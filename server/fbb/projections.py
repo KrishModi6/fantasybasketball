@@ -1,0 +1,472 @@
+"""Player projections: statistics first, news second.
+
+Order of operations for every player (each step is recorded for the UI):
+
+  1. Preseason sources
+       SPS     3-season weighted, regressed, age-adjusted rates (baseline.py)
+       ESPN    published preseason projection, when available
+       ML      LightGBM residual model over the SPS baseline (ml/model.py)
+     combined with convex weights learned in the backtest (scripts/train_model.py).
+  2. In-season update. Gamma-Poisson shrinkage: the preseason rate acts as K
+     minutes of prior evidence (K per stat, estimated from backtest error), and
+     this season's games are added with exponential recency decay.
+  3. Bounded adjustments (news layer). Only structured signals are used and
+     each is capped:
+       injury status / return date -> games missed (availability only)
+       team minutes budget         -> minutes x [0.92, 1.08]
+       new team                    -> wider uncertainty, no rate change
+       manual override             -> minutes x [0.85, 1.15]
+     Total minutes adjustment is clamped to [-20%, +15%]. Free-text news is
+     displayed, never parsed into numbers (except return-time phrases in an
+     official injury note, which only set games missed).
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import asdict, dataclass, field
+from datetime import date
+
+import numpy as np
+
+from .baseline import (
+    FALLBACK_LEAGUE_RATES,
+    RATE_STATS,
+    line_rates,
+    league_rates,
+    per_game_from_rates,
+    rates_from_per_game,
+    sps_projection,
+)
+from .ml.features import build_features
+from .ml.model import ProjectionModel
+from .models import LeagueSnapshot, Player, ScoringSettings
+from .schedule import period_for_date
+
+DEFAULT_ENSEMBLE = {"sps": 0.4, "espn": 0.4, "ml": 0.2}
+DEFAULT_PRIOR_MINUTES = {
+    "REB": 900, "AST": 900, "STL": 2500, "BLK": 1800, "TO": 1500, "FGM": 900, "FGMI": 900, "FTM": 1200,
+    "FTMI": 2500, "3PM": 1200, "3PMI": 1200, "DD": 2000, "TD": 4000, "PF": 1200,
+}
+MINUTES_PRIOR_GAMES = 8.0
+RATE_HALF_LIFE_GAMES = 25.0
+MINUTES_HALF_LIFE_GAMES = 10.0
+POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
+
+INJURY_DEFAULT_GAMES = {
+    "OUT": 4.0, "INJURY_RESERVE": 12.0, "SUSPENSION": 3.0,
+    "DOUBTFUL": 0.75, "QUESTIONABLE": 0.4, "DAY_TO_DAY": 0.5,
+}
+MINUTES_ADJ_FLOOR, MINUTES_ADJ_CAP = -0.20, 0.15
+TEAM_MINUTES_BUDGET = 236.0  # 240 minus garbage time spread among end-of-bench players
+TEAM_ADJ_LIMIT = 0.08
+MANUAL_LIMIT = 0.15
+
+
+@dataclass
+class SourceEstimate:
+    source: str
+    weight: float
+    mpg: float
+    availability: float | None
+    fp_pg: float
+    per_game: dict[str, float]
+
+
+@dataclass
+class Adjustment:
+    kind: str
+    label: str
+    detail: str
+    minutes_pct: float = 0.0
+    games_out: float = 0.0
+
+
+@dataclass
+class PlayerProjection:
+    player_id: str
+    name: str
+    pro_team: str
+    positions: list[str]
+    mpg: float
+    availability: float
+    games_out: float
+    per_game: dict[str, float]
+    fp_pg: float
+    fp_sd: float
+    preseason_fp_pg: float
+    season_fp_pg: float | None
+    recent_fp_pg: float | None
+    games_played: int
+    sources: list[SourceEstimate] = field(default_factory=list)
+    adjustments: list[Adjustment] = field(default_factory=list)
+    ml_explanation: list[dict] = field(default_factory=list)
+    in_season_weight: float = 0.0
+    flags: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _decay(n_back: int, half_life: float) -> float:
+    return 0.5 ** (n_back / half_life)
+
+
+_DURATION = re.compile(r"(\d+)\s*(?:-|to|-to-)?\s*(\d+)?\s*(day|week|month)s?", re.I)
+_SEASON_ENDING = re.compile(r"season[- ]ending|(?:remainder|rest) of the (?:\d{4}-\d{2} )?season|out for the season", re.I)
+
+
+def games_from_injury_note(note: str | None, team_games_left: int) -> tuple[float, str] | None:
+    """Very conservative parse of return-time phrases in an official injury note."""
+    if not note:
+        return None
+    if _SEASON_ENDING.search(note):
+        return float(team_games_left), "note says season-ending"
+    m = _DURATION.search(note)
+    if not m:
+        return None
+    lo = int(m.group(1))
+    hi = int(m.group(2)) if m.group(2) else lo
+    if hi > 24 or lo > hi:
+        return None
+    unit = m.group(3).lower()
+    days = (lo + hi) / 2 * {"day": 1, "week": 7, "month": 30}[unit]
+    games = days * 82 / 174  # NBA teams play ~82 games in ~174 days
+    return min(games, float(team_games_left)), f"note mentions '{m.group(0)}'"
+
+
+class ProjectionEngine:
+    def __init__(self, snapshot: LeagueSnapshot, model: ProjectionModel | None = None):
+        self.s = snapshot
+        self.model = model if model is not None else ProjectionModel.load()
+        self.scoring: ScoringSettings = snapshot.settings.scoring
+        if self.scoring.kind == "categories":
+            # Category leagues still get an FP/G column (ESPN default weights) for sorting.
+            self.fp_scoring = ScoringSettings()
+        else:
+            self.fp_scoring = self.scoring
+        self.season = snapshot.settings.season
+        lines = [h for p in snapshot.players.values() for h in p.history if h.season < self.season]
+        self.lg = league_rates(lines)
+        self.ensemble = (self.model.ensemble if self.model else {}) or {}
+        self.prior_minutes = (self.model.prior_minutes if self.model else {}) or DEFAULT_PRIOR_MINUTES
+        self.fp_cv = (self.model.bundle.get("fp_game_cv") if self.model else None) or POPULATION_CV
+        self._feats: dict[str, dict | None] = {}
+        self._importance: dict[str, float] | None = None
+
+    # -- helpers -------------------------------------------------------------
+
+    def _prior_k(self, stat: str, weighted_minutes: float) -> float:
+        """Prior strength in minutes; established players (more history) get a stronger prior."""
+        k = self.prior_minutes.get(stat, 1000.0)
+        if isinstance(k, dict):
+            return k["high"] if weighted_minutes >= k["split"] else k["low"]
+        return float(k)
+
+    def _fp(self, per_game: dict[str, float]) -> float:
+        return self.fp_scoring.fantasy_points(per_game)
+
+    def _weights(self, target: str, available: list[str]) -> dict[str, float]:
+        w = self.ensemble.get(target) or DEFAULT_ENSEMBLE
+        sub = {k: w.get(k, 0.0) for k in available}
+        tot = sum(sub.values())
+        if tot <= 0:
+            return {k: 1.0 / len(available) for k in available}
+        return {k: v / tot for k, v in sub.items()}
+
+    def _effective_weights(self, available: list[str]) -> dict[str, float]:
+        """One weight per source for display: per-target blend weights averaged by each
+        target's share of fantasy points (minutes scale every stat, so they count as the total)."""
+        if self._importance is None:
+            lg = self.lg[max(self.lg)] if self.lg else FALLBACK_LEAGUE_RATES
+            base = self._fp(per_game_from_rates(lg, 30.0))
+            imp = {}
+            for k in RATE_STATS:
+                bumped = dict(lg)
+                bumped[k] = lg[k] * 1.01
+                imp[k] = abs(self._fp(per_game_from_rates(bumped, 30.0)) - base)
+            imp["mpg"] = sum(imp.values())
+            self._importance = imp
+        totals = {s: 0.0 for s in available}
+        norm = 0.0
+        for target, w_imp in self._importance.items():
+            w = self._weights(target, available)
+            for s_ in available:
+                totals[s_] += w_imp * w.get(s_, 0.0)
+            norm += w_imp
+        return {k: v / norm for k, v in totals.items()} if norm else totals
+
+    def _team_games_left(self, team: str) -> int:
+        last = max(self.s.schedule.games) if self.s.schedule.games else self.s.current_period
+        return self.s.schedule.team_games_between(team, self.s.current_period, last)
+
+    # -- main ----------------------------------------------------------------
+
+    def project_all(self) -> dict[str, PlayerProjection]:
+        players = list(self.s.players.values())
+        pre = self._preseason(players)
+        out = {p.id: self._in_season(p, pre[p.id]) for p in players}
+        self._reconcile_team_minutes(out)
+        overrides = {o.player_id: o for o in self.s.overrides}
+        for p in players:
+            self._finalize(p, out[p.id], overrides.get(p.id))
+        return out
+
+    def _preseason(self, players: list[Player]) -> dict[str, dict]:
+        feats_rows, metas = [], []
+        for p in players:
+            hist = [h for h in p.history if h.season < self.season]
+            espn = next((e for e in p.experts if e.season == self.season), None)
+            years_pro = (self.season - p.debut_year) if p.debut_year else None
+            feats, base = build_features(hist, self.season, p.age, years_pro, espn, p.adp, self.lg)
+            feats_rows.append(feats)
+            metas.append((p, base, espn))
+        ml = self.model.predict(feats_rows) if self.model else {}
+        result = {}
+        for i, (p, base, espn) in enumerate(metas):
+            src: dict[str, dict[str, float]] = {
+                "sps": {"mpg": base.mpg, "avail": base.availability, **base.rates},
+            }
+            if espn and espn.minutes_per_game > 0:
+                er = rates_from_per_game(espn.per_game, espn.minutes_per_game)
+                src["espn"] = {"mpg": espn.minutes_per_game, "avail": min(1.0, espn.gp / 82), **er}
+            if ml:
+                src["ml"] = {
+                    "mpg": float(np.clip(ml["mpg"][i], 3.0, 40.0)),
+                    "avail": float(np.clip(ml["avail"][i], 0.05, 1.0)),
+                    **{k: max(0.0, float(ml[k][i]) / 36) for k in RATE_STATS},
+                }
+            blended: dict[str, float] = {}
+            for target in ["mpg", "avail"] + RATE_STATS:
+                have = [s for s in src if target in src[s]]
+                w = self._weights(target, have)
+                blended[target] = sum(w[s] * src[s][target] for s in have)
+            eff_w = self._effective_weights(list(src))
+            sources = []
+            for name, vals in src.items():
+                pg = per_game_from_rates({k: vals.get(k, base.rates[k]) for k in RATE_STATS}, vals["mpg"])
+                sources.append(SourceEstimate(
+                    source={"sps": "Stat baseline (SPS)", "espn": "ESPN projection", "ml": "ML model"}[name],
+                    weight=round(eff_w.get(name, 0.0), 3), mpg=vals["mpg"], availability=vals.get("avail"),
+                    fp_pg=self._fp(pg), per_game=pg,
+                ))
+            result[p.id] = {"blend": blended, "sources": sources, "feats": feats_rows[i], "has_ml": bool(ml)}
+        return result
+
+    def _in_season(self, p: Player, pre: dict) -> PlayerProjection:
+        blend = pre["blend"]
+        prior_rates = {k: blend[k] for k in RATE_STATS}
+        prior_mpg = blend["mpg"]
+
+        games = [g for g in p.recent_games if g.season == self.season]
+        cur = p.current if p.current and p.current.season == self.season else None
+        obs_tot = {k: 0.0 for k in RATE_STATS}
+        obs_min = 0.0
+        w_games = 0.0
+        w_minutes_sum = 0.0
+        mins_prior_w = 0.0
+        # Most recent game is index 0 in the decay.
+        for n_back, g in enumerate(reversed(games)):
+            w = _decay(n_back, RATE_HALF_LIFE_GAMES)
+            tot = line_rates_from_game(g.stats)
+            for k in RATE_STATS:
+                obs_tot[k] += w * tot.get(k, 0.0)
+            obs_min += w * g.minutes
+            wm = _decay(n_back, MINUTES_HALF_LIFE_GAMES)
+            w_minutes_sum += wm * g.minutes
+            mins_prior_w += wm
+        # Season-to-date beyond the logged games, as one older block.
+        if cur and cur.gp > len(games):
+            extra_gp = cur.gp - len(games)
+            extra_min = max(0.0, cur.minutes - sum(g.minutes for g in games))
+            logged = {k: 0.0 for k in RATE_STATS}
+            for g in games:
+                for k, v in line_rates_from_game(g.stats).items():
+                    logged[k] += v
+            cur_tot = line_rates(cur)
+            w = _decay(len(games) + extra_gp / 2, RATE_HALF_LIFE_GAMES)
+            for k in RATE_STATS:
+                obs_tot[k] += w * max(0.0, cur_tot.get(k, 0.0) - logged[k])
+            obs_min += w * extra_min
+            wm = _decay(len(games) + extra_gp / 2, MINUTES_HALF_LIFE_GAMES)
+            w_minutes_sum += wm * extra_min
+            mins_prior_w += wm * extra_gp
+
+        rates = {}
+        w_min = pre["feats"].get("w_min", 0.0)
+        for k in RATE_STATS:
+            K = self._prior_k(k, w_min)
+            rates[k] = (K * prior_rates[k] + obs_tot[k]) / (K + obs_min)
+        mpg = (MINUTES_PRIOR_GAMES * prior_mpg + w_minutes_sum) / (MINUTES_PRIOR_GAMES + mins_prior_w)
+        k_avg = float(np.mean([self._prior_k(k, w_min) for k in ("FGM", "REB", "AST")]))
+        in_season_weight = obs_min / (obs_min + k_avg) if obs_min else 0.0
+
+        per_game = per_game_from_rates(rates, mpg)
+        pre_pg = per_game_from_rates(prior_rates, prior_mpg)
+        season_fp = None
+        if cur and cur.gp > 0:
+            season_fp = self._fp({k: v / cur.gp for k, v in cur.stats.items()})
+        last10 = games[-10:]
+        recent_fp = float(np.mean([self._fp(g.stats) for g in last10])) if len(last10) >= 3 else None
+
+        # Game-to-game volatility: shrink observed SD (this + last season logs) to the population CV.
+        fp = self._fp(per_game)
+        fps = [self._fp(g.stats) for g in p.recent_games[-30:]]
+        prior_var = (self.fp_cv * max(fp, 5.0)) ** 2
+        if len(fps) >= 5:
+            n = len(fps)
+            sd = math.sqrt((np.var(fps, ddof=1) * (n - 1) + prior_var * 10) / (n - 1 + 10))
+        else:
+            sd = math.sqrt(prior_var)
+
+        self._feats[p.id] = pre["feats"] if pre["has_ml"] else None
+
+        return PlayerProjection(
+            player_id=p.id, name=p.name, pro_team=p.pro_team, positions=p.positions,
+            mpg=mpg, availability=blend["avail"], games_out=0.0, per_game=per_game,
+            fp_pg=fp, fp_sd=sd, preseason_fp_pg=self._fp(pre_pg), season_fp_pg=season_fp,
+            recent_fp_pg=recent_fp, games_played=int(cur.gp) if cur else 0,
+            sources=pre["sources"], in_season_weight=in_season_weight,
+        )
+
+    def explain(self, pr: PlayerProjection) -> list[dict]:
+        """SHAP attribution of the ML component, in fantasy points per game (computed on demand)."""
+        feats = self._feats.get(pr.player_id)
+        if feats is None or self.model is None:
+            return []
+        rates = {k: v / max(pr.mpg, 1e-6) for k, v in pr.per_game.items() if k in RATE_STATS}
+        try:
+            return self._explain_fp(self.model.contributions(feats), rates, pr.mpg)
+        except Exception:  # noqa: BLE001 - explanations are best-effort
+            return []
+
+    def _explain_fp(self, contrib: dict[str, dict[str, float]], rates: dict[str, float], mpg: float) -> list[dict]:
+        """Linearise SHAP contributions into fantasy points per game.
+
+        FP/G = sum_s w_s * rate_s * mpg, so d(FP/G) ~= sum_s w_s * (mpg * d rate_s + rate_s * d mpg).
+        Rate models are per-36, hence the /36.
+        """
+        groups: dict[str, float] = {}
+        # Marginal FP per unit of each modelled per-minute rate, at the projected minutes.
+        for stat in RATE_STATS:
+            if stat not in contrib:
+                continue
+            bumped = dict(rates)
+            bumped[stat] = rates[stat] + 1.0 / 36
+            delta_fp = self._fp(per_game_from_rates(bumped, mpg)) - self._fp(per_game_from_rates(rates, mpg))
+            for g, v in contrib[stat].items():
+                groups[g] = groups.get(g, 0.0) + v * delta_fp
+        if "mpg" in contrib:
+            fp_per_min = self._fp(per_game_from_rates(rates, 1.0))
+            for g, v in contrib["mpg"].items():
+                groups[g] = groups.get(g, 0.0) + v * fp_per_min
+        return sorted(({"factor": g, "fp_pg": round(v, 2)} for g, v in groups.items() if abs(v) >= 0.05),
+                      key=lambda x: -abs(x["fp_pg"]))
+
+    def _reconcile_team_minutes(self, proj: dict[str, PlayerProjection]) -> None:
+        """Scale each NBA team's projected minutes toward a realistic budget (bounded)."""
+        by_team: dict[str, list[PlayerProjection]] = {}
+        for pr in proj.values():
+            p = self.s.players[pr.player_id]
+            if p.pro_team in ("FA", ""):
+                continue
+            by_team.setdefault(p.pro_team, []).append(pr)
+        for team, prs in by_team.items():
+            # Expected minutes in a typical upcoming game: healthy availability, injured players at 0.
+            def exp_minutes(pr: PlayerProjection) -> float:
+                st = self.s.players[pr.player_id].injury_status
+                if st in ("OUT", "INJURY_RESERVE", "SUSPENSION"):
+                    return 0.0
+                return pr.mpg * pr.availability
+
+            total = sum(exp_minutes(pr) for pr in prs)
+            if total < 120:  # pool doesn't cover this team; don't guess
+                continue
+            raw = TEAM_MINUTES_BUDGET / total - 1.0
+            factor = max(-TEAM_ADJ_LIMIT, min(TEAM_ADJ_LIMIT, raw * 0.5))  # move halfway, capped
+            if abs(factor) < 0.01:
+                continue
+            for pr in prs:
+                if exp_minutes(pr) == 0 or pr.mpg < 8:
+                    continue
+                pr.adjustments.append(Adjustment(
+                    kind="team_minutes",
+                    label=f"{team} minutes budget",
+                    detail=(f"{team}'s healthy players project to {total:.0f} min/game vs a "
+                            f"{TEAM_MINUTES_BUDGET:.0f} budget; minutes scaled {factor:+.1%} (capped at "
+                            f"±{TEAM_ADJ_LIMIT:.0%})."),
+                    minutes_pct=factor,
+                ))
+
+    def _finalize(self, p: Player, pr: PlayerProjection, override) -> None:
+        games_left = self._team_games_left(p.pro_team)
+        # New team since last season: widen uncertainty only.
+        last_team = p.history[-1].team if p.history else None
+        recent_team = p.recent_games[-1].team if p.recent_games else None
+        prev = recent_team or last_team
+        if prev and p.pro_team not in ("FA", "") and prev not in ("", "FA") and prev != p.pro_team:
+            pr.fp_sd *= 1.15
+            pr.flags.append("new_team")
+            pr.adjustments.append(Adjustment(
+                kind="team_change", label=f"New team ({prev} → {p.pro_team})",
+                detail="Role is less certain after a team change: game-to-game uncertainty widened 15%. "
+                       "Rates are unchanged; the team minutes budget handles opportunity.",
+            ))
+
+        if override is not None and override.minutes_pct:
+            pct = max(-MANUAL_LIMIT, min(MANUAL_LIMIT, override.minutes_pct))
+            pr.adjustments.append(Adjustment(
+                kind="manual", label="League override",
+                detail=(override.note or "Manual minutes adjustment") + f" ({pct:+.0%}, capped at ±15%).",
+                minutes_pct=pct,
+            ))
+
+        total_pct = sum(a.minutes_pct for a in pr.adjustments)
+        total_pct = max(MINUTES_ADJ_FLOOR, min(MINUTES_ADJ_CAP, total_pct))
+        if total_pct:
+            pr.mpg *= 1.0 + total_pct
+            rates = {k: v / max(pr.per_game.get("MIN", 1.0), 1e-6) for k, v in pr.per_game.items()
+                     if k in RATE_STATS}
+            pr.per_game = per_game_from_rates(rates, pr.mpg)
+            pr.fp_sd *= 1.0 + total_pct
+
+        # Injury: affects games played only.
+        status = (p.injury_status or "ACTIVE").upper()
+        games_out = 0.0
+        if override is not None and override.out_games is not None:
+            games_out = float(override.out_games)
+            pr.adjustments.append(Adjustment(kind="injury", label="League override: games out",
+                                              detail=f"Set to {games_out:.0f} games by a league member.",
+                                              games_out=games_out))
+        elif status in INJURY_DEFAULT_GAMES:
+            games_out = INJURY_DEFAULT_GAMES[status]
+            detail = f"ESPN status {status.replace('_', ' ').title()}: default {games_out:g} games missed."
+            if p.expected_return:
+                ret_p = period_for_date(self.s.schedule, p.expected_return)
+                if ret_p is not None:
+                    games_out = float(self.s.schedule.team_games_between(p.pro_team, self.s.current_period, ret_p - 1))
+                    detail = f"Expected return {p.expected_return.isoformat()}: {games_out:.0f} team games."
+            elif status in ("OUT", "INJURY_RESERVE"):
+                parsed = games_from_injury_note(p.injury_note, games_left)
+                if parsed and parsed[0] > games_out:
+                    games_out, why = parsed
+                    detail = f"Injury report {why}: ~{games_out:.0f} games missed (capped at games remaining)."
+            pr.adjustments.append(Adjustment(kind="injury", label=f"Injury: {status.replace('_', ' ').title()}",
+                                              detail=detail, games_out=games_out))
+        pr.games_out = min(games_out, float(games_left))
+        pr.fp_pg = self._fp(pr.per_game)
+
+
+def line_rates_from_game(stats: dict[str, float]) -> dict[str, float]:
+    from .models import SeasonLine
+
+    return line_rates(SeasonLine(season=0, stats=stats))
+
+
+def project_snapshot(snapshot: LeagueSnapshot, model: ProjectionModel | None = None) -> dict[str, PlayerProjection]:
+    return ProjectionEngine(snapshot, model).project_all()
+
+
+def as_of(snapshot: LeagueSnapshot) -> date | None:
+    return snapshot.schedule.period_dates.get(snapshot.current_period)

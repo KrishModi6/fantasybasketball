@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+server/.venv/
+.pytest_cache/
+
+# Runtime data (keep history + model, which are versioned training artifacts)
+server/data/app.db*
+server/data/secret.key
+server/data/cache/
+server/data/db/
+server/.env
+
+# Node
+node_modules/
+web/dist/
+desktop/web-dist/
+desktop/release/
+
+*.log
+.DS_Store
+
+# Local editor/agent config
+.claude/
+*.tsbuildinfo

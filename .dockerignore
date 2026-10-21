@@ -1,0 +1,9 @@
+**/node_modules
+**/.venv
+**/__pycache__
+web/dist
+desktop
+server/data/app.db*
+server/data/secret.key
+server/data/cache
+*.log

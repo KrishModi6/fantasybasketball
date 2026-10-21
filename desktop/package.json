@@ -1,0 +1,33 @@
+{
+  "name": "courtside-desktop",
+  "productName": "Courtside",
+  "version": "0.1.0",
+  "description": "Courtside fantasy basketball analytics for macOS and Windows",
+  "main": "main.js",
+  "author": "Courtside",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "build:web": "npm --prefix ../web run build",
+    "copy:web": "node scripts/copy-web.mjs",
+    "start": "npm run build:web && npm run copy:web && electron .",
+    "dev": "electron . --dev",
+    "dist:win": "npm run build:web && npm run copy:web && electron-builder --win nsis",
+    "dist:mac": "npm run build:web && npm run copy:web && electron-builder --mac dmg",
+    "dist:dir": "npm run build:web && npm run copy:web && electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "app.courtside.desktop",
+    "productName": "Courtside",
+    "files": ["main.js", "preload.js", "web-dist/**/*", "package.json"],
+    "directories": { "output": "release", "buildResources": "build" },
+    "win": { "target": ["nsis"], "icon": "build/icon.png" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false },
+    "mac": { "target": ["dmg"], "category": "public.app-category.sports", "icon": "build/icon.png", "hardenedRuntime": true },
+    "linux": { "target": ["AppImage"], "icon": "build/icon.png" }
+  }
+}
