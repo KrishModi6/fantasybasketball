@@ -5,7 +5,7 @@ import { Delta, Injury, Meter } from "../components/ui";
 describe("ui primitives", () => {
   it("colours deltas by sign", () => {
     render(<Delta value={-4.2} />);
-    expect(screen.getByText("−4.2")).toHaveClass("down");
+    expect(screen.getByText("−4.2")).toHaveClass("neg");
   });
   it("labels injuries accessibly", () => {
     render(<Injury status="DAY_TO_DAY" />);

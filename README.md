@@ -57,7 +57,7 @@ npm start
 The desktop app connects to a Courtside server; the address is set on the sign-in screen (default `http://localhost:8000`, or the `COURTSIDE_SERVER` environment variable).
 
 ### Mobile
-The website is fully responsive with a bottom tab bar on phones, and it's installable as a PWA (Add to Home Screen) on iOS and Android. Everything syncs through the server in real time.
+The website is fully responsive (the tab strip scrolls and tables scroll inside their panels on phones), and it's installable as a PWA (Add to Home Screen) on iOS and Android. Everything syncs through the server in real time.
 
 ## Connecting your league
 

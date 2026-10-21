@@ -39,7 +39,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: "Courtside",
-    backgroundColor: "#F4F1EA",
+    backgroundColor: "#0F1115",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     show: false,
     webPreferences: {

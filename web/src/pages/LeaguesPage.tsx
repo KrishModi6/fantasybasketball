@@ -1,85 +1,79 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, FileUp, FlaskConical, KeyRound, LogOut, Plug, Ticket } from "lucide-react";
-import { BrandMark, ThemeToggle } from "../components/Layout";
-import { Empty, ErrorBox, LoadingBlock, PageHead } from "../components/ui";
+import { LogOut } from "lucide-react";
+import { BrandMark, FetchLine, ThemeToggle } from "../components/Layout";
+import { Empty, ErrorBox, LoadingBlock, Panel, SubTabs, Tag } from "../components/ui";
 import { api, serverUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { relTime, sourceLabel } from "../lib/format";
 import { useLeagues } from "../lib/queries";
 import type { League } from "../lib/types";
 
-type Mode = "espn" | "file" | "demo" | "join" | "flaim";
+type Mode = "espn" | "file" | "join" | "demo" | "flaim";
 
 export function LeaguesPage() {
   const { user, signOut } = useAuth();
   const { data, isLoading, error } = useLeagues();
-  const [mode, setMode] = useState<Mode | null>(null);
-  const options: { mode: Mode; icon: JSX.Element; title: string; text: string }[] = [
-    { mode: "espn", icon: <Plug />, title: "Connect ESPN league", text: "Live rosters, scoring settings and matchups, refreshed automatically." },
-    { mode: "file", icon: <FileUp />, title: "Import a file", text: "CSV or JSON rosters from any platform. Stats still update live." },
-    { mode: "join", icon: <Ticket />, title: "Join with a code", text: "Your commissioner shared an invite link or code." },
-    { mode: "demo", icon: <FlaskConical />, title: "Try a demo league", text: "Ten teams drafted from this season's real player pool." },
-  ];
+  const nav = useNavigate();
+  const [mode, setMode] = useState<Mode>("espn");
   return (
-    <div style={{ minHeight: "100vh" }}>
+    <div className="standalone">
+      <FetchLine />
       <header className="topbar">
-        <Link to="/" className="brand" style={{ padding: 0 }}>
-          <BrandMark size={26} />
-          <span className="brand-name" style={{ fontSize: 20 }}>Courtside</span>
-        </Link>
-        <div className="spacer" />
-        <span className="small muted hide-sm">{user?.display_name}</span>
+        <span className="brand"><BrandMark /> Courtside</span>
+        <span className="small muted">Leagues</span>
+        <span className="spacer" />
         <ThemeToggle />
-        <button className="btn ghost sm" onClick={signOut}><LogOut size={15} /> Sign out</button>
+        <span className="small muted hide-sm">{user?.display_name}</span>
+        <button className="btn ghost icon" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut /></button>
       </header>
-      <main className="content" style={{ maxWidth: 1080 }}>
-        <PageHead kicker="Your leagues" title="Pick a league" lede="Each league is a shared hub: everyone you invite sees the same rankings, projections and trade board, with their own team front and center." />
-        <div className="grid grid-main" style={{ alignItems: "start" }}>
-          <section className="stack" aria-label="Leagues">
-            {isLoading && <LoadingBlock rows={4} />}
-            {error && <ErrorBox error={error} />}
-            {data && data.length === 0 && (
-              <div className="panel"><Empty title="No leagues yet">Connect your ESPN league, import a roster file, or start with the demo league to explore.</Empty></div>
-            )}
-            {data?.map((l, i) => (
-              <Link key={l.id} to={`/l/${l.id}`} className="league-card rise" style={{ "--i": i } as React.CSSProperties}>
-                <div className="stack" style={{ gap: 3 }}>
-                  <span className="h2">{l.name}</span>
-                  <span className="small muted">
-                    {sourceLabel[l.source]} · {l.season - 1}–{String(l.season).slice(2)} · {l.member_count} member{l.member_count === 1 ? "" : "s"} ·{" "}
-                    {l.role === "owner" ? "you own this league" : "member"} · updated {relTime(l.last_synced_at)}
-                  </span>
-                </div>
-                <ArrowRight size={18} />
-              </Link>
-            ))}
-          </section>
-          <aside className="stack" aria-label="Add a league">
-            <div className="kicker">Add a league</div>
-            {options.map((o) => (
-              <button key={o.mode} className="option-card" aria-pressed={mode === o.mode} onClick={() => setMode(mode === o.mode ? null : o.mode)}>
-                <span className="row">{o.icon}<span className="h3">{o.title}</span></span>
-                <span className="small muted">{o.text}</span>
-              </button>
-            ))}
-            <button className="btn ghost sm" style={{ justifySelf: "start" }} onClick={() => setMode("flaim")}>
-              <KeyRound size={14} /> Connect through Flaim (beta)
-            </button>
-          </aside>
-        </div>
-        {mode && (
-          <section className="panel" style={{ marginTop: 22 }}>
-            <div className="panel-body">
-              {mode === "espn" && <EspnForm />}
-              {mode === "file" && <FileForm />}
-              {mode === "demo" && <DemoForm />}
-              {mode === "join" && <JoinForm />}
-              {mode === "flaim" && <FlaimForm />}
+      <main className="page-narrow">
+        <Panel title="Your leagues" flush>
+          {isLoading && <div style={{ padding: 10 }}><LoadingBlock rows={3} /></div>}
+          {error && <div style={{ padding: 10 }}><ErrorBox error={error} /></div>}
+          {data && data.length === 0 && <Empty title="No leagues yet">Connect an ESPN league, import rosters from a file, or create a demo league below.</Empty>}
+          {data && data.length > 0 && (
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr><th>League</th><th>Source</th><th>Season</th><th>Role</th><th className="n">Members</th><th>Data</th></tr>
+                </thead>
+                <tbody>
+                  {data.map((l) => (
+                    <tr key={l.id} className="clickable" onClick={() => nav(`/l/${l.id}`)}>
+                      <td><button className="linkbtn strong" onClick={() => nav(`/l/${l.id}`)}>{l.name}</button></td>
+                      <td>{sourceLabel[l.source]}</td>
+                      <td>{l.season - 1}–{String(l.season).slice(2)}</td>
+                      <td>{l.role === "owner" ? "Owner" : "Member"}</td>
+                      <td className="n">{l.member_count}</td>
+                      <td className={l.sync_status === "error" ? "down" : "muted"}>
+                        {l.sync_status === "error" ? "Refresh failed" : `Synced ${relTime(l.last_synced_at)}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </section>
-        )}
+          )}
+        </Panel>
+
+        <section className="stack" style={{ gap: 0 }} aria-label="Add a league">
+          <SubTabs label="Add a league" value={mode} onChange={setMode} tabs={[
+            { value: "espn", label: "Connect ESPN" },
+            { value: "file", label: "Import file" },
+            { value: "join", label: "Join with invite" },
+            { value: "demo", label: "Demo league" },
+            { value: "flaim", label: "Flaim (beta)" },
+          ]} />
+          <div className="panel" style={{ borderTop: 0, borderRadius: "0 0 3px 3px" }}>
+            {mode === "espn" && <EspnForm />}
+            {mode === "file" && <FileForm />}
+            {mode === "join" && <JoinForm />}
+            {mode === "demo" && <DemoForm />}
+            {mode === "flaim" && <FlaimForm />}
+          </div>
+        </section>
       </main>
     </div>
   );
@@ -109,13 +103,12 @@ function EspnForm() {
     create.mutate({ source: "espn", season, espn: { league_id: id, espn_s2: s2 || null, swid: swid || null } });
   };
   return (
-    <form className="stack" onSubmit={submit}>
-      <h2 className="h2">Connect an ESPN league</h2>
-      <div className="grid grid-2">
-        <div className="field">
+    <form className="form" onSubmit={submit}>
+      <p className="small muted">Reads rosters, scoring settings, lineup slots, schedule and matchups from ESPN, and refreshes them automatically.</p>
+      <div className="form-grid">
+        <div className="field" style={{ gridColumn: "span 2" }}>
           <label htmlFor="lid">League ID or league URL</label>
           <input id="lid" className="input" required value={leagueId} onChange={(e) => setLeagueId(e.target.value)} placeholder="https://fantasy.espn.com/basketball/league?leagueId=123456" />
-          <span className="hint">It's the <span className="mono">leagueId</span> number in your league's address bar.</span>
         </div>
         <div className="field">
           <label htmlFor="season">Season</label>
@@ -124,54 +117,21 @@ function EspnForm() {
             <option value={2026}>2025–26</option>
           </select>
         </div>
-      </div>
-      <details>
-        <summary className="strong" style={{ cursor: "pointer" }}>Private league? Add your ESPN cookies</summary>
-        <div className="stack" style={{ marginTop: 12 }}>
-          <p className="small muted" style={{ margin: 0 }}>
-            ESPN only shares private leagues with a signed-in browser. On fantasy.espn.com open your browser's developer tools → Application → Cookies and copy the values of
-            <span className="mono"> espn_s2</span> and <span className="mono">SWID</span>. They're encrypted at rest and only used to read your league.
-          </p>
-          <div className="grid grid-2">
-            <div className="field">
-              <label htmlFor="s2">espn_s2</label>
-              <input id="s2" className="input mono" value={s2} onChange={(e) => setS2(e.target.value)} autoComplete="off" spellCheck={false} />
-            </div>
-            <div className="field">
-              <label htmlFor="swid">SWID</label>
-              <input id="swid" className="input mono" value={swid} onChange={(e) => setSwid(e.target.value)} placeholder="{XXXXXXXX-XXXX-…}" autoComplete="off" spellCheck={false} />
-            </div>
-          </div>
+        <div className="field">
+          <label htmlFor="s2">espn_s2 (private leagues)</label>
+          <input id="s2" className="input mono" value={s2} onChange={(e) => setS2(e.target.value)} autoComplete="off" spellCheck={false} />
         </div>
-      </details>
-      {create.error && <ErrorBox error={create.error} />}
-      <div className="row">
-        <button className="btn" type="submit" disabled={create.isPending}>{create.isPending ? "Reading league from ESPN…" : "Connect league"}</button>
+        <div className="field">
+          <label htmlFor="swid">SWID (private leagues)</label>
+          <input id="swid" className="input mono" value={swid} onChange={(e) => setSwid(e.target.value)} placeholder="{XXXXXXXX-…}" autoComplete="off" spellCheck={false} />
+        </div>
       </div>
-    </form>
-  );
-}
-
-function DemoForm() {
-  const create = useCreate();
-  const [teams, setTeams] = useState(10);
-  return (
-    <div className="stack">
-      <h2 className="h2">Demo league</h2>
-      <p className="small muted" style={{ margin: 0 }}>
-        A league using ESPN's default points scoring (the same weights as most ESPN points leagues), drafted by ADP from the live 2026–27 player pool and NBA schedule. Invite friends to it to try the hub features.
+      <p className="tiny faint">
+        Private leagues: sign in at fantasy.espn.com, open developer tools → Application → Cookies, and copy espn_s2 and SWID. They are encrypted at rest and used only to read the league.
       </p>
-      <div className="row wrap">
-        <label className="label" htmlFor="tc">Teams</label>
-        <select id="tc" className="select" style={{ width: 90 }} value={teams} onChange={(e) => setTeams(Number(e.target.value))}>
-          {[8, 10, 12].map((n) => <option key={n}>{n}</option>)}
-        </select>
-        <button className="btn" onClick={() => create.mutate({ source: "demo", team_count: teams, name: "Demo League" })} disabled={create.isPending}>
-          {create.isPending ? "Drafting…" : "Create demo league"}
-        </button>
-      </div>
       {create.error && <ErrorBox error={create.error} />}
-    </div>
+      <div><button className="btn primary" type="submit" disabled={create.isPending}>{create.isPending ? "Reading league…" : "Connect league"}</button></div>
+    </form>
   );
 }
 
@@ -193,17 +153,16 @@ function FileForm() {
     },
   });
   return (
-    <form className="stack" onSubmit={(e) => { e.preventDefault(); if (file) upload.mutate(); }}>
-      <h2 className="h2">Import rosters from a file</h2>
-      <p className="small muted" style={{ margin: 0 }}>
-        CSV with <span className="mono">team, player</span> columns (optional <span className="mono">owner, slot</span>), or JSON with a <span className="mono">teams</span> list. Players are matched to ESPN's
-        pool by name; stats, injuries and schedule keep refreshing. Default ESPN points scoring is applied and can be edited afterwards.{" "}
+    <form className="form" onSubmit={(e) => { e.preventDefault(); if (file) upload.mutate(); }}>
+      <p className="small muted">
+        CSV with <span className="mono">team, player</span> columns (optional <span className="mono">owner, slot</span>) or a JSON roster file, from any platform.
+        Players are matched to ESPN's pool by name; stats, injuries and the schedule keep refreshing.{" "}
         <a href={`${serverUrl()}/api/import/example.csv`} target="_blank" rel="noreferrer">Example CSV</a>
       </p>
-      <div className="grid grid-2">
+      <div className="form-grid">
         <div className="field">
           <label htmlFor="f">File</label>
-          <input id="f" className="input" type="file" accept=".csv,.json" required onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ paddingTop: 6 }} />
+          <input id="f" type="file" accept=".csv,.json" required onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </div>
         <div className="field">
           <label htmlFor="fn">League name</label>
@@ -211,7 +170,7 @@ function FileForm() {
         </div>
       </div>
       {upload.error && <ErrorBox error={upload.error} />}
-      <div><button className="btn" disabled={!file || upload.isPending}>{upload.isPending ? "Importing…" : "Import league"}</button></div>
+      <div><button className="btn primary" disabled={!file || upload.isPending}>{upload.isPending ? "Importing…" : "Import league"}</button></div>
     </form>
   );
 }
@@ -220,13 +179,36 @@ function JoinForm() {
   const nav = useNavigate();
   const [code, setCode] = useState("");
   return (
-    <form className="row wrap" onSubmit={(e) => { e.preventDefault(); const c = code.trim().split("/").pop(); if (c) nav(`/join/${c.toUpperCase()}`); }}>
-      <div className="field" style={{ flex: 1, minWidth: 220 }}>
+    <form className="form" onSubmit={(e) => { e.preventDefault(); const c = code.trim().split("/").pop(); if (c) nav(`/join/${c.toUpperCase()}`); }}>
+      <div className="field" style={{ maxWidth: 360 }}>
         <label htmlFor="code">Invite code or link</label>
-        <input id="code" className="input mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. 7KQ2MZ4P" required />
+        <input id="code" className="input mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="7KQ2MZ4P" required />
       </div>
-      <button className="btn" style={{ alignSelf: "flex-end" }}>Continue</button>
+      <div><button className="btn primary">Continue</button></div>
     </form>
+  );
+}
+
+function DemoForm() {
+  const create = useCreate();
+  const [teams, setTeams] = useState(10);
+  return (
+    <div className="form">
+      <p className="small muted">
+        A points league with ESPN's default scoring, drafted by ADP from the live 2026–27 player pool and NBA schedule. Useful for trying the tools or inviting friends to test.
+      </p>
+      <div className="toolbar">
+        <label className="field-inline" htmlFor="tc"><span className="label">Teams</span>
+          <select id="tc" className="select" value={teams} onChange={(e) => setTeams(Number(e.target.value))}>
+            {[8, 10, 12].map((n) => <option key={n}>{n}</option>)}
+          </select>
+        </label>
+        <button className="btn primary" onClick={() => create.mutate({ source: "demo", team_count: teams, name: "Demo League" })} disabled={create.isPending}>
+          {create.isPending ? "Creating…" : "Create demo league"}
+        </button>
+      </div>
+      {create.error && <ErrorBox error={create.error} />}
+    </div>
   );
 }
 
@@ -236,15 +218,15 @@ function FlaimForm() {
   const [platform, setPlatform] = useState("espn");
   const [leagueId, setLeagueId] = useState("");
   return (
-    <form className="stack" onSubmit={(e) => { e.preventDefault(); create.mutate({ source: "flaim", flaim: { flaim_token: token, platform, league_id: leagueId } }); }}>
-      <div className="row"><h2 className="h2">Flaim connector</h2><span className="badge warn">Unverified</span></div>
-      <p className="small muted" style={{ margin: 0 }}>
-        Flaim exposes ESPN, Yahoo and Sleeper leagues through an MCP server meant for AI assistants. Its output format isn't published, so this adapter
-        maps rosters defensively. You'll need a Flaim access token from Flaim's sign-in flow. For ESPN leagues the direct ESPN connector is more reliable.
+    <form className="form" onSubmit={(e) => { e.preventDefault(); create.mutate({ source: "flaim", flaim: { flaim_token: token, platform, league_id: leagueId } }); }}>
+      <p className="small muted">
+        <Tag tone="warn">Unverified</Tag>{" "}
+        Flaim exposes ESPN, Yahoo and Sleeper leagues through an MCP server built for AI assistants; its output format is unpublished, so rosters are mapped
+        defensively. Requires a Flaim access token. For ESPN leagues the direct connector is more reliable.
       </p>
-      <div className="grid grid-3">
+      <div className="form-grid">
         <div className="field">
-          <label htmlFor="ft">Flaim access token</label>
+          <label htmlFor="ft">Access token</label>
           <input id="ft" className="input mono" value={token} onChange={(e) => setToken(e.target.value)} required minLength={10} autoComplete="off" />
         </div>
         <div className="field">
@@ -261,7 +243,7 @@ function FlaimForm() {
         </div>
       </div>
       {create.error && <ErrorBox error={create.error} />}
-      <div><button className="btn" disabled={create.isPending}>{create.isPending ? "Connecting…" : "Connect via Flaim"}</button></div>
+      <div><button className="btn primary" disabled={create.isPending}>{create.isPending ? "Connecting…" : "Connect"}</button></div>
     </form>
   );
 }

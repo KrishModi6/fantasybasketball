@@ -29,7 +29,7 @@ Uses ESPN's v3 fantasy API, the JSON the ESPN website itself loads. It isn't off
   - a stale-cookie HTML response becomes a clear error message;
   - injury and news failures never block a sync.
 
-**Private leagues.** Sign in at fantasy.espn.com. Open DevTools → Application → Cookies → `https://fantasy.espn.com` and copy `espn_s2` (a long string) and `SWID` (`{…}`). Paste them when connecting; the owner can update them later under League hub → Data & sync. They're stored encrypted (Fernet, key derived from `FBB_SECRET_KEY`).
+**Private leagues.** Sign in at fantasy.espn.com. Open DevTools → Application → Cookies → `https://fantasy.espn.com` and copy `espn_s2` (a long string) and `SWID` (`{…}`). Paste them when connecting; the owner can update them later under League → Data and sync. They're stored encrypted (Fernet, key derived from `FBB_SECRET_KEY`).
 
 ## File import
 

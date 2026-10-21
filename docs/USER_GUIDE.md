@@ -8,7 +8,7 @@
   - **Import a file:** CSV/JSON rosters, for Yahoo, Sleeper or anything else.
   - **Try a demo league:** explore with a realistic 10-team league.
 
-Then open **League hub → Invite your league → New link** and share it.
+Then open **League → Invites → New invite** and share the link.
 
 ## Pages
 
@@ -18,13 +18,13 @@ Then open **League hub → Invite your league → New link** and share it.
 - the best add/drop right now;
 - the live league feed (trades shared, injuries, joins) and NBA news.
 
-**Power rankings.** Every team ranked by *all-play win rate*: how often it would beat every other team, every remaining week. Expand a team to see **why**:
+**Rankings.** Every team ranked by *all-play win rate*: how often it would beat every other team, every remaining week. Select a team's row to see **why**:
 - fantasy points per week from each stat vs league average;
 - who produces them;
 - empty lineup slots, games stuck on the bench and schedule volume;
 - injuries.
 
-**My team** (any team via the switcher)
+**Team** (any team via the switcher; the league table on the left of wide screens also opens teams)
 - **Roster:** projected FP/G, recent form, games in the next 7 days, expected starts and points per week, value over replacement.
 - **Daily lineup:** the optimal lineup for each of the next 7 days. *Confidence* is the chance a starter outscores the best bench player who could take that slot. "Locked in" means nobody could replace him.
 - **Improve my team:**
@@ -52,7 +52,7 @@ Uncheck a player to see the odds if he sits, e.g. to decide on a questionable st
 - **Find trades:** searches every 1- and 2-player package with every team and lists the ones that help you without hurting the other side (so they might accept).
 - **League board:** share a trade idea (with a note) so the whole league can see the numbers. "Re-run with today's data" re-evaluates it.
 
-**League hub.** Standings, scoring rules, members and which team each manages. Owners also see invite links, refresh settings, ESPN cookies, and delete.
+**League.** Standings, scoring rules, members and which team each manages. Owners also see invite links, refresh settings, ESPN cookies, and delete.
 
 ## Adjusting a projection
 
@@ -69,4 +69,4 @@ If you know something the data doesn't yet (a confirmed starting role, an absenc
 
 **Why does a trade that adds value still say "neutral"?** The verdict is based on your *lineup-adjusted* output. Two good players who play the same days or positions may not both start. The threshold is ±1% of your rest-of-season points.
 
-**How often does data update?** Automatically every few hours (set by the league owner), and anyone can press the refresh pill at the top.
+**How often does data update?** Automatically every few hours (set by the league owner), and anyone can press **Refresh** in the top bar.

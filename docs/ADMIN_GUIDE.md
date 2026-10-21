@@ -59,7 +59,7 @@ Put it behind HTTPS (Caddy, nginx, or your host's TLS). WebSockets must be proxi
 
 - **Health:** `GET /api/health`.
 - **Sync failures:**
-  - visible to owners under League hub → Data & sync, and in the league feed;
+  - visible to owners under League → Data and sync, and in the league feed;
   - expired ESPN cookies show as "ESPN refused access" or "non-JSON response": the owner pastes fresh cookies;
   - a crash mid-sync is reset to an error state on restart.
 - **ESPN rate limits:** requests are spaced ≥0.35 s with retries; the scheduler runs at most 2 league syncs in parallel and checks every 10 minutes for due leagues.
