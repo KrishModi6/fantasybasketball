@@ -1,0 +1,39 @@
+name: Refresh league data
+
+# Scale-to-zero hosts stop the in-process scheduler when idle, so this job asks the
+# server to refresh every league that is due (each league's interval is set in the app).
+# Set two repository secrets to enable it:
+#   COURTSIDE_URL         the deployed base URL, e.g. https://courtside-abc123-uc.a.run.app
+#   COURTSIDE_CRON_TOKEN  the same value as the server's FBB_CRON_TOKEN
+#
+# This repo is private, so runs draw from the 2,000 free Actions minutes per month.
+# Every 3 hours is 8 runs/day at ~1 billed minute each, about 240 minutes/month.
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: courtside-sync
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Trigger refresh
+        env:
+          URL: ${{ secrets.COURTSIDE_URL }}
+          TOKEN: ${{ secrets.COURTSIDE_CRON_TOKEN }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$TOKEN" ]; then
+            echo "COURTSIDE_URL / COURTSIDE_CRON_TOKEN not set; nothing to do."
+            exit 0
+          fi
+          # The first request may wait for a cold start; allow up to 5 minutes for syncs.
+          curl --fail-with-body --silent --show-error --max-time 300 --retry 2 --retry-delay 20 \
+            -X POST -H "X-Cron-Token: $TOKEN" "$URL/api/cron/sync"

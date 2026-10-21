@@ -1,6 +1,7 @@
 fastapi==0.120.2
 uvicorn[standard]==0.35.0
 SQLAlchemy==2.0.51
+psycopg[binary]==3.2.3
 pydantic==2.12.3
 pydantic-settings==2.11.0
 email-validator==2.3.0
@@ -10,8 +11,6 @@ cryptography==46.0.3
 httpx==0.28.1
 numpy==1.26.4
 scipy==1.16.1
-pandas==2.3.1
-scikit-learn==1.7.2
 lightgbm==4.6.0
 joblib==1.5.2
 python-multipart==0.0.20

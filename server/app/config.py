@@ -39,9 +39,32 @@ class Settings(BaseSettings):
     retrain_interval_days: int = 7
     flaim_mcp_url: str = "https://api.flaim.app/mcp"
     web_dist: str = str(SERVER_DIR.parent / "web" / "dist")
+    # Hosting knobs. Scale-to-zero hosts (Cloud Run, Render free) only give CPU while a request is in
+    # flight, so syncs must run inside the request and be triggered by an external cron.
+    inline_sync: bool = False  # run manual refreshes inside the request instead of a background task
+    realtime_enabled: bool = True  # WebSocket push; clients fall back to polling when disabled
+    cron_token: str = ""  # enables POST /api/cron/sync when set
+
+    @property
+    def is_sqlite(self) -> bool:
+        return self.database_url.startswith("sqlite")
+
+    def sqlalchemy_url(self) -> str:
+        """Accept provider-style Postgres URLs (postgres://, postgresql://) and use the psycopg 3 driver."""
+        url = self.database_url
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url[len(prefix):]
+        return url
 
     def signing_key(self) -> str:
-        return self.secret_key or _persistent_secret()
+        if self.secret_key:
+            return self.secret_key
+        if not self.is_sqlite:
+            # With a shared database, a per-instance random key would sign users out on every
+            # restart and make stored ESPN cookies unreadable.
+            raise RuntimeError("FBB_SECRET_KEY must be set when using a hosted database.")
+        return _persistent_secret()
 
     def origins(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

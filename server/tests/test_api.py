@@ -8,7 +8,8 @@ import tempfile
 import pytest
 
 _tmp = tempfile.mkdtemp()
-os.environ["FBB_DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
+os.environ.setdefault("FBB_DATABASE_URL", f"sqlite:///{_tmp}/test.db")  # conftest may supply Postgres
+os.environ["FBB_CRON_TOKEN"] = "test-cron-token"
 os.environ["FBB_SCHEDULER_ENABLED"] = "false"
 os.environ["FBB_SECRET_KEY"] = "test-secret-key-not-for-production-use-0123456789"
 
@@ -114,3 +115,21 @@ def test_auth_errors(client):
     assert client.get("/api/leagues").status_code == 401
     r = client.post("/api/auth/login", json={"email": "nobody@example.com", "password": "whatever123"})
     assert r.status_code == 401
+
+
+def test_cron_endpoint_requires_token(client):
+    assert client.post("/api/cron/sync").status_code == 404
+    assert client.post("/api/cron/sync", headers={"X-Cron-Token": "wrong"}).status_code == 404
+    r = client.post("/api/cron/sync", headers={"X-Cron-Token": "test-cron-token"})
+    assert r.status_code == 200, r.text
+    assert set(r.json()) == {"synced", "results", "seconds"}
+
+
+def test_hosted_database_requires_secret_key():
+    from app.config import Settings
+
+    s = Settings(database_url="postgresql://u:p@db.example.com/x", secret_key="")
+    with pytest.raises(RuntimeError):
+        s.signing_key()
+    assert s.sqlalchemy_url().startswith("postgresql+psycopg://")
+    assert Settings(database_url="postgres://u:p@h/x").sqlalchemy_url() == "postgresql+psycopg://u:p@h/x"

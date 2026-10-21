@@ -13,7 +13,7 @@ class Base(DeclarativeBase):
 
 
 def _make_engine():
-    url = get_settings().database_url
+    url = get_settings().sqlalchemy_url()
     if url.startswith("sqlite"):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         eng = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
@@ -26,7 +26,9 @@ def _make_engine():
             cur.close()
 
         return eng
-    return create_engine(url, pool_pre_ping=True, pool_size=10, max_overflow=20)
+    # Serverless Postgres (Neon, Supabase) drops idle connections and caps connection counts on
+    # free plans: keep the pool small, check connections before use, and recycle them often.
+    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5, pool_recycle=300)
 
 
 engine = _make_engine()

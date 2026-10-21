@@ -1,0 +1,24 @@
+# Render Blueprint (no-card alternative to Cloud Run). See docs/DEPLOY.md.
+# Free web services sleep after 15 idle minutes and have no persistent disk, so the database
+# lives on Neon and refreshes are triggered by .github/workflows/sync.yml.
+services:
+  - type: web
+    name: courtside
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: FBB_DATABASE_URL # Neon connection string (postgresql://...?sslmode=require)
+        sync: false
+      - key: FBB_PUBLIC_URL # e.g. https://courtside.onrender.com, used in invite links
+        sync: false
+      - key: FBB_SECRET_KEY
+        generateValue: true
+      - key: FBB_CRON_TOKEN # copy this value into the GitHub secret COURTSIDE_CRON_TOKEN
+        generateValue: true
+      - key: FBB_SCHEDULER_ENABLED
+        value: "false"
+      - key: FBB_INLINE_SYNC
+        value: "true"

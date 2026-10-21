@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
-import { useLeagueSocket } from "../lib/realtime";
+import { useLeagueSocket, useRefreshOnSync } from "../lib/realtime";
 import { useToast } from "../lib/toast";
 import type { League, TeamRef } from "../lib/types";
 import { PlayerDrawer } from "./PlayerDrawer";
@@ -65,11 +65,15 @@ function SyncStatus({ league }: { league: League }) {
   const qc = useQueryClient();
   const toast = useToast();
   const sync = useMutation({
-    mutationFn: () => api(`/api/leagues/${league.id}/sync`, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["league", league.id, "meta"] }),
+    mutationFn: () => api<{ status: string; error?: string | null }>(`/api/leagues/${league.id}/sync`, { method: "POST" }),
+    onSuccess: (r) => {
+      // Hosts with inline syncing return the finished result; others report "started".
+      if (r?.status === "error") toast(`Refresh failed: ${r.error ?? "unknown error"}`, "err");
+      qc.invalidateQueries({ queryKey: ["league", league.id, "meta"] });
+    },
     onError: (e: Error) => toast(e.message, "err"),
   });
-  const s = league.sync.status;
+  const s = sync.isPending ? "running" : league.sync.status;
   const label = s === "running" ? "Refreshing" : s === "error" ? "Refresh failed" : `Synced ${relTime(league.sync.last_synced_at)}`;
   return (
     <div className="sync" title={league.sync.error ?? `Auto-refresh every ${league.sync.interval_hours}h`}>
@@ -132,6 +136,7 @@ export function LeagueLayout() {
   const { user, signOut } = useAuth();
   const [search, setSearch] = useSearchParams();
   useLeagueSocket(leagueId);
+  useRefreshOnSync(leagueId, league ? league.sync.last_synced_at : undefined);
 
   const ctx = useMemo<LeagueCtx | null>(() => {
     if (!league) return null;

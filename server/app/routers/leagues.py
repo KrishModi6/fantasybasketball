@@ -225,6 +225,11 @@ def sync_now(background: BackgroundTasks, m: Membership = Depends(membership), d
         raise HTTPException(429, "Data was refreshed moments ago; try again in a few minutes.")
     lg.last_sync_status = "running"
     db.commit()
+    if get_settings().inline_sync:
+        # Scale-to-zero hosts throttle CPU once the response is sent, so finish the sync first.
+        run_sync(lg.id, "manual")
+        db.refresh(lg)
+        return {"status": lg.last_sync_status, "error": lg.last_sync_error}
     background.add_task(run_sync, lg.id, "manual")
     return {"status": "started"}
 

@@ -115,7 +115,7 @@ Everyone in a league needs to reach one server. The simplest option is the inclu
 docker build -t courtside .
 docker run -p 8000:8000 -v courtside-data:/app/server/data/db -e FBB_SECRET_KEY=... -e FBB_PUBLIC_URL=https://your.host courtside
 ```
-See [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) for environment variables, Postgres, backups and scaling.
+Free hosting (Cloud Run + Neon, or Render): see [docs/DEPLOY.md](docs/DEPLOY.md). Environment variables, backups and scaling: [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md).
 
 ## Retraining
 

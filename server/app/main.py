@@ -21,7 +21,7 @@ from .config import get_settings
 from .db import SessionLocal, init_db
 from .orm import League, LeagueMember
 from .realtime import hub
-from .routers import analysis, auth, leagues, matchups, meta, trades
+from .routers import analysis, auth, cron, leagues, matchups, meta, trades
 from .scheduler import refresh_loop
 from .security import decode_token
 
@@ -30,6 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    get_settings().signing_key()  # fail fast if a hosted deployment forgot FBB_SECRET_KEY
     init_db()
     with SessionLocal() as db:  # a crash mid-sync would otherwise leave leagues stuck in "running"
         db.execute(update(League).where(League.last_sync_status == "running").values(last_sync_status="error",
@@ -48,12 +49,16 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().origins(), allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
 
-for r in (auth.router, leagues.router, analysis.router, matchups.router, trades.router, meta.router):
+for r in (auth.router, leagues.router, analysis.router, matchups.router, trades.router, meta.router, cron.router):
     app.include_router(r)
 
 
 @app.websocket("/api/ws/leagues/{league_id}")
 async def league_socket(ws: WebSocket, league_id: str):
+    if not get_settings().realtime_enabled:
+        # 4403 tells the client push is off on this host; it falls back to polling.
+        await ws.close(code=4403)
+        return
     user_id = decode_token(ws.query_params.get("token", ""))
     with SessionLocal() as db:
         ok = user_id and db.scalar(select(LeagueMember).where(LeagueMember.league_id == league_id,

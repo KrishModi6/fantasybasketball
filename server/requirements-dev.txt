@@ -1,0 +1,3 @@
+-r requirements.txt
+# Embedded Postgres for running the test suite against Postgres (FBB_TEST_POSTGRES=1)
+pgserver
