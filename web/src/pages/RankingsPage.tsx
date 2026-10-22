@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Bar, Diverging } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented } from "../components/ui";
-import { fmt0, fmt1, pct, record, shortDate, signed } from "../lib/format";
+import { fmt0, fmt1, pct, powerMix, record, shortDate, signed } from "../lib/format";
 import { useRankings, useWeekly } from "../lib/queries";
 import type { TeamStrength } from "../lib/types";
 
@@ -17,7 +17,7 @@ export default function RankingsPage() {
     <>
       <PageHead
         title="Power rankings"
-        desc="Ranked by all-play win rate: each team against every other team in every remaining week, with optimal daily lineups. Records and odds from 5,000 simulations of the actual schedule and playoff bracket. Select a row for the breakdown."
+        desc="Ranked by power score: this season's record counts for the share of the regular season already played, and the projected all-play win rate (each team against every other team in every remaining week, with optimal daily lineups) counts for the rest. In week 1 it's all projection; halfway it's half each. Records and odds from 5,000 simulations of the actual schedule and playoff bracket. Select a row for the breakdown."
       />
       {error && <ErrorBox error={error} />}
       {isLoading && <LoadingBlock rows={12} />}
@@ -30,7 +30,7 @@ export default function RankingsPage() {
                   <th className="n">#</th>
                   <th>Team</th>
                   <th className="hide-sm">Manager</th>
-                  <th className="n">All-play</th>
+                  <th className="n" title="Power score: this season's record for the share played, projected all-play for the rest">Power</th>
                   <th className="hide-sm" style={{ width: 120 }} />
                   {isPoints && <th className="n">Pts/wk</th>}
                   {isPoints && <th className="n">vs avg</th>}
@@ -48,8 +48,8 @@ export default function RankingsPage() {
                       <td className="n muted">{t.rank}</td>
                       <td><Link to={`../team/${t.team_id}`} relative="path" onClick={(e) => e.stopPropagation()} style={{ color: "var(--text)" }}>{t.name}</Link></td>
                       <td className="hide-sm muted">{t.owner ?? "–"}</td>
-                      <td className="n">{pct(t.power_score)}</td>
-                      <td className="hide-sm"><Bar value={t.power_score} max={1} tick={0.5} label={`${pct(t.power_score)} all-play`} /></td>
+                      <td className="n" title={powerMix(t)}>{pct(t.power_score)}</td>
+                      <td className="hide-sm" title={powerMix(t)}><Bar value={t.power_score} max={1} tick={0.5} label={`${pct(t.power_score)} power score`} /></td>
                       {isPoints && <td className="n">{fmt0(t.ppw)}</td>}
                       {isPoints && <td className="n"><Delta value={t.ppw_vs_avg} digits={0} /></td>}
                       <td className="n">{record(t.wins, t.losses, t.ties)}</td>
@@ -210,6 +210,7 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
         </div>
         <div className="stack" style={{ gap: 8 }}>
           <dl className="kv">
+            <dt>Power score</dt><dd>{pct(t.power_score)} <span className="faint">{powerMix(t)}</span></dd>
             <dt>Player-games per week</dt><dd>{fmt1(ex.schedule.player_games_per_week)} <span className="faint">avg {fmt1(ex.schedule.league_avg)}</span></dd>
             <dt>Empty starting slots per week</dt><dd>{fmt1(ex.depth.empty_slots_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_empty)}</span></dd>
             <dt>Playable games on bench per week</dt><dd>{fmt1(ex.depth.bench_games_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_bench)}</span></dd>

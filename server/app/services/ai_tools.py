@@ -68,7 +68,8 @@ class ToolBox:
 
         team = {"type": "string", "description": "Team name or id. Omit for the user's own team."}
         return [
-            fn("league_overview", "Power rankings for every team: record, projected points per week, all-play win rate, "
+            fn("league_overview", "Power rankings for every team: record, projected points per week, power score (this "
+               "season's record for the share of the season played, projected all-play win rate for the rest), "
                "projected final record, playoff and title odds from 5,000 season simulations."),
             fn("team_roster", "A team's roster with each player's projection, schedule, injury and weekly contribution, "
                "plus the team's diagnosed weak spots.", {"team": team}),
@@ -166,7 +167,8 @@ class ToolBox:
             teams.append({
                 "rank": t.rank, "team": t.name, "team_id": t.team_id, "manager": t.owner,
                 "is_users_team": t.team_id == self.my_team_id, "record": f"{t.wins}-{t.losses}-{t.ties}",
-                "pts_per_week": _r(t.ppw, 0), "vs_league_avg": _r(t.ppw_vs_avg, 0), "all_play_win_rate": _r(t.power_score, 3),
+                "pts_per_week": _r(t.ppw, 0), "vs_league_avg": _r(t.ppw_vs_avg, 0), "power_score": _r(t.power_score, 3),
+                "record_share_of_power_score": _r(t.record_weight, 2), "projected_all_play_win_rate": _r(t.projected_allplay, 3),
                 "projected_record": f"{t.proj_wins:.0f}-{t.proj_losses:.0f}", "playoff_odds": _r(t.playoff_odds, 3),
                 "title_odds": _r(t.title_odds, 3), "why": t.explanation.get("summary"),
             })

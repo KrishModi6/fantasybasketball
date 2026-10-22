@@ -195,6 +195,21 @@ def test_matchup_periods_are_monday_to_sunday(snapshot):
     assert max(mps) == 13  # 12 regular weeks + one playoff round
 
 
+def test_power_score_blends_record_by_season_played(snapshot):
+    base = {ts.team_id: ts for ts in league_strength(AnalysisContext(snapshot), with_sim=False)}
+    assert all(ts.power_score == ts.projected_allplay and ts.record_weight == 0 for ts in base.values())
+    # Halfway through a 12-week season: the weakest projected team is 6-0, everyone else 0-6.
+    weakest = min(base.values(), key=lambda ts: ts.projected_allplay).team_id
+    for t in snapshot.teams:
+        t.wins, t.losses = (6, 0) if t.id == weakest else (0, 6)
+    ranked = league_strength(AnalysisContext(snapshot), with_sim=False)
+    top = ranked[0]
+    assert top.team_id == weakest and top.record_weight == pytest.approx(0.5) and top.record_pct == 1.0
+    assert top.power_score == pytest.approx(0.5 * 1.0 + 0.5 * top.projected_allplay)
+    assert top.projected_allplay == pytest.approx(base[weakest].projected_allplay)
+    assert "6-0 record counts for 50%" in top.explanation["summary"]
+
+
 def test_round_robin_is_balanced():
     rounds = round_robin([1, 2, 3, 4, 5, 6])
     pairs = {frozenset(p) for r in rounds for p in r}

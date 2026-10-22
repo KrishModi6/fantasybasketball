@@ -12,6 +12,11 @@ export const signed = (x: number, digits = 1) => {
 export const signedInt = (x: number) => signed(x, 0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 export const signedPct = (x: number, digits = 1) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(x * 100).toFixed(digits)}%`;
 export const record = (w: number, l: number, t = 0) => (t ? `${w}–${l}–${t}` : `${w}–${l}`);
+/** How a power score is made up: this season's record for the share played, the projection for the rest. */
+export const powerMix = (t: { wins: number; losses: number; ties: number; record_weight: number; projected_allplay: number }) =>
+  t.record_weight > 0
+    ? `${pct(t.record_weight)} this season's record (${record(t.wins, t.losses, t.ties)}), ${pct(1 - t.record_weight)} projected all-play (${pct(t.projected_allplay)})`
+    : `All projection so far: ${pct(t.projected_allplay)} projected all-play win rate`;
 
 export function relTime(iso: string | null | undefined): string {
   if (!iso) return "never";

@@ -42,7 +42,10 @@ class TeamStrength:
     abbrev: str
     owner: str | None
     rank: int = 0
-    power_score: float = 0.0
+    power_score: float = 0.0  # record_weight * record_pct + (1 - record_weight) * projected_allplay
+    projected_allplay: float = 0.0  # expected all-play win rate over the remaining regular-season weeks
+    record_pct: float | None = None  # this season's win rate, ties as half (None before any game)
+    record_weight: float = 0.0  # share of the regular season already played
     ppw: float = 0.0
     ppw_vs_avg: float = 0.0
     wins: int = 0
@@ -295,11 +298,26 @@ def league_strength(ctx: AnalysisContext, results: dict[int, WindowResult] | Non
     denom = max(1, len(sample_mps) * (len(ids) - 1))
     allplay = {k: v / denom for k, v in allplay.items()}
 
+    # This season's record counts for the share of the regular season already played, the projection for
+    # the rest: the projected final win rate, with an average opponent in every remaining week so schedule
+    # luck stays out of the future part.
+    record: dict[int, tuple[float | None, float]] = {}
+    for t in ctx.s.teams:
+        played = t.wins + t.losses + t.ties
+        weight = min(1.0, played / max(reg, played, 1))
+        record[t.id] = ((t.wins + 0.5 * t.ties) / played if played else None, weight)
+
+    def power(tid: int) -> float:
+        pct, weight = record[tid]
+        return allplay[tid] if pct is None else weight * pct + (1 - weight) * allplay[tid]
+
     sim = simulate_season(ctx, mm, ppw=ppw) if with_sim else {}
     out = []
     for t in ctx.s.teams:
         ts = TeamStrength(team_id=t.id, name=t.name, abbrev=t.abbrev, owner=t.owner_name,
-                          power_score=allplay[t.id], ppw=ppw[t.id], ppw_vs_avg=ppw[t.id] - league_avg,
+                          power_score=power(t.id), projected_allplay=allplay[t.id], record_pct=record[t.id][0],
+                          record_weight=record[t.id][1] if record[t.id][0] is not None else 0.0,
+                          ppw=ppw[t.id], ppw_vs_avg=ppw[t.id] - league_avg,
                           wins=t.wins, losses=t.losses, ties=t.ties)
         if sim:
             for k, v in sim[t.id].items():
@@ -313,7 +331,7 @@ def league_strength(ctx: AnalysisContext, results: dict[int, WindowResult] | Non
                           "win_prob": mm.p_win(t.id, opp, cur)}
         ts.explanation = explain_team(ctx, t.id, results, ppw, league_avg, mm, future_reg)
         out.append(ts)
-    out.sort(key=lambda x: -x.power_score)
+    out.sort(key=lambda x: (-x.power_score, -x.projected_allplay))
     for i, ts in enumerate(out, 1):
         ts.rank = i
     _add_summaries(ctx, out)
@@ -406,4 +424,7 @@ def _add_summaries(ctx: AnalysisContext, teams: list[TeamStrength]) -> None:
         if sched and abs(sched["player_games_per_week"] - sched["league_avg"]) >= 1.5:
             more = sched["player_games_per_week"] > sched["league_avg"]
             bits.append(("favourable" if more else "light") + " schedule volume")
+        if ts.record_weight > 0:
+            rec = f"{ts.wins}-{ts.losses}" + (f"-{ts.ties}" if ts.ties else "")
+            bits.append(f"the {rec} record counts for {ts.record_weight:.0%} of the power score")
         ex["summary"] = "; ".join(bits) + "."
