@@ -122,6 +122,8 @@ export interface PlayerDetail extends PlayerRow {
   adjustments: Adjustment[];
   explanation: { factor: string; fp_pg: number }[];
   in_season_weight: number;
+  carryover_games: number;
+  carryover_weight: number;
   fp_breakdown: Record<string, number>;
   game_log: { season: number; period: number; date: string | null; team: string; min: number; fp: number; [k: string]: number | string | null }[];
   seasons: { season: number; label: string; team: string; gp: number; mpg: number | null; fp_pg: number | null; [k: string]: number | string | null }[];
@@ -166,6 +168,19 @@ export interface TeamStrength {
     injuries: { player_id: string; name: string; status: string; games_out: number; fp_lost: number }[];
     schedule: { player_games_per_week: number; league_avg: number };
   };
+}
+
+export interface WeeklyPoints {
+  scoring: string;
+  weeks: { matchup_period: number; start: string | null; end: string | null; days: number; playoffs: boolean; current: boolean }[];
+  teams: {
+    team_id: number;
+    name: string;
+    abbrev: string;
+    owner: string | null;
+    weeks: { matchup_period: number; proj: number; sd: number; scored: number | null; opponent_id: number | null; win_prob: number | null }[];
+  }[];
+  as_of: { date: string | null };
 }
 
 export interface TeamDetail {

@@ -13,7 +13,7 @@ The live version of this page (with the current model's numbers) is in the app u
 The baseline follows Basketball-Reference's *Simple Projection System* [1], itself modelled on Tango's Marcel [2].
 
 - **Rates, not totals.** The model projects per-minute rates for 14 stats: REB, AST, STL, BLK, TO, FG made, FG missed, FT made, FT missed, 3PM, 3P missed, DD, TD and PF. Attempts are makes + misses, and points = 2·FGM + 3PM + FTM, so shooting efficiency and volume stay consistent.
-- **Weighting.** The last three seasons are weighted 6 / 3 / 1.
+- **Weighting.** The last two seasons are weighted 6 / 2: for 2026‑27, that's 2025‑26 and 2024‑25, and nothing older. SPS itself uses three seasons at 6 / 3 / 1; dropping the oldest was slightly more accurate in the backtest (season-total error 448 → 446, §2).
 - **Regression to the mean.** The baseline adds 1,000 minutes of league-average production, at each season's league rate, weighted the same way. A rookie with 300 minutes is pulled strongly toward average; a veteran with 8,000 barely moves.
 - **Aging.** Rates are multiplied by `1 + (28 − age) × 0.004` below 28 and `1 + (28 − age) × 0.002` above. The sign is reversed for misses, turnovers and fouls.
 - **Minutes and availability.** SPS deliberately doesn't project these. Courtside uses the same weighting with priors: minutes shrink toward 18 MPG with 6 weighted games of prior weight; availability is games played ÷ team games, shrunk toward 76%.
@@ -45,16 +45,16 @@ Current weights:
 
 | Target | SPS | ESPN | ML |
 |---|---|---|---|
-| Minutes | 3% | 31% | 66% |
-| Games played (availability) | 8% | 5% | 86% |
-| Rebounds | 15% | 55% | 30% |
-| Assists | 6% | 53% | 41% |
-| Steals | 47% | 10% | 43% |
-| Blocks | 16% | 54% | 30% |
-| 3PM | 41% | 18% | 41% |
-| Turnovers | 21% | 26% | 53% |
+| Minutes | 7% | 30% | 64% |
+| Games played (availability) | 10% | 4% | 86% |
+| Rebounds | 10% | 60% | 29% |
+| Assists | 7% | 54% | 39% |
+| Steals | 38% | 20% | 42% |
+| Blocks | 18% | 60% | 22% |
+| 3PM | 47% | 24% | 29% |
+| Turnovers | 22% | 29% | 49% |
 
-These match intuition. Steals and threes are noisy year to year, so the long-history baseline earns weight there. ESPN knows about roles, so it dominates rebounds, assists and blocks. ML is best at minutes and durability.
+These match intuition. Steals and threes are noisy year to year, so the heavily regressed baseline earns weight there. ESPN knows about roles, so it dominates rebounds, assists and blocks. ML is best at minutes and durability.
 
 In the UI, each source also gets a single "effective weight": the per-target weights averaged by each target's share of fantasy points under your league's scoring.
 
@@ -67,22 +67,23 @@ rate = (K · preseason_rate + Σ w_g · stat_g) / (K + Σ w_g · minutes_g)
 ```
 
 - `w_g = 0.5^(games_ago / 25)` is the exponential recency weight.
+- Early in a season the sum also includes the player's **last 10 games of last season** (ESPN returns each player's last 20 team games, which reach back across the summer), behind this season's games and at a quarter of the weight: `w_g = 0.25 · 0.5^(games_ago / 25)`. Those games are already part of last season's line in the preseason projection, hence the discount. They fade out as this season's games pile up.
 - `K` is the **prior strength in minutes**, estimated per stat from the ensemble's own backtest errors by method of moments: `K = mean_rate / (Var(actual − projected) − φ · E[rate / minutes])`.
 - φ is the measured overdispersion of game counts relative to Poisson (from 2025‑26 game logs).
 - Established players, with more weighted history, get a stronger prior than young or low-minute players.
 
 | Stat | K (young / low data) | K (established) |
 |---|---|---|
-| Rebounds | 150 min | 397 min |
-| Assists | 150 | 226 |
-| Steals | 611 | 1,289 |
-| Blocks | 199 | 602 |
-| 3PM | 170 | 427 |
-| Turnovers | 316 | 550 |
+| Rebounds | 150 min | 393 min |
+| Assists | 150 | 232 |
+| Steals | 599 | 1,140 |
+| Blocks | 191 | 606 |
+| 3PM | 164 | 423 |
+| Turnovers | 296 | 564 |
 
 Steals need about 3× more minutes than rebounds before this season's sample dominates. Minutes per game update faster: 8 games of prior weight with a 10-game half-life, because roles change.
 
-How quickly old evidence fades is tested, not assumed. `scripts/backtest_recency.py` replays every game of 2024-25 and 2025-26: each player starts from the preseason projection the app would have made (ML refit on earlier seasons only), takes in his first 3 to 35 games, and is scored on his rest-of-season FP/G. Fading faster (12- and 5-game half-lives) was about 0.4% less accurate, and no recency weighting was 1.0-1.4% less accurate. Down-weighting older seasons in the preseason baseline (6/2/0 instead of 6/3/1) helps SPS on its own by 0.8% but changes the blended projection by under 0.05%, because the ML model already learns how much each past season counts from separate last-season and two-seasons-ago inputs.
+How quickly old evidence fades is tested, not assumed. `scripts/backtest_recency.py` replays every game of 2024-25 and 2025-26: each player starts from the preseason projection the app would have made (ML refit on earlier seasons only), sees the closing games of the season before, takes in his first 0 to 35 games, and is scored on his rest-of-season FP/G. Fading faster (12- and 5-game half-lives) was about 0.4-0.5% less accurate, and no recency weighting was 0.9-2.3% less accurate. Adding last season's last 10 games at a quarter weight cut the error by 0.8% overall and 1.1% over a player's first 0-3 games (2025‑26: 4.51 → 4.45 FP/G; 2024‑25: 3.87 → 3.86). Half weight, or all 20 games, did better in 2025‑26 but worse in 2024‑25.
 
 Game-to-game volatility of fantasy points is the player's recent standard deviation, shrunk toward the population coefficient of variation (0.51, measured).
 
@@ -109,22 +110,22 @@ Rolling origin: the model for season *T* is trained only on seasons before *T*. 
 
 | Method | FP/G MAE | FP/G RMSE | Season-total MAE | Rank ρ (season FP) |
 |---|---|---|---|---|
-| Last season repeated | 4.78 | 6.06 | 515 | 0.667 |
-| SPS baseline | 4.62 | 5.89 | 469 | 0.700 |
-| ESPN preseason | 4.57 | 5.79 | 507 | **0.736** |
-| LightGBM alone | 4.39 | 5.58 | 459 | 0.721 |
-| **Ensemble** | **4.34** | **5.49** | **448** | 0.732 |
+| Last season repeated | 4.80 | 6.08 | 514 | 0.668 |
+| SPS baseline | 4.56 | 5.83 | 469 | 0.704 |
+| ESPN preseason | 4.57 | 5.79 | 507 | 0.736 |
+| LightGBM alone | 4.41 | 5.60 | 456 | 0.729 |
+| **Ensemble** | **4.33** | **5.49** | **446** | **0.737** |
 
 **All players with 20+ games, all five test seasons** (ESPN not required):
 
 | Method | FP/G MAE | FP/G RMSE | Season-total MAE | Rank ρ |
 |---|---|---|---|---|
-| Last season | 5.18 | 6.59 | 506 | 0.658 |
-| SPS | 5.02 | 6.38 | 470 | 0.682 |
-| LightGBM | 4.57 | 5.74 | 440 | 0.735 |
-| **Ensemble** | **4.57** | **5.73** | **431** | **0.739** |
+| Last season | 5.18 | 6.60 | 506 | 0.657 |
+| SPS | 4.97 | 6.33 | 470 | 0.685 |
+| LightGBM | **4.55** | **5.73** | 437 | 0.739 |
+| **Ensemble** | 4.56 | **5.73** | **428** | **0.742** |
 
-By season, the ensemble's FP/G MAE vs ESPN's: 4.28 vs 4.46 (2021‑22), 4.24 vs 4.48 (2023‑24), 4.11 vs 4.48 (2024‑25), 4.72 vs 4.84 (2025‑26). It beat ESPN in every season.
+By season, the ensemble's FP/G MAE vs ESPN's: 4.30 vs 4.46 (2021‑22), 4.20 vs 4.48 (2023‑24), 4.10 vs 4.48 (2024‑25), 4.72 vs 4.84 (2025‑26). It beat ESPN in every season.
 
 **Interpretation.** ML measurably helps on per-game accuracy and on season totals. It does not improve the *ranking* of players over ESPN alone; that difference is within noise. This is why ML is one input to a blend rather than the projection.
 

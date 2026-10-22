@@ -6,6 +6,7 @@ from dataclasses import asdict
 
 from fbb.baseline import RATE_STATS
 from fbb.constants import season_label
+from fbb.strength import MatchupModel
 from fbb.valuation import player_values
 
 from .analysis import LeagueAnalysis
@@ -90,6 +91,8 @@ def player_detail(a: LeagueAnalysis, pid: str, history_rows: list | None = None)
         "adjustments": [asdict(x) for x in pr.adjustments],
         "explanation": a.engine.explain(pr),
         "in_season_weight": _r(pr.in_season_weight, 3),
+        "carryover_games": pr.carryover_games,
+        "carryover_weight": _r(pr.carryover_weight, 3),
         "fp_breakdown": {k: _r(v) for k, v in a.engine.fp_scoring.breakdown(pr.per_game).items()},
         "game_log": games,
         "seasons": seasons,
@@ -102,6 +105,41 @@ def player_detail(a: LeagueAnalysis, pid: str, history_rows: list | None = None)
 
 def strength_rows(a: LeagueAnalysis) -> list[dict]:
     return [ts.to_dict() for ts in a.strength()]
+
+
+def weekly_points(a: LeagueAnalysis) -> dict:
+    """Every team's projected total in each remaining week, with its scheduled opponent and win odds.
+
+    The current week adds the points already scored to the days left, so it reads as a final score.
+    """
+    ctx = a.ctx
+    s = a.snapshot
+    mm = MatchupModel(ctx, a.windows)
+    reg = s.settings.regular_season_matchups
+    weeks = []
+    for mp in ctx.remaining_mps():
+        days = s.settings.matchup_periods.get(mp, [])
+        d0 = s.schedule.period_dates.get(days[0]) if days else None
+        d1 = s.schedule.period_dates.get(days[-1]) if days else None
+        weeks.append({"matchup_period": mp, "start": d0.isoformat() if d0 else None, "end": d1.isoformat() if d1 else None,
+                      "days": len(days), "playoffs": mp > reg, "current": mp == s.current_matchup_period})
+    opponents: dict[tuple[int, int], int] = {}
+    for m in s.matchups:
+        if m.away_team_id is not None:
+            opponents[(m.home_team_id, m.matchup_period)] = m.away_team_id
+            opponents[(m.away_team_id, m.matchup_period)] = m.home_team_id
+    teams = []
+    for t in s.teams:
+        cells = []
+        for w in weeks:
+            mp = w["matchup_period"]
+            mean, var = mm.dist(t.id, mp)
+            opp = opponents.get((t.id, mp))
+            cells.append({"matchup_period": mp, "proj": _r(mean, 1), "sd": _r(var ** 0.5, 1),
+                          "scored": _r(mm.partial.get((t.id, mp)), 1), "opponent_id": opp,
+                          "win_prob": _r(mm.p_win(t.id, opp, mp), 3) if opp is not None else None})
+        teams.append({"team_id": t.id, "name": t.name, "abbrev": t.abbrev, "owner": t.owner_name, "weeks": cells})
+    return {"scoring": s.settings.scoring.kind, "weeks": weeks, "teams": teams}
 
 
 def team_detail(a: LeagueAnalysis, team_id: int) -> dict:

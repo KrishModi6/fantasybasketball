@@ -14,6 +14,7 @@ import type {
   TeamDetail,
   TeamReport,
   TeamStrength,
+  WeeklyPoints,
 } from "./types";
 
 const L = (id: string, ...rest: unknown[]) => ["league", id, ...rest];
@@ -33,6 +34,9 @@ export const useRankings = (id: string, enabled = true) =>
     queryFn: () => api<{ teams: TeamStrength[]; scoring: string; as_of: { date: string | null } }>(`/api/leagues/${id}/rankings`),
     enabled,
   });
+
+export const useWeekly = (id: string, enabled = true) =>
+  useQuery({ queryKey: L(id, "weekly"), queryFn: () => api<WeeklyPoints>(`/api/leagues/${id}/weekly`), enabled });
 
 export const useTeam = (id: string, teamId: number | null) =>
   useQuery({

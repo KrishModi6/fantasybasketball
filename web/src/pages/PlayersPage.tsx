@@ -15,7 +15,7 @@ const COLUMNS: { key: string; label: string; title: string; hideSm?: boolean }[]
   { key: "games_next7", label: "Next 7", title: "Expected games in the next 7 days" },
   { key: "mpg", label: "MPG", title: "Projected minutes per game", hideSm: true },
   { key: "season_fp_pg", label: "Season", title: "Fantasy points per game this season", hideSm: true },
-  { key: "recent_fp_pg", label: "Last 10", title: "Average over the last 10 games", hideSm: true },
+  { key: "recent_fp_pg", label: "Last 10", title: "Average over the last 10 games, reaching back into last season while this one is young", hideSm: true },
   { key: "ownership_pct", label: "Rostered", title: "Share of ESPN leagues rostering the player", hideSm: true },
 ];
 

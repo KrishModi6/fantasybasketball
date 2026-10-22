@@ -98,7 +98,8 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
           </div>
           <p className="panel-foot">
             This season: {p.games_played} game{p.games_played === 1 ? "" : "s"}{p.season_fp_pg != null ? ` at ${fmt1(p.season_fp_pg)} FP/G` : ""}, carrying {pct(p.in_season_weight)} of
-            the weight (updated stat by stat; steals and blocks need more games than points or rebounds). Weights are each source's share across stats,
+            the weight{p.carryover_games > 0 ? `; last season's final ${p.carryover_games} games add ${pct(p.carryover_weight)}` : ""} (updated stat by stat;
+            steals and blocks need more games than points or rebounds). Weights are each source's share across stats,
             weighted by their value under your scoring. Result: {fmt1(p.fp_pg)} FP/G in {fmt1(p.mpg)} minutes.
           </p>
         </Panel>

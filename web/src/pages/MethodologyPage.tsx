@@ -17,7 +17,7 @@ const TARGET_LABEL: Record<string, string> = {
 };
 
 const REFERENCES = [
-  ["Basketball-Reference, Simple Projection System", "3-season 6/3/1 weighting, 1,000 minutes of league-average regression, aging curve.", "https://www.basketball-reference.com/about/projections.html"],
+  ["Basketball-Reference, Simple Projection System", "Weighted seasons (Courtside: last two at 6/2, SPS itself: three at 6/3/1), 1,000 minutes of league-average regression, aging curve.", "https://www.basketball-reference.com/about/projections.html"],
   ["T. Tango, Marcel the Monkey Forecasting System", "The weighted-history, regression and age template SPS is built on.", "https://www.tangotiger.net/archives/stud0346.shtml"],
   ["B. Efron & C. Morris (1975), JASA 70(350)", "Shrinkage toward a prior; basis for the in-season Gamma–Poisson update.", null],
   ["J. M. Bates & C. W. J. Granger (1969), Operational Research Quarterly 20(4)", "Combining forecasts.", null],
@@ -88,7 +88,7 @@ export default function MethodologyPage() {
 
       <Panel title="Pipeline">
         <ol className="steps">
-          <li><strong>Player projections.</strong> Per-minute rates for 14 box-score stats, minutes and availability come from three sources: a statistical baseline (SPS: last three seasons weighted 6/3/1, regressed toward league average, age-adjusted), ESPN's projection, and a LightGBM model that predicts corrections to the baseline. They are blended with weights fitted on out-of-sample seasons, then updated with this season's games (Gamma–Poisson shrinkage, stat by stat).</li>
+          <li><strong>Player projections.</strong> Per-minute rates for 14 box-score stats, minutes and availability come from three sources: a statistical baseline (SPS: the last two seasons, 2024-25 onward for 2026-27, weighted 6/2, regressed toward league average, age-adjusted), ESPN's projection, and a LightGBM model that predicts corrections to the baseline. They are blended with weights fitted on out-of-sample seasons, then updated with this season's games (Gamma–Poisson shrinkage, stat by stat). Until this season has enough games, last season's final 10 also count, at a quarter of the weight.</li>
           <li><strong>Bounded adjustments.</strong> Injury status and return dates change games played only. Each NBA team's healthy players are scaled toward a 236-minute budget (±8%). New-team players get wider uncertainty. League overrides are capped at ±15% minutes; all minutes adjustments together at −20% / +15%. Headlines are never parsed into numbers.</li>
           <li><strong>Team simulation.</strong> Every remaining day, each roster's optimal legal lineup is solved exactly. Expected points and variance per week give the matchup odds (Normal approximation; Poisson-binomial over categories in category leagues).</li>
           <li><strong>Rankings and odds.</strong> Power score is the all-play win rate over remaining weeks. Playoff and title odds come from 5,000 simulated seasons of the real schedule and bracket.</li>

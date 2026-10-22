@@ -2,9 +2,9 @@ import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, Diverging } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName } from "../components/ui";
-import { fmt0, fmt1, pct, record, signed } from "../lib/format";
-import { useRankings } from "../lib/queries";
+import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented } from "../components/ui";
+import { fmt0, fmt1, pct, record, shortDate, signed } from "../lib/format";
+import { useRankings, useWeekly } from "../lib/queries";
 import type { TeamStrength } from "../lib/types";
 
 export default function RankingsPage() {
@@ -69,7 +69,89 @@ export default function RankingsPage() {
           </div>
         </Panel>
       )}
+      {data && <WeeklyGrid order={data.teams.map((t) => t.team_id)} />}
     </>
+  );
+}
+
+/** Every team's projected points (or win odds) in each remaining week. */
+function WeeklyGrid({ order }: { order: number[] }) {
+  const { league, myTeamId, teamName } = useLeagueCtx();
+  const { data, error, isLoading } = useWeekly(league.id);
+  const [view, setView] = useState<"points" | "odds">("points");
+  const isPoints = data?.scoring !== "categories";
+  const shown = isPoints ? view : "odds";
+  if (error) return <ErrorBox error={error} />;
+  if (isLoading || !data) return <LoadingBlock rows={6} />;
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const teams = [...data.teams].sort((a, b) => (rank.get(a.team_id) ?? 99) - (rank.get(b.team_id) ?? 99));
+  const abbrev = new Map(data.teams.map((t) => [t.team_id, t.abbrev || t.name]));
+  // Best and worst projection each week, for colouring.
+  const hi = data.weeks.map((_, i) => Math.max(...teams.map((t) => t.weeks[i]?.proj ?? -Infinity)));
+  const lo = data.weeks.map((_, i) => Math.min(...teams.map((t) => t.weeks[i]?.proj ?? Infinity)));
+  const avg = data.weeks.map((_, i) => teams.reduce((s, t) => s + (t.weeks[i]?.proj ?? 0), 0) / Math.max(1, teams.length));
+  return (
+    <Panel
+      title={shown === "points" ? "Projected points by week" : "Win odds by week"}
+      flush
+      actions={isPoints && (
+        <Segmented label="Show" value={view} onChange={setView}
+          options={[{ value: "points", label: "Points" }, { value: "odds", label: "Win odds" }]} />
+      )}
+      foot={shown === "points"
+        ? "Each team's expected total with optimal daily lineups. This week adds the points already scored to the days left; two-week weeks and playoff rounds show the combined total. Green is the week's highest, red the lowest. Hover a cell for the opponent, range and win odds."
+        : "Chance of beating the scheduled opponent that week. Playoff opponents depend on the bracket, so those weeks are blank until they're set."}
+    >
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th className="pin">Team</th>
+              {data.weeks.map((w) => (
+                <th key={w.matchup_period} className="n" title={`${shortDate(w.start)} – ${shortDate(w.end)}, ${w.days} days`}>
+                  <div>{w.playoffs ? "Playoffs" : `Wk ${w.matchup_period}`}{w.current ? " · now" : ""}</div>
+                  <div className="tiny faint">{shortDate(w.start)}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {teams.map((t) => (
+              <tr key={t.team_id} className={t.team_id === myTeamId ? "mine" : ""}>
+                <td className="pin"><Link to={`../team/${t.team_id}`} relative="path" style={{ color: "var(--text)" }}>{t.name}</Link></td>
+                {t.weeks.map((c, i) => {
+                  const opp = c.opponent_id != null ? teamName(c.opponent_id) : null;
+                  const title = [
+                    `${t.name}${opp ? ` vs ${opp}` : ""}`,
+                    `${fmt0(c.proj)} ± ${fmt0(c.sd)} points`,
+                    c.scored != null ? `${fmt0(c.scored)} scored so far` : null,
+                    c.win_prob != null ? `${pct(c.win_prob)} to win` : null,
+                  ].filter(Boolean).join(" · ");
+                  if (shown === "odds") {
+                    return (
+                      <td key={c.matchup_period} className="n" title={title}>
+                        {c.win_prob == null ? <span className="faint">–</span> : (
+                          <><span className="tiny faint">{abbrev.get(c.opponent_id!)}</span>{" "}
+                            <span className={c.win_prob >= 0.5 ? "up" : "down"}>{pct(c.win_prob)}</span></>
+                        )}
+                      </td>
+                    );
+                  }
+                  const tone = teams.length > 1 && c.proj === hi[i] ? "up" : teams.length > 1 && c.proj === lo[i] ? "down" : "";
+                  return <td key={c.matchup_period} className={`n ${tone}`} title={title}>{fmt0(c.proj)}</td>;
+                })}
+              </tr>
+            ))}
+            {shown === "points" && (
+              <tr>
+                <td className="pin muted">League average</td>
+                {avg.map((v, i) => <td key={data.weeks[i]!.matchup_period} className="n muted">{fmt0(v)}</td>)}
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 

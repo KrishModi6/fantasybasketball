@@ -229,6 +229,7 @@ class ToolBox:
             "projection_sources": [{"source": s["source"], "fp_per_game": _r(s["fp_pg"]), "weight": _r(s["weight"], 2)}
                                    for s in d["sources"]],
             "this_season_weight": _r(d["in_season_weight"], 2),
+            "last_season_closing_games_weight": _r(d["carryover_weight"], 2),
             "adjustments": [{"what": x["label"], "detail": x["detail"]} for x in d["adjustments"]],
             "ml_factors_fp_per_game": d["explanation"][:5],
             "projected_per_game": {k: _r(v) for k, v in d["per_game"].items()},

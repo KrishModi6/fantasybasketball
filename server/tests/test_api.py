@@ -48,6 +48,14 @@ def test_full_flow(client):
     assert abs(sum(t["title_odds"] for t in teams) - 1) < 0.02
     assert teams[0]["explanation"]["summary"]
 
+    wk = client.get(f"/api/leagues/{lid}/weekly", headers=owner).json()
+    assert wk["scoring"] == "points" and wk["weeks"] and len(wk["teams"]) == 10
+    assert {w["matchup_period"] for w in wk["weeks"]} == {c["matchup_period"] for c in wk["teams"][0]["weeks"]}
+    future = [i for i, w in enumerate(wk["weeks"]) if not w["current"] and not w["playoffs"]]
+    assert all(t["weeks"][i]["proj"] > 0 for t in wk["teams"] for i in future)
+    scheduled = [c for t in wk["teams"] for c in t["weeks"] if c["opponent_id"] is not None]
+    assert scheduled and all(0 <= c["win_prob"] <= 1 for c in scheduled)
+
     tid = teams[0]["team_id"]
     assert client.get(f"/api/leagues/{lid}/teams/{tid}", headers=owner).status_code == 200
     rep = client.get(f"/api/leagues/{lid}/teams/{tid}/report", headers=owner).json()

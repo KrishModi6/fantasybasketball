@@ -13,7 +13,7 @@ Fantasy basketball analytics for a whole league: player projections, team power 
 | Area | What you get |
 |---|---|
 | **Player projections** | Per-minute rates for 14 stats, plus minutes and availability, blended from a statistical baseline (Basketball-Reference SPS), ESPN's projection and a LightGBM model. Blend weights are learned out of sample, then updated in-season with Bayesian shrinkage. Every player shows its sources, weights, adjustments and SHAP factors. |
-| **Team strength model** | A day-by-day optimal-lineup simulation for every team over the rest of the season gives weekly score distributions. Teams are ranked by all-play win rate, with projected records plus playoff and title odds from 5,000 simulated seasons of your actual schedule and bracket. Each rank comes with a "why": stat-by-stat edges, top contributors, depth, schedule and injury drag. |
+| **Team strength model** | A day-by-day optimal-lineup simulation for every team over the rest of the season gives weekly score distributions. Teams are ranked by all-play win rate, with projected records plus playoff and title odds from 5,000 simulated seasons of your actual schedule and bracket. A week-by-week grid shows every team's projected points (or win odds against that week's opponent) for the rest of the season. Each rank comes with a "why": stat-by-stat edges, top contributors, depth, schedule and injury drag. |
 | **Team improvement** | Weak spots ranked by points at stake. Add/drop moves are simulated against your lineup. Also: streaming pickups for the current week and daily lineups with a confidence score for every start. |
 | **Matchup simulator** | Plays any week's head-to-head out 10,000 times, box score by box score: who suits up, each player's night, bench fill-ins when a starter sits, and points already scored. You get win probability, score and margin distributions, a day-by-day breakdown, each player's range and "swing", and what-if toggles to sit players. Works for points and category leagues. |
 | **Trades** | The analyzer re-simulates both rosters and handles 2-for-1 roster spots. It shows the math step by step: raw value, lineup-adjusted change, playoff weeks, and playoff and title odds before and after. The verdict is advantageous, neutral or disadvantageous. The finder screens every 1–2 player package and fully simulates the best ones. |
@@ -58,7 +58,7 @@ npm start
 - **Windows:** `npm run dist:win` → `desktop/release/Courtside-Setup-<version>.exe` (builds and self-tests the engine first).
 - **macOS:** `npm run dist:mac` on a Mac → `Courtside-<version>-mac-arm64.zip`, ad-hoc signed. Without an Apple Developer ID, friends approve it once under System Settings > Privacy & Security.
 - **Releases:** bump the version in `desktop/package.json`, then push a matching tag like `v0.2.0`. `.github/workflows/release.yml` builds both, self-tests a real Windows install, and publishes a GitHub release with [these notes](desktop/release-notes.md) and the update feed (`latest.yml`, `latest-mac.yml`, `.blockmap` files).
-- **Auto-update:** installed apps check the newest GitHub release shortly after launch and every 4 hours (`electron-updater`). On Windows the update downloads in the background; people get a "Restart now" prompt, or it installs the next time they close the app. The Mac app is only ad-hoc signed, and macOS won't install updates that aren't signed with an Apple Developer ID, so Macs show a "new version" banner with a Download button instead. Help > Check for updates… checks on demand. Logs: `updates.log` next to the engine log.
+- **Auto-update:** installed apps check the newest GitHub release shortly after launch, every 4 hours, and when the computer wakes up or Courtside comes back to the front after 4+ hours, so a laptop that mostly sleeps still checks at least daily (`electron-updater`). On Windows the update downloads in the background; people get a "Restart now" prompt, or it installs the next time they close the app. The Mac app is only ad-hoc signed, and macOS won't install updates that aren't signed with an Apple Developer ID, so Macs show a "new version" banner with a Download button instead. Help > Check for updates… checks on demand. Logs: `updates.log` next to the engine log.
 
 Without a bundled engine (plain `npm start` before `npm run build:engine`), the app connects to a Courtside server instead: `COURTSIDE_SERVER`, or `http://localhost:8000`.
 
@@ -81,11 +81,11 @@ Rolling origin: each season is predicted using only earlier seasons. Error is in
 
 | Method | FP/G MAE | FP/G RMSE | Season-total MAE | Rank ρ |
 |---|---|---|---|---|
-| Last season repeated | 4.78 | 6.06 | 515 | 0.667 |
-| Statistical baseline (SPS) | 4.62 | 5.89 | 469 | 0.700 |
-| ESPN preseason projection | 4.57 | 5.79 | 507 | **0.736** |
-| LightGBM alone | 4.39 | 5.58 | 459 | 0.721 |
-| **Courtside ensemble** | **4.34** | **5.49** | **448** | 0.732 |
+| Last season repeated | 4.80 | 6.08 | 514 | 0.668 |
+| Statistical baseline (SPS) | 4.56 | 5.83 | 469 | 0.704 |
+| ESPN preseason projection | 4.57 | 5.79 | 507 | 0.736 |
+| LightGBM alone | 4.41 | 5.60 | 456 | 0.729 |
+| **Courtside ensemble** | **4.33** | **5.49** | **446** | **0.737** |
 
 The ensemble is 5% more accurate than ESPN per game and 12% more accurate on season totals, and it beat ESPN in every one of these seasons; ranking accuracy is a statistical tie. A data audit excluded ESPN's stored projections for 2019‑20 and 2022‑23, because they were refreshed in-season, and removed ADP as a feature because ESPN overwrites it for past seasons. Both choices are documented in the methodology.
 

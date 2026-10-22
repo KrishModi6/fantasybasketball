@@ -4,8 +4,9 @@ For each player with 40+ games in a completed season: start from the preseason p
 would have made (the ML model is refit on earlier seasons only, then blended with SPS and ESPN using the
 learned weights, so nothing leaks from the season being tested), feed in his first N games through the
 engine's own in-season update, and compare the projected fantasy points per game with his actual
-average over the rest of that season. Settings are the half-lives and prior
-strength in fbb/projections.py; the first row is what the app uses now.
+average over the rest of that season. Like the app, the update also sees the closing games of the season
+before (his games among his team's last 20). Settings are the half-lives, prior strength and the weight
+of last season's closing games in fbb/projections.py; the first row is what the app uses now.
 
 Usage: python -m scripts.backtest_recency --season 2026 --season 2025
 """
@@ -28,14 +29,18 @@ from fbb.connectors.espn import EspnClient, parse_player  # noqa: E402
 from fbb.history import CACHE_DIR, load_history  # noqa: E402
 from fbb.models import GameLog, LeagueSettings, LeagueSnapshot, Player, ProSchedule  # noqa: E402
 
-CUTOFFS = (3, 5, 10, 20, 35)  # games seen before projecting
+CUTOFFS = (0, 1, 3, 5, 10, 20, 35)  # games seen before projecting
 MIN_GAMES, MIN_LEFT = 40, 10
-SETTINGS = {  # rate half-life (games), minutes half-life (games), prior strength scale
-    "app now": (P.RATE_HALF_LIFE_GAMES, P.MINUTES_HALF_LIFE_GAMES, P.PRIOR_STRENGTH_SCALE),
-    "faster recency": (12.0, 5.0, 1.0),
-    "faster minutes only": (25.0, 5.0, 1.0),
-    "stronger prior": (25.0, 10.0, 2.0),
-    "no recency weighting": (1e9, 1e9, 1.0),
+SETTINGS = {  # changes to the settings in fbb/projections.py; the first row is the app as it is
+    "app now": {},
+    "no closing games": {"CARRYOVER_RATE_WEIGHT": 0.0, "CARRYOVER_MINUTES_WEIGHT": 0.0},
+    "closing games x0.5": {"CARRYOVER_RATE_WEIGHT": 0.5, "CARRYOVER_MINUTES_WEIGHT": 0.5},
+    "all 20 closing games": {"CARRYOVER_GAMES": 20},
+    "faster recency": {"RATE_HALF_LIFE_GAMES": 12.0, "MINUTES_HALF_LIFE_GAMES": 5.0},
+    "faster minutes only": {"MINUTES_HALF_LIFE_GAMES": 5.0},
+    "stronger prior": {"PRIOR_STRENGTH_SCALE": 2.0},
+    "no recency weighting": {"RATE_HALF_LIFE_GAMES": 1e9, "MINUTES_HALF_LIFE_GAMES": 1e9,
+                             "CARRYOVER_RATE_WEIGHT": 0.0, "CARRYOVER_MINUTES_WEIGHT": 0.0},
 }
 
 
@@ -52,6 +57,22 @@ def season_logs(season: int) -> dict[str, list[dict]]:
             out[p.id] = games
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out))
+    return out
+
+
+def closing_games(logs: dict[str, list[dict]], team_games: int = 20) -> dict[str, list[dict]]:
+    """Each player's games among his team's last ``team_games`` games of the season, as ESPN returns them
+    in the first weeks of the next season (a player who sat out the end of the season has fewer). The
+    engine keeps the last CARRYOVER_GAMES of them."""
+    periods: dict[str, set[int]] = {}
+    for games in logs.values():
+        for g in games:
+            periods.setdefault(g["team"], set()).add(g["period"])
+    out = {}
+    for pid, games in logs.items():
+        last = sorted(periods.get(games[-1]["team"], ()))[-team_games:]
+        if last:
+            out[pid] = [g for g in games if g["period"] >= last[0]]
     return out
 
 
@@ -90,25 +111,30 @@ def run(season: int) -> None:
     engine = P.ProjectionEngine(snap)  # loads the learned prior strengths
     pre = preseason(season, set(players))
     logs = {pid: g for pid, g in logs.items() if pid in pre}
+    closing = closing_games(season_logs(season - 1))
     fp = engine.fp_scoring.fantasy_points
 
-    print(f"\n{season - 1}-{str(season)[2:]}: {len(players)} players with {MIN_GAMES}+ games")
+    print(f"\n{season - 1}-{str(season)[2:]}: {len(players)} players with {MIN_GAMES}+ games, "
+          f"{sum(1 for pid in logs if closing.get(pid))} with closing games from {season - 2}-{str(season - 1)[2:]}")
     print(f"{'settings':<22}{'mean error':>11}" + "".join(f"{f'after {c}':>10}" for c in CUTOFFS))
-    saved = (P.RATE_HALF_LIFE_GAMES, P.MINUTES_HALF_LIFE_GAMES, P.PRIOR_STRENGTH_SCALE)
-    for name, (rate_hl, min_hl, scale) in SETTINGS.items():
-        P.RATE_HALF_LIFE_GAMES, P.MINUTES_HALF_LIFE_GAMES, P.PRIOR_STRENGTH_SCALE = rate_hl, min_hl, scale
+    saved = {k: getattr(P, k) for changes in SETTINGS.values() for k in changes}
+    for name, changes in SETTINGS.items():
+        for k, v in {**saved, **changes}.items():
+            setattr(P, k, v)
         errors = []
         for c in CUTOFFS:
             err = []
             for pid, games in logs.items():
                 if len(games) - c < MIN_LEFT:
                     continue
-                seen = players[pid].model_copy(update={"recent_games": [GameLog(**g) for g in games[:c]]})
+                seen = [GameLog(**g) for g in closing.get(pid, []) + games[:c]]
                 actual = statistics.fmean(fp(g["stats"]) for g in games[c:])
-                err.append(abs(engine._in_season(seen, pre[pid]).fp_pg - actual))
+                err.append(abs(engine._in_season(players[pid].model_copy(update={"recent_games": seen}), pre[pid]).fp_pg
+                               - actual))
             errors.append(statistics.fmean(err))
         print(f"{name:<22}{statistics.fmean(errors):>11.3f}" + "".join(f"{e:>10.2f}" for e in errors))
-    P.RATE_HALF_LIFE_GAMES, P.MINUTES_HALF_LIFE_GAMES, P.PRIOR_STRENGTH_SCALE = saved
+    for k, v in saved.items():
+        setattr(P, k, v)
 
 
 def main() -> None:

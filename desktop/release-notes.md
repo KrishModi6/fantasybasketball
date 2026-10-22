@@ -1,9 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.2.2
+## What's new in 0.2.3
 
-- **Much bigger AI allowance.** Each computer can now make about three times as many assistant requests a day (450 model calls, roughly 110-220 questions), and the app's hourly cap went from 30 to 100 questions. If you add your own OpenAI key on the Assistant tab, there's no hourly cap at all.
-- Projection weighting was re-checked against every game of the last two seasons. Leaning harder on the latest games made projections less accurate, so the model is unchanged.
+- **Projected points by week for every team.** Power rankings now has a grid of each team's projected points for every remaining week, with this week counting the points already scored. Switch it to **Win odds** to see each team's chance against that week's opponent. Hover a cell for the opponent and range.
+- **Projections start at 2024-25.** The statistical baseline now uses only the last two seasons (2024-25 and 2025-26) instead of three, and player pages show seasons from 2024-25 on. Retested on past seasons, this was slightly more accurate.
+- **Recent games count from day one.** Until this season has enough games, each player's last 10 games of 2025-26 also feed the projection, at a quarter of the weight of a game this season. Replaying the last two seasons, this made early-season projections about 1% more accurate. The **Last 10** column and the player page now include those games too, so they aren't blank in the first week.
+- **Update checks at least once a day.** Courtside already checked when it opened and every 4 hours, but those timers pause while the computer sleeps. It now also checks when your computer wakes up or when you come back to Courtside after a few hours, so a new version shows up within a day.
 
 Already on 0.2.0 or later? This update installs itself. Restart Courtside when it asks.
 

@@ -3,13 +3,15 @@
 Order of operations for every player (each step is recorded for the UI):
 
   1. Preseason sources
-       SPS     3-season weighted, regressed, age-adjusted rates (baseline.py)
+       SPS     2-season weighted, regressed, age-adjusted rates (baseline.py)
        ESPN    published preseason projection, when available
        ML      LightGBM residual model over the SPS baseline (ml/model.py)
      combined with convex weights learned in the backtest (scripts/train_model.py).
   2. In-season update. Gamma-Poisson shrinkage: the preseason rate acts as K
      minutes of prior evidence (K per stat, estimated from backtest error), and
-     this season's games are added with exponential recency decay.
+     this season's games are added with exponential recency decay. Early in a
+     season, last season's closing games are added too, behind this season's
+     and at a reduced weight.
   3. Bounded adjustments (news layer). Only structured signals are used and
      each is capped:
        injury status / return date -> games missed (availability only)
@@ -56,6 +58,14 @@ MINUTES_PRIOR_GAMES = 8.0
 RATE_HALF_LIFE_GAMES = 25.0
 MINUTES_HALF_LIFE_GAMES = 10.0
 PRIOR_STRENGTH_SCALE = 1.0  # multiplier on the learned per-stat prior strengths (the backtest tests 2.0)
+# Last season's closing games. ESPN returns each player's last 20 team games, so for the first weeks of a
+# season they reach back into the previous one. They are already inside last season's line in the
+# preseason projection, so the last 10 count at a quarter of a current game's weight, as the oldest
+# evidence. In the same backtest this cut the error 0.8% (1.1% over each player's first 0-3 games) and
+# helped in both seasons; half weight or all 20 games did better in 2025-26 but worse in 2024-25.
+CARRYOVER_GAMES = 10
+CARRYOVER_RATE_WEIGHT = 0.25
+CARRYOVER_MINUTES_WEIGHT = 0.25
 POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
 
 INJURY_DEFAULT_GAMES = {
@@ -107,6 +117,8 @@ class PlayerProjection:
     adjustments: list[Adjustment] = field(default_factory=list)
     ml_explanation: list[dict] = field(default_factory=list)
     in_season_weight: float = 0.0
+    carryover_games: int = 0  # last season's closing games in the update
+    carryover_weight: float = 0.0
     flags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -264,10 +276,10 @@ class ProjectionEngine:
         prior_mpg = blend["mpg"]
 
         games = [g for g in p.recent_games if g.season == self.season]
+        carry = [g for g in p.recent_games if g.season == self.season - 1][-CARRYOVER_GAMES:]
         cur = p.current if p.current and p.current.season == self.season else None
         obs_tot = {k: 0.0 for k in RATE_STATS}
         obs_min = 0.0
-        w_games = 0.0
         w_minutes_sum = 0.0
         mins_prior_w = 0.0
         # Most recent game is index 0 in the decay.
@@ -296,6 +308,17 @@ class ProjectionEngine:
             wm = _decay(len(games) + extra_gp / 2, MINUTES_HALF_LIFE_GAMES)
             w_minutes_sum += wm * extra_min
             mins_prior_w += wm * extra_gp
+        # Last season's closing games continue the decay behind everything from this season.
+        season_min = obs_min
+        seen = max(len(games), int(cur.gp) if cur else 0)
+        for i, g in enumerate(reversed(carry)):
+            w = CARRYOVER_RATE_WEIGHT * _decay(seen + i, RATE_HALF_LIFE_GAMES)
+            for k, v in line_rates_from_game(g.stats).items():
+                obs_tot[k] += w * v
+            obs_min += w * g.minutes
+            wm = CARRYOVER_MINUTES_WEIGHT * _decay(seen + i, MINUTES_HALF_LIFE_GAMES)
+            w_minutes_sum += wm * g.minutes
+            mins_prior_w += wm
 
         rates = {}
         w_min = pre["feats"].get("w_min", 0.0)
@@ -304,14 +327,16 @@ class ProjectionEngine:
             rates[k] = (K * prior_rates[k] + obs_tot[k]) / (K + obs_min)
         mpg = (MINUTES_PRIOR_GAMES * prior_mpg + w_minutes_sum) / (MINUTES_PRIOR_GAMES + mins_prior_w)
         k_avg = float(np.mean([self._prior_k(k, w_min) for k in ("FGM", "REB", "AST")]))
-        in_season_weight = obs_min / (obs_min + k_avg) if obs_min else 0.0
+        in_season_weight = season_min / (obs_min + k_avg) if obs_min else 0.0
+        carryover_weight = (obs_min - season_min) / (obs_min + k_avg) if obs_min else 0.0
 
         per_game = per_game_from_rates(rates, mpg)
         pre_pg = per_game_from_rates(prior_rates, prior_mpg)
         season_fp = None
         if cur and cur.gp > 0:
             season_fp = self._fp({k: v / cur.gp for k, v in cur.stats.items()})
-        last10 = games[-10:]
+        # Last 10 games, reaching back into last season while this one is young.
+        last10 = (carry + games)[-10:]
         recent_fp = float(np.mean([self._fp(g.stats) for g in last10])) if len(last10) >= 3 else None
 
         # Game-to-game volatility: shrink observed SD (this + last season logs) to the population CV.
@@ -332,6 +357,8 @@ class ProjectionEngine:
             fp_pg=fp, fp_sd=sd, preseason_fp_pg=self._fp(pre_pg), season_fp_pg=season_fp,
             recent_fp_pg=recent_fp, games_played=int(cur.gp) if cur else 0,
             sources=pre["sources"], in_season_weight=in_season_weight,
+            carryover_games=len(carry) if CARRYOVER_RATE_WEIGHT or CARRYOVER_MINUTES_WEIGHT else 0,
+            carryover_weight=carryover_weight,
         )
 
     def explain(self, pr: PlayerProjection) -> list[dict]:
