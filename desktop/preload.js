@@ -1,5 +1,6 @@
-// Exposes a tiny, read-only bridge: the server address, whether it is the bundled engine, and app metadata.
-const { contextBridge } = require("electron");
+// Exposes a small bridge: the server address, whether it is the bundled engine, app metadata, and
+// auto-update status (read it, follow changes, install a downloaded update, open the download page).
+const { contextBridge, ipcRenderer } = require("electron");
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -11,4 +12,14 @@ contextBridge.exposeInMainWorld("courtside", {
   version: arg("courtside-version"),
   platform: process.platform,
   local: arg("courtside-local") === "1", // talking to the engine bundled with this app
+  updates: {
+    state: () => ipcRenderer.invoke("courtside:update-state"),
+    install: () => ipcRenderer.invoke("courtside:update-install"),
+    download: () => ipcRenderer.invoke("courtside:update-download"),
+    onChange: (callback) => {
+      const listener = (_event, state) => callback(state);
+      ipcRenderer.on("courtside:update", listener);
+      return () => ipcRenderer.removeListener("courtside:update", listener);
+    },
+  },
 });

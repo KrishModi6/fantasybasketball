@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { InvitePanel } from "../components/Invite";
 import { useLeagueCtx } from "../components/Layout";
 import { Dialog, ErrorBox, Notice, PageHead, Panel } from "../components/ui";
 import { api } from "../lib/api";
@@ -8,7 +9,6 @@ import { useAuth } from "../lib/auth";
 import { fmt0, record, relTime, shortDate, sourceLabel } from "../lib/format";
 import { useMembers } from "../lib/queries";
 import { useToast } from "../lib/toast";
-import type { Invite } from "../lib/types";
 
 export default function LeagueHubPage() {
   const { league } = useLeagueCtx();
@@ -23,7 +23,7 @@ export default function LeagueHubPage() {
           <Rules />
         </div>
         <div className="stack">
-          {isOwner ? <Invites /> : <Panel title="Invites"><p className="small muted">Only the league owner can create invite links.</p></Panel>}
+          {isOwner ? <InvitePanel league={league} /> : <Panel title="Invites"><p className="small muted">Only the league owner can invite people.</p></Panel>}
           <Members />
           {isOwner && <OwnerSettings />}
           <Leave />
@@ -130,60 +130,6 @@ function Rules() {
   );
 }
 
-function Invites() {
-  const { league } = useLeagueCtx();
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [copied, setCopied] = useState<string | null>(null);
-  const { data } = useQuery({ queryKey: ["league", league.id, "invites"], queryFn: () => api<Invite[]>(`/api/leagues/${league.id}/invites`) });
-  const create = useMutation({
-    mutationFn: () => api<Invite>(`/api/leagues/${league.id}/invites`, { body: { expires_in_days: 30 } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["league", league.id, "invites"] }),
-    onError: (e: Error) => toast(e.message, "err"),
-  });
-  const revoke = useMutation({
-    mutationFn: (code: string) => api(`/api/leagues/${league.id}/invites/${code}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["league", league.id, "invites"] }),
-  });
-  const link = (inv: Invite) => (window.location.protocol.startsWith("http") ? `${window.location.origin}/join/${inv.code}` : inv.url);
-  const copy = async (inv: Invite) => {
-    try {
-      await navigator.clipboard.writeText(link(inv));
-      setCopied(inv.code);
-      setTimeout(() => setCopied(null), 1500);
-    } catch {
-      toast(`Copy failed. The code is ${inv.code}.`, "err");
-    }
-  };
-  return (
-    <Panel title="Invites" flush note="Anyone with a link can create an account, join and claim a team. Links expire after 30 days."
-      actions={<button className="btn primary" onClick={() => create.mutate()} disabled={create.isPending}>New invite</button>}>
-      {data && data.length === 0 ? <p className="small muted" style={{ padding: "0 10px 10px" }}>No active invites.</p> : (
-        <div className="table-wrap">
-          <table className="data">
-            <thead><tr><th>Code</th><th className="n">Joined</th><th>Expires</th><th /></tr></thead>
-            <tbody>
-              {data?.map((inv) => (
-                <tr key={inv.code}>
-                  <td className="mono">{inv.code}</td>
-                  <td className="n">{inv.uses}</td>
-                  <td className="muted">{shortDate(inv.expires_at)}</td>
-                  <td className="n">
-                    <div className="row" style={{ justifyContent: "flex-end" }}>
-                      <button className="btn" onClick={() => copy(inv)}>{copied === inv.code ? "Copied" : "Copy link"}</button>
-                      <button className="btn danger" onClick={() => revoke.mutate(inv.code)} aria-label={`Revoke ${inv.code}`}>Revoke</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Panel>
-  );
-}
-
 function Members() {
   const { league, teams, teamName } = useLeagueCtx();
   const { user } = useAuth();
@@ -256,7 +202,7 @@ function OwnerSettings() {
     mutationFn: () => api(`/api/leagues/${league.id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leagues"] });
-      nav("/");
+      nav("/leagues", { replace: true });
     },
   });
   return (
@@ -271,7 +217,10 @@ function OwnerSettings() {
         </div>
         {league.source === "espn" && (
           <>
-            <p className="small muted">ESPN league <span className="mono">{league.connector.espn_league_id}</span>, {league.connector.has_cookies ? "private (cookies stored)" : "public"}.</p>
+            <p className="small muted">
+              ESPN league <span className="mono">{league.connector.espn_league_id}</span>, {league.connector.has_cookies ? "private (cookies stored)" : "public"}
+              {league.connector.shared_by ? `, connected with an invite code from ${league.connector.shared_by}` : ""}.
+            </p>
             <div className="form-grid">
               <div className="field"><label htmlFor="s2u">Replace espn_s2</label><input id="s2u" className="input mono" value={s2} onChange={(e) => setS2(e.target.value)} autoComplete="off" /></div>
               <div className="field"><label htmlFor="swu">Replace SWID</label><input id="swu" className="input mono" value={swid} onChange={(e) => setSwid(e.target.value)} autoComplete="off" /></div>
@@ -305,7 +254,7 @@ function Leave() {
     mutationFn: () => api(`/api/leagues/${league.id}/members/${user!.id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leagues"] });
-      nav("/");
+      nav("/leagues", { replace: true });
     },
   });
   if (league.me?.role === "owner") return null;

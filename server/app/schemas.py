@@ -57,6 +57,28 @@ class InviteCreate(BaseModel):
     max_uses: int | None = Field(default=None, ge=1, le=100)
 
 
+class ShareCodeIn(BaseModel):
+    team_id: int | None = None  # the team whoever joins with this code will manage; None lets them pick
+
+
+class JoinCodeIn(BaseModel):
+    code: str = Field(min_length=8, max_length=65_536)
+
+
+class SharedLeague(BaseModel):
+    """What a league code carries: enough for another copy of Courtside to connect the same league."""
+    v: Literal[1] = 1
+    source: Literal["espn", "demo", "file"]
+    name: str = Field(min_length=1, max_length=120)
+    season: int = Field(ge=2018, le=2035)
+    by: str | None = Field(default=None, max_length=80)
+    team_id: int | None = None
+    espn: EspnConfig | None = None
+    team_count: int = Field(default=10, ge=4, le=12)
+    seed: int = 7
+    spec: dict | None = None
+
+
 class ClaimTeam(BaseModel):
     team_id: int | None
 

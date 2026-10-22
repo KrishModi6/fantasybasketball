@@ -57,7 +57,8 @@ npm start
 
 - **Windows:** `npm run dist:win` → `desktop/release/Courtside-Setup-<version>.exe` (builds and self-tests the engine first).
 - **macOS:** `npm run dist:mac` on a Mac → `Courtside-<version>-mac-arm64.zip`, ad-hoc signed. Without an Apple Developer ID, friends approve it once under System Settings > Privacy & Security.
-- **Releases:** push a tag like `v0.1.0` (matching `desktop/package.json`) and `.github/workflows/release.yml` builds both, self-tests a real Windows install, and publishes a GitHub release with [these notes](desktop/release-notes.md).
+- **Releases:** bump the version in `desktop/package.json`, then push a matching tag like `v0.2.0`. `.github/workflows/release.yml` builds both, self-tests a real Windows install, and publishes a GitHub release with [these notes](desktop/release-notes.md) and the update feed (`latest.yml`, `latest-mac.yml`, `.blockmap` files).
+- **Auto-update:** installed apps check the newest GitHub release shortly after launch and every 4 hours (`electron-updater`). On Windows the update downloads in the background; people get a "Restart now" prompt, or it installs the next time they close the app. The Mac app is only ad-hoc signed, and macOS won't install updates that aren't signed with an Apple Developer ID, so Macs show a "new version" banner with a Download button instead. Help > Check for updates… checks on demand. Logs: `updates.log` next to the engine log.
 
 Without a bundled engine (plain `npm start` before `npm run build:engine`), the app connects to a Courtside server instead: `COURTSIDE_SERVER`, or `http://localhost:8000`.
 
@@ -111,7 +112,7 @@ docs/              methodology, API, user guide, admin guide, connectors
 ## Tests
 
 ```bash
-cd server && .venv/Scripts/python -m pytest      # 37 tests (the API test needs internet once; ESPN data is cached)
+cd server && .venv/Scripts/python -m pytest      # 40 tests (the API test needs internet once; ESPN data is cached)
 cd web && npm test && npm run typecheck           # 11 tests
 cd cloudflare/ai-proxy && npm test                # 7 tests: the AI proxy against SQLite and a stubbed OpenAI
 cd server && .venv/Scripts/python engine.py --self-test   # the desktop engine end to end

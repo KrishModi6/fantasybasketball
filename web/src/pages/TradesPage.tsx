@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, SubTabs, Tag } from "../components/ui";
 import { askPath } from "../lib/ai";
@@ -23,7 +23,14 @@ const verdictTone = (v: TradeSide["verdict"]) => (v === "advantageous" ? "up" : 
 
 export default function TradesPage() {
   const { myTeamId, teams } = useLeagueCtx();
-  const [tab, setTab] = useState<Tab>("analyze");
+  // The tool lives in the URL so Back (or reopening the app) returns to the same one.
+  const [search, setSearch] = useSearchParams();
+  const tab = (search.get("tab") as Tab) || "analyze";
+  const setTab = (t: Tab) => {
+    const next = new URLSearchParams(search);
+    next.set("tab", t);
+    setSearch(next, { replace: true });
+  };
   const [autoRun, setAutoRun] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => ({
     a: myTeamId ?? teams[0]?.id ?? null,

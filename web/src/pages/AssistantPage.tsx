@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLeagueCtx } from "../components/Layout";
 import { Markdown } from "../components/Markdown";
-import { Empty, LoadingBlock, Notice, PageHead, Panel, Tag } from "../components/ui";
+import { Empty, ErrorBox, LoadingBlock, Notice, PageHead, Panel, Tag } from "../components/ui";
 import { TOOL_LABELS } from "../lib/ai";
-import { api, isDesktop } from "../lib/api";
+import { api, isLocalApp } from "../lib/api";
 import { useAiStatus } from "../lib/queries";
-import type { AiAnswer } from "../lib/types";
+import { useToast } from "../lib/toast";
+import type { AiAnswer, AiStatus } from "../lib/types";
 
 const PRESETS = [
   { key: "waivers", title: "Waiver pickups", desc: "Best adds for the rest of the season and streams for this week, with who to drop." },
@@ -42,6 +44,62 @@ function saveTurns(leagueId: string, turns: Turn[]) {
   } catch {
     /* storage unavailable: the thread just won't survive a reload */
   }
+}
+
+/** The user's own OpenAI key: optional when the app has a shared AI service, required when it doesn't. */
+function OwnKeyPanel({ status }: { status: AiStatus }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [key, setKey] = useState("");
+  const update = (s: AiStatus) => {
+    qc.setQueryData(["ai-status"], s);
+    setKey("");
+  };
+  const save = useMutation({
+    mutationFn: () => api<AiStatus>("/api/ai/key", { method: "PUT", body: { api_key: key.trim() } }),
+    onSuccess: (s) => {
+      update(s);
+      toast("OpenAI key saved. The assistant now uses it.");
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api<AiStatus>("/api/ai/key", { method: "DELETE" }),
+    onSuccess: (s) => {
+      update(s);
+      toast("OpenAI key removed.");
+    },
+    onError: (e: Error) => toast(e.message, "err"),
+  });
+  if (status.own_key) {
+    return (
+      <Panel title="Your OpenAI key">
+        <div className="form">
+          <p className="small">
+            The assistant uses your key ending in <span className="mono">…{status.own_key_hint}</span>. Questions go straight to OpenAI and are billed to your account.
+          </p>
+          <div><button className="btn" onClick={() => remove.mutate()} disabled={remove.isPending}>Remove key</button></div>
+        </div>
+      </Panel>
+    );
+  }
+  return (
+    <Panel title="Your OpenAI key">
+      <form className="form" onSubmit={(e) => { e.preventDefault(); if (key.trim()) save.mutate(); }}>
+        <p className="small muted">
+          {status.shared ? "Optional. Without one, the assistant uses Courtside's shared AI service, which has a daily limit. " : "Paste an OpenAI API key to turn the assistant on. "}
+          Create one at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">platform.openai.com/api-keys</a>.
+        </p>
+        <div className="field">
+          <label htmlFor="oak">API key</label>
+          <input id="oak" className="input mono" type="password" value={key} onChange={(e) => setKey(e.target.value)}
+            placeholder="sk-…" autoComplete="off" spellCheck={false} />
+          <span className="hint">Stored encrypted {isLocalApp() ? "on this computer" : "on the Courtside server"} and used only for your questions.</span>
+        </div>
+        {save.error && <ErrorBox error={save.error} />}
+        <div><button className="btn primary" type="submit" disabled={!key.trim() || save.isPending}>{save.isPending ? "Checking key…" : "Save key"}</button></div>
+      </form>
+    </Panel>
+  );
 }
 
 function Elapsed() {
@@ -123,9 +181,10 @@ export default function AssistantPage() {
     setDraft("");
   };
 
-  const offMessage = isDesktop()
-    ? "The assistant isn't available in this build of the app. Download the latest release to use it."
-    : "The assistant isn't set up on this server yet. The server owner can add an OpenAI key or connect the Courtside AI proxy (see docs/AI.md).";
+  const offMessage = isLocalApp()
+    ? "The assistant needs an OpenAI key. Add yours under Your OpenAI key."
+    : "The assistant isn't set up on this server yet. Add your own OpenAI key under Your OpenAI key, or the server owner can set one up for everyone (see docs/AI.md).";
+  const via = status.data?.own_key ? "with your key" : status.data?.mode === "proxy" ? "through Courtside's AI service" : "with the server's key";
 
   return (
     <div className="stack">
@@ -153,6 +212,9 @@ export default function AssistantPage() {
                 <div className="turn-q"><span className="who">You</span><span>{t.prompt}</span></div>
                 {t.answer && <Markdown text={t.answer} />}
                 {t.error && <Notice level="error">{t.error}</Notice>}
+                {t.error && status.data?.mode === "proxy" && (
+                  <p className="small muted">You can also add your own OpenAI key (Your OpenAI key panel) to skip the shared service.</p>
+                )}
                 {!t.answer && !t.error && (
                   <div className="turn-wait">
                     <span className="small muted">Running Courtside's numbers… <Elapsed /></span>
@@ -186,6 +248,7 @@ export default function AssistantPage() {
         </Panel>
 
         <div className="stack">
+          {status.data && !enabled && <OwnKeyPanel status={status.data} />}
           <Panel title="Quick questions" flush>
             <ul className="list presets">
               {PRESETS.filter((p) => !status.data || status.data.presets.includes(p.key)).map((p) => (
@@ -208,8 +271,9 @@ export default function AssistantPage() {
               <li>Matchup simulations, including benching players</li>
               <li>Recent news and injuries (context only)</li>
             </ul>
-            <p className="panel-foot">Your question and the tool results needed to answer it are sent to OpenAI through Courtside's AI service. Nothing else from your league leaves the app.</p>
+            <p className="panel-foot">Your question and the tool results needed to answer it are sent to OpenAI {via}. Nothing else from your league leaves the app.</p>
           </Panel>
+          {status.data && enabled && <OwnKeyPanel status={status.data} />}
         </div>
       </div>
     </div>

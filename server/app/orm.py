@@ -41,6 +41,17 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class UserSettings(Base):
+    """Per-user secrets, such as the user's own OpenAI key (Fernet-encrypted JSON).
+
+    A separate table so existing databases pick it up through create_all, with no migration.
+    """
+    __tablename__ = "user_settings"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class League(Base):
     __tablename__ = "leagues"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)

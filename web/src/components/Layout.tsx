@@ -1,14 +1,16 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useIsFetching, useMutation, useQueryClient } from "@tanstack/react-query";
-import { LogOut, Moon, RefreshCw, Sun } from "lucide-react";
+import { ArrowLeft, LogOut, Moon, RefreshCw, Sun } from "lucide-react";
 import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
+import { canGoBack, rememberPath } from "../lib/nav";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
 import { useLeagueSocket, useRefreshOnSync } from "../lib/realtime";
 import { useToast } from "../lib/toast";
 import type { League, TeamRef } from "../lib/types";
+import { InviteButton } from "./Invite";
 import { PlayerDrawer } from "./PlayerDrawer";
 import { ErrorBox, LoadingBlock, Notice } from "./ui";
 
@@ -37,6 +39,20 @@ export function ThemeToggle() {
   return (
     <button className="btn ghost icon" onClick={flip} aria-label={`Switch to ${light ? "dark" : "light"} theme`} title="Theme">
       {light ? <Moon /> : <Sun />}
+    </button>
+  );
+}
+
+/** Steps back through in-app history; with none (e.g. just after launch), goes to `fallback` instead. */
+export function BackButton({ fallback }: { fallback?: string }) {
+  const nav = useNavigate();
+  const { pathname } = useLocation(); // re-renders on every navigation, so the button state stays current
+  const back = canGoBack();
+  const target = !back && fallback && fallback.replace(/\/$/, "") !== pathname.replace(/\/$/, "") ? fallback : null;
+  return (
+    <button className="btn ghost icon" onClick={() => (back ? nav(-1) : target && nav(target))} disabled={!back && !target}
+      aria-label="Back" title="Back">
+      <ArrowLeft />
     </button>
   );
 }
@@ -92,9 +108,9 @@ function LeagueSwitch({ current }: { current: League | undefined }) {
   const nav = useNavigate();
   return (
     <select className="select league-select" aria-label="League" value={current?.id ?? ""}
-      onChange={(e) => nav(e.target.value ? `/l/${e.target.value}` : "/")}>
+      onChange={(e) => nav(e.target.value ? `/l/${e.target.value}` : "/leagues")}>
       {data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-      <option value="">All leagues…</option>
+      <option value="">All leagues / add a league…</option>
     </select>
   );
 }
@@ -135,6 +151,8 @@ export function LeagueLayout() {
   const { data: model } = useModelCard();
   const { user, signOut } = useAuth();
   const [search, setSearch] = useSearchParams();
+  const loc = useLocation();
+  useEffect(() => rememberPath(loc.pathname, loc.search), [loc.pathname, loc.search]);
   useLeagueSocket(leagueId);
   useRefreshOnSync(leagueId, league ? league.sync.last_synced_at : undefined);
 
@@ -179,11 +197,13 @@ export function LeagueLayout() {
       <a className="skip-link" href="#main">Skip to content</a>
       <FetchLine />
       <header className="topbar">
-        <Link to="/" className="brand" aria-label="All leagues"><BrandMark /> <span className="hide-sm">Courtside</span></Link>
+        <BackButton fallback={base} />
+        <Link to={base} className="brand" aria-label="League home" title="League home"><BrandMark /> <span className="hide-sm">Courtside</span></Link>
         <LeagueSwitch current={league} />
         {league && <span className="small muted hide-sm">{league.season - 1}–{String(league.season).slice(2)}{s ? ` · Week ${s.current_matchup_period}` : ""}</span>}
         <span className="spacer" />
         {league && <SyncStatus league={league} />}
+        {league && <InviteButton league={league} />}
         <ThemeToggle />
         {!isLocalApp() && (
           <>
@@ -225,6 +245,7 @@ export function LeagueLayout() {
         {league && <span>{sourceLabel[league.source]} data, synced {relTime(league.sync.last_synced_at)}</span>}
         {model?.trained && <span>Model trained through {model.trained_through ? `${model.trained_through - 1}–${String(model.trained_through).slice(2)}` : "–"}</span>}
         <span>{league?.me?.role === "owner" ? "League owner" : "Member"}</span>
+        {window.courtside?.version && <span>Courtside {window.courtside.version}</span>}
       </footer>
     </div>
   );

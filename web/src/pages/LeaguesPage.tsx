@@ -2,11 +2,12 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LogOut } from "lucide-react";
-import { BrandMark, FetchLine, ThemeToggle } from "../components/Layout";
+import { BackButton, BrandMark, FetchLine, ThemeToggle } from "../components/Layout";
 import { Empty, ErrorBox, LoadingBlock, Panel, SubTabs, Tag } from "../components/ui";
 import { api, isLocalApp, serverUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { relTime, sourceLabel } from "../lib/format";
+import { canGoBack } from "../lib/nav";
 import { useLeagues } from "../lib/queries";
 import type { League } from "../lib/types";
 
@@ -16,11 +17,14 @@ export function LeaguesPage() {
   const { user, signOut } = useAuth();
   const { data, isLoading, error } = useLeagues();
   const nav = useNavigate();
-  const [mode, setMode] = useState<Mode>("espn");
+  const [picked, setMode] = useState<Mode | null>(null);
+  // Most people opening a fresh copy of the desktop app were sent an invite code by their league owner.
+  const mode = picked ?? (isLocalApp() && data?.length === 0 ? "join" : "espn");
   return (
     <div className="standalone">
       <FetchLine />
       <header className="topbar">
+        {canGoBack() && <BackButton />}
         <span className="brand"><BrandMark /> Courtside</span>
         <span className="small muted">Leagues</span>
         <span className="spacer" />
@@ -36,7 +40,11 @@ export function LeaguesPage() {
         <Panel title="Your leagues" flush>
           {isLoading && <div style={{ padding: 10 }}><LoadingBlock rows={3} /></div>}
           {error && <div style={{ padding: 10 }}><ErrorBox error={error} /></div>}
-          {data && data.length === 0 && <Empty title="No leagues yet">Connect an ESPN league, import rosters from a file, or create a demo league below.</Empty>}
+          {data && data.length === 0 && (
+            <Empty title="No leagues yet">
+              Got an invite from your league owner? Paste it under Join with invite. Otherwise connect your ESPN league, import rosters from a file, or try a demo league.
+            </Empty>
+          )}
           {data && data.length > 0 && (
             <div className="table-wrap">
               <table className="data">
@@ -181,14 +189,35 @@ function FileForm() {
 
 function JoinForm() {
   const nav = useNavigate();
-  const [code, setCode] = useState("");
+  const qc = useQueryClient();
+  const [text, setText] = useState("");
+  const join = useMutation({
+    mutationFn: (code: string) => api<League>("/api/join-code", { body: { code } }),
+    onSuccess: (lg) => {
+      qc.invalidateQueries({ queryKey: ["leagues"] });
+      nav(`/l/${lg.id}`);
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    // A league code (CS1.…) may arrive inside the owner's whole invite message; it's always last.
+    const at = text.indexOf("CS1.");
+    if (at >= 0) return join.mutate(text.slice(at));
+    const c = text.trim().split("/").pop();
+    if (c) nav(`/join/${c.toUpperCase()}`);
+  };
   return (
-    <form className="form" onSubmit={(e) => { e.preventDefault(); const c = code.trim().split("/").pop(); if (c) nav(`/join/${c.toUpperCase()}`); }}>
-      <div className="field" style={{ maxWidth: 360 }}>
+    <form className="form" onSubmit={submit}>
+      <p className="small muted">
+        Paste the invite your league owner sent you. The whole message is fine. Courtside connects the league for you, with no league ID or ESPN cookies to look up.
+      </p>
+      <div className="field">
         <label htmlFor="code">Invite code or link</label>
-        <input id="code" className="input mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="7KQ2MZ4P" required />
+        <textarea id="code" className="input mono code-box" rows={3} value={text} onChange={(e) => setText(e.target.value)}
+          placeholder="CS1.… or 7KQ2MZ4P" required spellCheck={false} />
       </div>
-      <div><button className="btn primary">Continue</button></div>
+      {join.error && <ErrorBox error={join.error} />}
+      <div><button className="btn primary" type="submit" disabled={join.isPending}>{join.isPending ? "Connecting league…" : "Join league"}</button></div>
     </form>
   );
 }

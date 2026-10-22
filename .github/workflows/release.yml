@@ -2,7 +2,11 @@ name: Build desktop app
 
 # Builds the Courtside desktop app for Windows and macOS with the projection engine bundled,
 # self-tests the engine in the build and in a real Windows installation, and attaches the
-# installers to a GitHub release.
+# installers to a GitHub release, with the files installed apps check for updates
+# (latest.yml, latest-mac.yml and the .blockmap files for partial downloads).
+#
+# Installed apps update from the newest published release, so bump desktop/package.json's version
+# for every release: an app only updates to a higher version than its own.
 #
 # Publish: push a tag that matches desktop/package.json's version (v0.1.0), or run this workflow
 # from the Actions tab with "Publish" ticked. Otherwise the files are kept as run artifacts only.
@@ -109,7 +113,17 @@ jobs:
           if-no-files-found: error
           path: |
             desktop/release/Courtside-Setup-*.exe
+            desktop/release/Courtside-Setup-*.exe.blockmap
+            desktop/release/latest.yml
             desktop/release/Courtside-*-mac-*.zip
+            desktop/release/Courtside-*-mac-*.zip.blockmap
+            desktop/release/latest-mac.yml
+      - name: Check the update feed files
+        shell: bash
+        run: |
+          feed=desktop/release/$([[ "$RUNNER_OS" == "Windows" ]] && echo latest.yml || echo latest-mac.yml)
+          test -f "$feed" || { echo "::error::$feed is missing, so installed apps couldn't see this release."; exit 1; }
+          grep -q "version: ${{ steps.version.outputs.version }}" "$feed" || { echo "::error::$feed has the wrong version"; cat "$feed"; exit 1; }
 
   release:
     needs: build

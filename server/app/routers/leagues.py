@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import zlib
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,7 +20,18 @@ from ..db import get_db
 from ..deps import Membership, current_user, membership, owner_membership
 from ..orm import Activity, Invite, League, LeagueMember, Snapshot, User
 from ..realtime import hub
-from ..schemas import ClaimTeam, InviteCreate, LeagueCreate, LeagueUpdate, MemberUpdate, ScoringUpdate
+from ..schemas import (
+    ClaimTeam,
+    EspnConfig,
+    InviteCreate,
+    JoinCodeIn,
+    LeagueCreate,
+    LeagueUpdate,
+    MemberUpdate,
+    ScoringUpdate,
+    ShareCodeIn,
+    SharedLeague,
+)
 from ..security import decrypt_json, encrypt_json, invite_code
 from ..services.analysis import invalidate, latest_snapshot_row, pack_snapshot, unpack_snapshot
 from ..services.sync import run_sync
@@ -64,7 +79,8 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
                  "last_synced_at": _aware(lg.last_synced_at).isoformat() if lg.last_synced_at else None,
                  "interval_hours": lg.sync_interval_hours},
         "connector": {"espn_league_id": cfg.get("league_id") if lg.source == "espn" else None,
-                      "has_cookies": bool(cfg.get("espn_s2")) if lg.source == "espn" else None},
+                      "has_cookies": bool(cfg.get("espn_s2")) if lg.source == "espn" else None,
+                      "shared_by": cfg.get("shared_by")},
         "me": {"role": me.role, "team_id": me.team_id} if me else None,
         "member_count": len(lg.members),
         "teams": teams,
@@ -85,15 +101,33 @@ def my_leagues(user: User = Depends(current_user), db: Session = Depends(get_db)
     return out
 
 
-def _create(db: Session, user: User, name: str, season: int, source: str, cfg: dict) -> League:
+def _create(db: Session, user: User, name: str, season: int, source: str, cfg: dict,
+            message: str = "created the league") -> League:
     lg = League(name=name, season=season, source=source, owner_id=user.id, connector_config=encrypt_json(cfg),
                 sync_interval_hours=get_settings().sync_interval_hours)
     db.add(lg)
     db.flush()
     db.add(LeagueMember(league_id=lg.id, user_id=user.id, role="owner"))
-    db.add(Activity(league_id=lg.id, kind="league", message=f"{user.display_name} created the league"))
+    db.add(Activity(league_id=lg.id, kind="league", message=f"{user.display_name} {message}"))
     db.commit()
     return lg
+
+
+def _first_sync(db: Session, lg: League, reason: str, keep_on_error: bool = False,
+                fallback_error: str = "Could not read that league") -> None:
+    """Sync a new league inline so the user lands on a populated league (or sees the error immediately)."""
+    run_sync(lg.id, reason=reason)
+    db.refresh(lg)
+    if lg.last_sync_status == "error" and not keep_on_error:
+        err = lg.last_sync_error
+        db.delete(lg)
+        db.commit()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, err or fallback_error)
+    if lg.source == "espn" and lg.name.startswith("ESPN league"):
+        row = latest_snapshot_row(db, lg.id)
+        if row is not None:
+            lg.name = unpack_snapshot(row.data).settings.name[:120]
+            db.commit()
 
 
 @router.post("/leagues", status_code=201)
@@ -112,19 +146,7 @@ def create_league(body: LeagueCreate, user: User = Depends(current_user), db: Se
         cfg = {"team_count": body.team_count, "seed": 7}
         name = body.name or "Demo League"
     lg = _create(db, user, name, body.season, body.source, cfg)
-    # First sync runs inline so the user lands on a populated league (or sees the error immediately).
-    run_sync(lg.id, reason="created")
-    db.refresh(lg)
-    if lg.last_sync_status == "error" and body.source != "demo":
-        err = lg.last_sync_error
-        db.delete(lg)
-        db.commit()
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, err or "Could not read that league")
-    if lg.source == "espn" and lg.name.startswith("ESPN league"):
-        row = latest_snapshot_row(db, lg.id)
-        if row is not None:
-            lg.name = unpack_snapshot(row.data).settings.name[:120]
-            db.commit()
+    _first_sync(db, lg, "created", keep_on_error=body.source == "demo")
     me = db.scalar(select(LeagueMember).where(LeagueMember.league_id == lg.id, LeagueMember.user_id == user.id))
     return league_out(db, lg, me)
 
@@ -142,13 +164,7 @@ async def import_league(file: UploadFile = File(...), name: str = Form("Imported
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(422, f"Couldn't read that file: {exc}") from exc
     lg = _create(db, user, (spec.get("name") or name)[:120], int(spec.get("season") or season), "file", {"spec": spec})
-    run_sync(lg.id, reason="imported")
-    db.refresh(lg)
-    if lg.last_sync_status == "error":
-        err = lg.last_sync_error
-        db.delete(lg)
-        db.commit()
-        raise HTTPException(400, err or "Import failed")
+    _first_sync(db, lg, "imported", fallback_error="Import failed")
     me = db.scalar(select(LeagueMember).where(LeagueMember.league_id == lg.id, LeagueMember.user_id == user.id))
     return league_out(db, lg, me)
 
@@ -376,3 +392,99 @@ def accept_invite(code: str, body: ClaimTeam | None = None, user: User = Depends
         db.commit()
         hub.publish(inv.league_id, {"type": "member_joined", "name": user.display_name})
     return {"league_id": inv.league_id}
+
+
+# ---- league codes (desktop app) -------------------------------------------------
+# Each desktop app runs its own engine, so link invites can't reach anyone else's computer. A league
+# code carries the league's connection instead (for ESPN: the league id and, for private leagues,
+# the owner's cookies), so the person joining connects the same league without finding cookies.
+
+CODE_PREFIX = "CS1."
+MAX_CODE_JSON = 2 * 1024 * 1024
+
+
+def _pack_code(shared: SharedLeague) -> str:
+    raw = zlib.compress(shared.model_dump_json(exclude_none=True).encode(), 9)
+    return CODE_PREFIX + base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _unpack_code(code: str) -> SharedLeague:
+    code = "".join(code.split())  # chat apps wrap long codes across lines
+    start = code.find(CODE_PREFIX)
+    if start < 0:
+        raise HTTPException(422, "That isn't a Courtside league code. League codes start with CS1.")
+    body = code[start + len(CODE_PREFIX):]
+    try:
+        inflate = zlib.decompressobj()
+        raw = inflate.decompress(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)), MAX_CODE_JSON)
+        if inflate.unconsumed_tail or not inflate.eof:
+            raise ValueError("truncated or oversized")
+        shared = SharedLeague.model_validate(json.loads(raw))
+    except (ValueError, zlib.error, ValidationError) as exc:
+        raise HTTPException(422, "That code is incomplete or damaged. Copy the whole code and try again.") from exc
+    if shared.source == "espn" and shared.espn is None:
+        raise HTTPException(422, "That code is incomplete or damaged. Copy the whole code and try again.")
+    return shared
+
+
+def _team_ids(db: Session, league_id: str) -> set[int]:
+    row = latest_snapshot_row(db, league_id)
+    return {t.id for t in unpack_snapshot(row.data).teams} if row is not None else set()
+
+
+@router.post("/leagues/{league_id}/share-code")
+def share_code(body: ShareCodeIn, m: Membership = Depends(owner_membership), db: Session = Depends(get_db)):
+    lg = m.league
+    cfg = decrypt_json(lg.connector_config)
+    if lg.source == "flaim":
+        raise HTTPException(400, "Flaim leagues can't be shared with a code; each member connects their own Flaim token.")
+    if cfg.get("shared_by") and cfg.get("espn_s2"):
+        raise HTTPException(403, f"This league uses {cfg['shared_by']}'s ESPN login, so only they can invite people.")
+    if body.team_id is not None and body.team_id not in _team_ids(db, lg.id):
+        raise HTTPException(404, "No such team in this league")
+    # The desktop app's single local user is called "You", which means nothing to the person joining.
+    by = None if get_settings().local_mode else m.user.display_name
+    shared = SharedLeague(source=lg.source, name=lg.name, season=lg.season, by=by, team_id=body.team_id)
+    if lg.source == "espn":
+        shared.espn = EspnConfig(league_id=cfg["league_id"], espn_s2=cfg.get("espn_s2"), swid=cfg.get("swid"))
+    elif lg.source == "demo":
+        shared.team_count, shared.seed = int(cfg.get("team_count", 10)), int(cfg.get("seed", 7))
+    else:
+        shared.spec = cfg.get("spec", {})
+    return {"code": _pack_code(shared), "includes_login": bool(cfg.get("espn_s2"))}
+
+
+@router.post("/join-code", status_code=201)
+def join_with_code(body: JoinCodeIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    shared = _unpack_code(body.code)
+    by = shared.by or "the league owner"
+    if shared.source == "espn":
+        cfg = {**shared.espn.model_dump(), "shared_by": by}
+    elif shared.source == "demo":
+        cfg = {"team_count": shared.team_count, "seed": shared.seed, "shared_by": by}
+    else:
+        cfg = {"spec": shared.spec or {}, "shared_by": by}
+
+    # Already connected (the code was pasted twice, or the league was added by hand): open that copy, and
+    # if it can't currently read ESPN, switch it to the code's login.
+    lg, me = None, None
+    if shared.source == "espn":
+        for mem in db.scalars(select(LeagueMember).where(LeagueMember.user_id == user.id)).all():
+            old = decrypt_json(mem.league.connector_config)
+            if (mem.league.source == "espn" and mem.league.season == shared.season
+                    and old.get("league_id") == shared.espn.league_id):
+                lg, me = mem.league, mem
+                break
+    if lg is not None:
+        if shared.espn.espn_s2 and me.role == "owner" and lg.last_sync_status == "error":
+            lg.connector_config = encrypt_json(cfg)
+            db.commit()
+            _first_sync(db, lg, "joined", keep_on_error=True)
+    else:
+        lg = _create(db, user, shared.name, shared.season, shared.source, cfg, message="joined with an invite code")
+        _first_sync(db, lg, "joined", keep_on_error=shared.source == "demo")
+        me = db.scalar(select(LeagueMember).where(LeagueMember.league_id == lg.id, LeagueMember.user_id == user.id))
+    if shared.team_id is not None and me.team_id is None and shared.team_id in _team_ids(db, lg.id):
+        me.team_id = shared.team_id
+        db.commit()
+    return league_out(db, lg, me)
