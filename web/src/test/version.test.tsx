@@ -1,0 +1,50 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { VersionBadge } from "../components/VersionBadge";
+import type { UpdateState } from "../lib/api";
+
+function desktop(initial: UpdateState) {
+  let push: (s: UpdateState) => void = () => undefined;
+  const updates = {
+    state: vi.fn(() => Promise.resolve(initial)),
+    install: vi.fn(() => Promise.resolve()),
+    download: vi.fn(() => Promise.resolve()),
+    check: vi.fn(() => Promise.resolve()),
+    onChange: vi.fn((cb: (s: UpdateState) => void) => {
+      push = cb;
+      return () => undefined;
+    }),
+  };
+  window.courtside = { version: "0.2.3", updates };
+  return { updates, push: (s: UpdateState) => act(() => push(s)) };
+}
+
+describe("version label", () => {
+  afterEach(() => {
+    delete window.courtside;
+  });
+
+  it("is hidden on the website", () => {
+    const { container } = render(<VersionBadge />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows the version and checks for updates when clicked", async () => {
+    const { updates } = desktop({ status: "current", current: "0.2.3" });
+    render(<VersionBadge />);
+    const badge = await screen.findByRole("button", { name: "Courtside version 0.2.3, Up to date" });
+    expect(badge).toHaveTextContent("v0.2.3");
+    fireEvent.click(badge);
+    expect(updates.check).toHaveBeenCalledOnce();
+  });
+
+  it("offers the new version once one is out", async () => {
+    const { updates, push } = desktop({ status: "idle" });
+    render(<VersionBadge />);
+    await screen.findByRole("button", { name: "Courtside version 0.2.3" });
+    push({ status: "available", version: "0.2.4", current: "0.2.3" });
+    fireEvent.click(screen.getByRole("button", { name: "Courtside version 0.2.3, 0.2.4 available" }));
+    expect(updates.download).toHaveBeenCalledOnce();
+    expect(updates.check).not.toHaveBeenCalled();
+  });
+});

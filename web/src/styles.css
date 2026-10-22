@@ -235,6 +235,20 @@ th.n {
   background: var(--warn);
   animation: blink 1s infinite;
 }
+.dot.idle {
+  background: var(--faint);
+}
+.dot.new {
+  background: var(--accent);
+}
+.version-badge {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 8px;
+}
+.version-badge.new {
+  color: var(--accent-text);
+}
 @keyframes blink {
   50% {
     opacity: 0.3;

@@ -12,6 +12,7 @@ import { useToast } from "../lib/toast";
 import type { League, TeamRef } from "../lib/types";
 import { InviteButton } from "./Invite";
 import { PlayerDrawer } from "./PlayerDrawer";
+import { VersionBadge } from "./VersionBadge";
 import { ErrorBox, LoadingBlock, Notice } from "./ui";
 
 export function BrandMark({ size = 16 }: { size?: number }) {
@@ -205,6 +206,7 @@ export function LeagueLayout() {
         <span className="spacer" />
         {league && <SyncStatus league={league} />}
         {league && <InviteButton league={league} />}
+        <VersionBadge />
         <ThemeToggle />
         {!isLocalApp() && (
           <>

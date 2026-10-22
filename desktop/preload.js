@@ -1,5 +1,5 @@
 // Exposes a small bridge: the server address, whether it is the bundled engine, app metadata, and
-// auto-update status (read it, follow changes, install a downloaded update, open the download page).
+// auto-update status (read it, follow changes, check now, install a downloaded update, open the download page).
 const { contextBridge, ipcRenderer } = require("electron");
 
 function arg(name) {
@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("courtside", {
     state: () => ipcRenderer.invoke("courtside:update-state"),
     install: () => ipcRenderer.invoke("courtside:update-install"),
     download: () => ipcRenderer.invoke("courtside:update-download"),
+    check: () => ipcRenderer.invoke("courtside:update-check"),
     onChange: (callback) => {
       const listener = (_event, state) => callback(state);
       ipcRenderer.on("courtside:update", listener);
