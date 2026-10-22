@@ -237,7 +237,7 @@ function loadApp(win) {
 }
 
 function publishUpdate(next) {
-  update = { ...next, current: app.getVersion(), canInstall: CAN_INSTALL_UPDATES };
+  update = { checkedAt: update.checkedAt, ...next, current: app.getVersion(), canInstall: CAN_INSTALL_UPDATES };
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("courtside:update", update);
   }
@@ -283,7 +283,7 @@ function setupUpdates() {
   let manual = false; // a check from the Help menu answers "up to date" and errors in a dialog
   autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking" }));
   autoUpdater.on("update-not-available", () => {
-    publishUpdate({ status: "current" });
+    publishUpdate({ status: "current", checkedAt: new Date().toISOString() });
     if (manual) {
       dialog.showMessageBox({ type: "info", title: "Courtside", message: "You're up to date.",
         detail: `Courtside ${app.getVersion()} is the latest version.` });
@@ -291,7 +291,8 @@ function setupUpdates() {
     manual = false;
   });
   autoUpdater.on("update-available", (info) => {
-    publishUpdate({ status: CAN_INSTALL_UPDATES ? "downloading" : "available", version: info.version, percent: 0 });
+    publishUpdate({ status: CAN_INSTALL_UPDATES ? "downloading" : "available", version: info.version, percent: 0,
+      checkedAt: new Date().toISOString() });
     manual = false;
   });
   autoUpdater.on("download-progress", (p) =>
@@ -299,7 +300,7 @@ function setupUpdates() {
   autoUpdater.on("update-downloaded", (info) => publishUpdate({ status: "ready", version: info.version }));
   autoUpdater.on("error", (err) => {
     const message = err?.message ?? String(err);
-    publishUpdate({ status: "error", version: update.version, error: message });
+    publishUpdate({ status: "error", version: update.version, error: message, checkedAt: new Date().toISOString() });
     if (manual) {
       dialog.showMessageBox({ type: "warning", title: "Courtside", message: "Couldn't check for updates.",
         detail: `${message.split("\n")[0]}\n\nThe latest version is always at ${RELEASES_URL}` });
@@ -333,6 +334,13 @@ function setupUpdates() {
   app.on("browser-window-focus", checkIfDue);
 }
 
+// "Check for updates" from the Help menu or the version label: answers in a dialog either way.
+function checkForUpdatesNow() {
+  if (updater) return updater.check(true);
+  return dialog.showMessageBox({ type: "info", title: "Courtside",
+    message: "Updates are checked in installed copies of Courtside.", detail: `Downloads: ${RELEASES_URL}` });
+}
+
 function setupIpc() {
   // Only Courtside's own pages may drive updates.
   const fromApp = (event) => {
@@ -343,6 +351,7 @@ function setupIpc() {
   ipcMain.handle("courtside:update-state", () => update);
   ipcMain.handle("courtside:update-install", (event) => (fromApp(event) ? updater?.install() : undefined));
   ipcMain.handle("courtside:update-download", (event) => (fromApp(event) ? shell.openExternal(RELEASES_URL) : undefined));
+  ipcMain.handle("courtside:update-check", (event) => (fromApp(event) ? checkForUpdatesNow() : undefined));
 }
 
 function buildMenu() {
@@ -364,11 +373,7 @@ function buildMenu() {
     {
       role: "help",
       submenu: [
-        {
-          label: "Check for updates…",
-          click: () => (updater ? updater.check(true) : dialog.showMessageBox({ type: "info", title: "Courtside",
-            message: "Updates are checked in installed copies of Courtside.", detail: `Downloads: ${RELEASES_URL}` })),
-        },
+        { label: "Check for updates…", click: checkForUpdatesNow },
         { label: "Download page", click: () => shell.openExternal(RELEASES_URL) },
         { type: "separator" },
         { label: "Open engine log", click: () => engine && shell.showItemInFolder(engine.logFile) },

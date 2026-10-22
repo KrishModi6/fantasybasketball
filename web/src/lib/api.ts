@@ -12,6 +12,7 @@ export interface UpdateState {
   percent?: number;
   error?: string;
   canInstall?: boolean;
+  checkedAt?: string; // when the last check finished
 }
 
 declare global {
@@ -25,6 +26,7 @@ declare global {
         state: () => Promise<UpdateState>;
         install: () => Promise<void>;
         download: () => Promise<void>;
+        check: () => Promise<void>;
         onChange: (callback: (state: UpdateState) => void) => () => void;
       };
     };

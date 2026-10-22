@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LogOut } from "lucide-react";
 import { BackButton, BrandMark, FetchLine, ThemeToggle } from "../components/Layout";
 import { Empty, ErrorBox, LoadingBlock, Panel, SubTabs, Tag } from "../components/ui";
+import { VersionBadge } from "../components/VersionBadge";
 import { api, isLocalApp, serverUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { relTime, sourceLabel } from "../lib/format";
@@ -28,6 +29,7 @@ export function LeaguesPage() {
         <span className="brand"><BrandMark /> Courtside</span>
         <span className="small muted">Leagues</span>
         <span className="spacer" />
+        <VersionBadge />
         <ThemeToggle />
         {!isLocalApp() && (
           <>
