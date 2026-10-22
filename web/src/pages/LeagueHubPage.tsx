@@ -212,7 +212,7 @@ function OwnerSettings() {
         <div className="field">
           <label htmlFor="iv">Automatic refresh</label>
           <select id="iv" className="select" value={interval} onChange={(e) => setInterval(Number(e.target.value))}>
-            {[2, 4, 6, 8, 12, 24].map((h) => <option key={h} value={h}>Every {h} hours</option>)}
+            {[1, 2, 4, 6, 8, 12, 24].map((h) => <option key={h} value={h}>{h === 1 ? "Every hour" : `Every ${h} hours`}</option>)}
           </select>
         </div>
         {league.source === "espn" && (

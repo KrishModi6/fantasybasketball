@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import type {
   AiStatus,
@@ -81,5 +81,14 @@ export const useActivity = (id: string) =>
 export const useMembers = (id: string) =>
   useQuery({ queryKey: L(id, "members"), queryFn: () => api<Member[]>(`/api/leagues/${id}/members`) });
 export const useModelCard = () => useQuery({ queryKey: ["model"], queryFn: () => api<ModelCard>("/api/model"), staleTime: 3600_000 });
+/** Saves which team the signed-in member manages; every page then defaults to it. */
+export function useClaimTeam(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (teamId: number | null) => api<{ team_id: number | null }>(`/api/leagues/${id}/members/me/team`, { body: { team_id: teamId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: L(id) }),
+  });
+}
+
 export const useAiStatus = () =>
   useQuery({ queryKey: ["ai-status"], queryFn: () => api<AiStatus>("/api/ai/status"), staleTime: 300_000 });

@@ -1,5 +1,14 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
+## What's new in 0.2.1
+
+- **Fantasy weeks match ESPN.** ESPN leagues showed every "week" as a single day, so matchup odds, weekly projections and playoff odds were based on one day. Weeks now match ESPN's calendar, including the two-week NBA Cup and All-Star matchups.
+- **Your team is remembered.** Pick it once (Overview or the Team tab) and every page opens on it. If you connected an ESPN league with your own cookies, Courtside finds your team for you.
+- **Better trade finder.** "Up to 2-for-2" now returns a varied list from several teams, with 2-for-2 deals when one works for both sides.
+- **The league board stays current.** Trades and waiver moves made on ESPN show up in the league feed and under Trades > League board, shared trade ideas are re-scored after every refresh, and data refreshes every hour and whenever you open the app.
+
+Already on 0.2.0? This update installs itself. Restart Courtside when it asks.
+
 ## Install on Windows
 
 1. Download **Courtside-Setup-<version>.exe** below and double-click it.
@@ -24,7 +33,9 @@ When a new version is out, Courtside shows a banner with a **Download** button. 
 
 Got an invite from your league owner? Choose **Join with invite** and paste it. That's all: no league ID or cookies needed.
 
-Setting up your league yourself? Pick **Connect ESPN** and paste your league's URL. Private leagues also need the `espn_s2` and `SWID` cookies from your browser (the app explains where to find them). Or start with **Demo league** to look around.
+Then pick your team once (on Overview or the Team tab). Courtside remembers it and opens every page on it from then on.
+
+Setting up your league yourself? Pick **Connect ESPN** and paste your league's URL. If you add your own ESPN cookies, Courtside recognizes your team automatically. Private leagues also need the `espn_s2` and `SWID` cookies from your browser (the app explains where to find them). Or start with **Demo league** to look around.
 
 Your leagues are stored on your computer only: `%APPDATA%\Courtside` on Windows, `~/Library/Application Support/Courtside` on a Mac.
 

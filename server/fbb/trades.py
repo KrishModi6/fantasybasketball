@@ -10,6 +10,7 @@ collide can't both start), bench depth, and the roster spot a 2-for-1 frees
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from itertools import combinations
 
@@ -19,6 +20,10 @@ from .valuation import player_values
 
 ADVANTAGE_PCT = 0.01  # +/-1% of rest-of-season output separates good/neutral/bad
 SIM_RUNS = 3000
+# Trade finder shortlist, tuned on a 10-team demo league: these give each team a full list of
+# suggestions from about 6 partners in every package size, while keeping each team's best deal.
+PARTNER_LOSS_WEIGHT = 1.5  # how much the quick score counts the partner's raw-value loss
+TOP_SHARE = 0.25  # share of the shortlist taken straight from the top quick scores
 
 
 @dataclass
@@ -229,13 +234,15 @@ def _fairness(a: TradeSide, b: TradeSide) -> dict:
 
 def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | None = None,
                 max_give: int = 2, max_get: int = 2, partners: list[int] | None = None,
-                candidates: int = 90, limit: int = 12, min_partner_pct: float = -0.004) -> list[dict]:
+                candidates: int = 90, limit: int = 12, min_partner_pct: float = -0.004,
+                checked: Counter | None = None) -> list[dict]:
     """Search 1-for-1 up to max_give-for-max_get trades with every other team.
 
     Stage 1 scores every package pair by raw ROS value (with roster-spot
     replacement) and keeps plausible ones; stage 2 runs the full lineup
     simulation for both teams on the best candidates; results are ranked by our
-    gain among trades the partner's model also likes (or barely dislikes).
+    gain among trades the partner's model also likes (or barely dislikes). If given, `checked`
+    counts the packages fully simulated per size ("2-for-1": 22, ...).
     """
     ev = evaluator or TradeEvaluator(ctx)
     vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
@@ -274,17 +281,15 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
                 scale = max(v_out, v_in)
                 if their_raw < -0.12 * scale or my_raw < -0.15 * scale:
                     continue
-                # Prefer trades good for us but not absurd for them.
-                pre.append((my_raw + 0.5 * min(their_raw, 0.0), pt, give, get))
+                # Prefer trades good for us that the partner wouldn't lose by: the full simulation drops
+                # anything that costs them more than min_partner_pct, so shortlisting lopsided deals wastes it.
+                pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw, 0.0), pt, give, get))
     pre.sort(key=lambda x: -x[0])
 
     results = []
-    seen = set()
-    for _, pt, give, get in pre[: candidates]:
-        key = (pt, give, get)
-        if key in seen:
-            continue
-        seen.add(key)
+    for pt, give, get in _shortlist(pre, candidates, max_give, max_get, len(partners)):
+        if checked is not None:
+            checked[f"{len(give)}-for-{len(get)}"] += 1
         try:
             r = ev.evaluate(team_id, pt, list(give), list(get), with_sim=False)
         except ValueError:
@@ -306,17 +311,52 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
             "summary": r["summary"],
         })
     results.sort(key=lambda x: -x["my_delta_ros"])
-    # Diversify: at most 3 suggestions per partner and 3 per outgoing player.
-    per_partner: dict[int, int] = {}
-    per_player: dict[str, int] = {}
+    # Diversify: at most 3 suggestions per partner and per outgoing player, and room for every package
+    # size the user asked for (half the list at most for any one of 1-for-1, 2-for-1, 2-for-2, ...).
+    counts: Counter = Counter()
     out = []
     for r in results:
-        if per_partner.get(r["partner_id"], 0) >= 3 or any(per_player.get(p, 0) >= 3 for p in r["give"]):
+        keys = [("partner", r["partner_id"]), *(("give", p) for p in r["give"]),
+                ("shape", len(r["give"]), len(r["get"]))]
+        caps = [3, *(3 for _ in r["give"]), max(limit // 2, 1)]
+        if any(counts[k] >= cap for k, cap in zip(keys, caps)):
             continue
-        per_partner[r["partner_id"]] = per_partner.get(r["partner_id"], 0) + 1
-        for p in r["give"]:
-            per_player[p] = per_player.get(p, 0) + 1
+        counts.update(keys)
         out.append(r)
         if len(out) >= limit:
             break
     return out
+
+
+def _shortlist(pre: list[tuple[float, int, tuple, tuple]], candidates: int, max_give: int, max_get: int,
+               n_partners: int) -> list[tuple[int, tuple, tuple]]:
+    """Pick which quick-scored packages get the full simulation, keeping the mix varied.
+
+    The quick score favours one deal plus every possible throw-in ("A + x for B", "A + y for B", ...).
+    Taken in score order those near-copies fill the whole shortlist, so other partners and package
+    sizes (2-for-2 especially) never get simulated. So cap each package size, each partner, each
+    exact package and each player per partner; if that leaves room, top up in score order.
+    """
+    shapes = max_give * max_get
+    caps = {"shape": max(candidates // shapes, 8), "partner": max(candidates // max(n_partners, 1), 6),
+            "package": 2, "player": 4}
+    counts: Counter = Counter()
+    # The very best quick scores always get simulated, whatever their mix.
+    chosen: list[tuple[int, tuple, tuple]] = [(pt, give, get) for _, pt, give, get in pre[: int(candidates * TOP_SHARE)]]
+    picked: set[tuple[int, tuple, tuple]] = set(chosen)
+    for relaxed in (False, True):
+        for _, pt, give, get in pre:
+            if len(chosen) >= candidates:
+                return chosen
+            if (pt, give, get) in picked:
+                continue
+            keys = [("package", pt, "give", give), ("package", pt, "get", get),
+                    *(("player", pt, p) for p in give + get)]
+            if not relaxed:
+                keys += [("shape", len(give), len(get)), ("partner", pt)]
+            if any(counts[k] >= caps[k[0]] for k in keys):
+                continue
+            counts.update(keys)
+            picked.add((pt, give, get))
+            chosen.append((pt, give, get))
+    return chosen

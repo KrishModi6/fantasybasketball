@@ -104,6 +104,7 @@ class FantasyTeam(BaseModel):
     name: str
     abbrev: str = ""
     owner_name: str | None = None
+    owner_ids: list[str] = Field(default_factory=list)  # ESPN member ids ("{GUID}"), the same as an owner's SWID
     roster: list[RosterEntry] = Field(default_factory=list)
     wins: int = 0
     losses: int = 0

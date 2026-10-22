@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # Comma-separated list of allowed browser origins (the Electron app uses app:// or file://).
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,app://fbb"
     public_url: str = "http://localhost:5173"  # used to build invite links
-    sync_interval_hours: float = 4.0  # default refresh cadence for connected leagues
+    sync_interval_hours: float = 1.0  # default refresh cadence for connected leagues (stats change nightly)
     scheduler_enabled: bool = True
     min_manual_sync_minutes: float = 5.0
     retrain_enabled: bool = False

@@ -117,7 +117,7 @@ def _first_sync(db: Session, lg: League, reason: str, keep_on_error: bool = Fals
                 fallback_error: str = "Could not read that league") -> None:
     """Sync a new league inline so the user lands on a populated league (or sees the error immediately)."""
     run_sync(lg.id, reason=reason)
-    db.refresh(lg)
+    db.expire_all()  # the sync wrote through its own session (and may have matched the user's ESPN team)
     if lg.last_sync_status == "error" and not keep_on_error:
         err = lg.last_sync_error
         db.delete(lg)

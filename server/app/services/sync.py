@@ -18,10 +18,11 @@ from fbb.projections import ProjectionEngine
 
 from ..config import get_settings
 from ..db import SessionLocal
-from ..orm import Activity, League, ProjectionHistory, Snapshot
+from ..orm import Activity, League, LeagueMember, ProjectionHistory, Snapshot
 from ..realtime import hub
 from ..security import decrypt_json
 from .analysis import invalidate, latest_snapshot_row, models, pack_snapshot, unpack_snapshot
+from .board import MOVE_SOURCES, describe_move, refresh_board, roster_moves
 
 log = logging.getLogger(__name__)
 KEEP_SNAPSHOTS = 20
@@ -96,17 +97,61 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
                  {"player_id": pid, "from": old, "to": new})
         for w in snap.warnings[:20]:
             _log(db, league_id, "warning", w)
+        moves = roster_moves(prev, snap) if league.source in MOVE_SOURCES else []
+        for move in moves:
+            _log(db, league_id, "transaction", describe_move(move, prev, snap), move)
 
         _record_projection_history(db, league_id, snap)
-        league.last_synced_at = datetime.now(timezone.utc)
-        league.last_sync_status = "ok"
-        league.last_sync_error = None
+        claim_own_team(db, league, snap)
         league.season = snap.settings.season
         db.commit()
         invalidate(league_id)
+        # Re-score the board before marking the refresh done, so anyone who sees the new sync time (by
+        # push or by polling) also gets the new board. This also warms the analysis cache for page loads.
+        try:
+            refresh_board(db, league)
+        except Exception:  # noqa: BLE001 - a stale board must never fail the refresh itself
+            log.exception("board refresh failed for %s", league_id)
+            db.rollback()
+        league.last_synced_at = datetime.now(timezone.utc)
+        league.last_sync_status = "ok"
+        league.last_sync_error = None
+        db.commit()
+        if moves:
+            hub.publish(league_id, {"type": "roster_moves", "count": len(moves),
+                                    "first": describe_move(moves[0], prev, snap)})
         hub.publish(league_id, {"type": "sync_completed", "reason": reason, "warnings": len(snap.warnings)})
     finally:
         db.close()
+
+
+def _swid(value: str | None) -> str:
+    return (value or "").strip().strip("{}").upper()
+
+
+def claim_own_team(db, league: League, snap: LeagueSnapshot) -> None:
+    """Give whoever connected an ESPN league the team ESPN says their login owns, if they have none yet.
+
+    ESPN lists each team's owners by member id, which is the same GUID as the SWID cookie. Copies
+    joined with an invite code are skipped: their cookies belong to whoever sent the code.
+    """
+    if league.source != "espn":
+        return
+    cfg = decrypt_json(league.connector_config)
+    swid = _swid(cfg.get("swid"))
+    if not swid or cfg.get("shared_by"):
+        return
+    creator = db.scalar(select(LeagueMember).where(LeagueMember.league_id == league.id,
+                                                   LeagueMember.user_id == league.owner_id))
+    if creator is None or creator.team_id is not None:
+        return
+    team = next((t for t in snap.teams if swid in {_swid(o) for o in t.owner_ids}), None)
+    taken = team is not None and db.scalar(select(LeagueMember).where(LeagueMember.league_id == league.id,
+                                                                     LeagueMember.team_id == team.id))
+    if team is None or taken:
+        return
+    creator.team_id = team.id
+    _log(db, league.id, "member", f"{team.name} was matched to the ESPN login that owns it", {"team_id": team.id})
 
 
 def _fail(db, league: League, message: str) -> None:

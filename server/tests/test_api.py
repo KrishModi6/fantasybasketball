@@ -159,6 +159,82 @@ def test_own_openai_key(client, monkeypatch):
     r = client.delete("/api/ai/key", headers=user)
     assert r.json()["own_key"] is False and r.json()["own_key_hint"] is None
 
+def test_espn_login_claims_its_own_team(client):
+    """An ESPN league connected with your own cookies opens on your team, with nothing to pick."""
+    from app.db import SessionLocal
+    from app.orm import League, LeagueMember, User
+    from app.security import encrypt_json
+    from app.services.sync import claim_own_team
+    from factories import make_snapshot
+
+    snap = make_snapshot()
+    snap.teams[2].owner_ids = ["{ABCDEF12-3456-7890-ABCD-EF1234567890}"]
+    db = SessionLocal()
+    try:
+        user = User(email="espn-owner@example.com", display_name="Espn Owner", password_hash="!")
+        db.add(user)
+        db.flush()
+
+        def connect(cfg):
+            lg = League(name="ESPN", season=2027, source="espn", owner_id=user.id, connector_config=encrypt_json(cfg))
+            db.add(lg)
+            db.flush()
+            me = LeagueMember(league_id=lg.id, user_id=user.id, role="owner")
+            db.add(me)
+            db.flush()
+            return lg, me
+
+        # The SWID cookie may be pasted without braces or in lower case.
+        lg, me = connect({"league_id": "1", "espn_s2": "x", "swid": "abcdef12-3456-7890-abcd-ef1234567890"})
+        claim_own_team(db, lg, snap)
+        assert me.team_id == snap.teams[2].id
+        me.team_id = snap.teams[0].id  # a team picked by hand is never replaced
+        claim_own_team(db, lg, snap)
+        assert me.team_id == snap.teams[0].id
+
+        # A copy joined with an invite code runs on the sender's cookies, so their team isn't yours.
+        lg2, me2 = connect({"league_id": "1", "espn_s2": "x", "swid": "{ABCDEF12-3456-7890-ABCD-EF1234567890}",
+                            "shared_by": "Pal"})
+        claim_own_team(db, lg2, snap)
+        assert me2.team_id is None
+    finally:
+        db.rollback()
+        db.close()
+
+def test_board_follows_the_league(client):
+    """Board posts are re-scored after each refresh and flagged once a roster move makes them impossible."""
+    from app.db import SessionLocal
+    from app.orm import League, Snapshot
+    from app.services.analysis import invalidate, latest_snapshot_row, pack_snapshot, unpack_snapshot
+    from app.services.board import refresh_board
+
+    owner = _auth(client, "board-owner@example.com", "Board Owner")
+    lg = client.post("/api/leagues", json={"source": "demo", "name": "Board League", "team_count": 8}, headers=owner).json()
+    a, b = lg["teams"][0]["id"], lg["teams"][1]["id"]
+    ra = client.get(f"/api/leagues/{lg['id']}/teams/{a}", headers=owner).json()["roster"]
+    rb = client.get(f"/api/leagues/{lg['id']}/teams/{b}", headers=owner).json()["roster"]
+    trade = {"team_a": a, "team_b": b, "a_gives": [ra[0]["id"]], "b_gives": [rb[0]["id"]], "note": "?"}
+    assert client.post(f"/api/leagues/{lg['id']}/trades/board", json=trade, headers=owner).status_code == 201
+
+    db = SessionLocal()
+    try:
+        league = db.get(League, lg["id"])
+        assert refresh_board(db, league) == 1
+        post = client.get(f"/api/leagues/{lg['id']}/trades/board", headers=owner).json()[0]
+        assert post["evaluation"]["status"] == "open" and post["evaluation"]["as_of"]
+
+        snap = unpack_snapshot(latest_snapshot_row(db, league.id).data)  # team A drops the player it offered
+        snap.team(a).roster = [e for e in snap.team(a).roster if e.player_id != ra[0]["id"]]
+        db.add(Snapshot(league_id=league.id, source=snap.source, data=pack_snapshot(snap)))
+        db.commit()
+        invalidate(league.id)
+        refresh_board(db, league)
+    finally:
+        db.close()
+    post = client.get(f"/api/leagues/{lg['id']}/trades/board", headers=owner).json()[0]
+    assert post["evaluation"]["status"] == "stale"
+    assert post["evaluation"]["status_note"] == f"{ra[0]['name']} is now a free agent."
+
 def test_auth_errors(client):
     assert client.get("/api/leagues").status_code == 401
     r = client.post("/api/auth/login", json={"email": "nobody@example.com", "password": "whatever123"})

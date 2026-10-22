@@ -60,7 +60,7 @@ class League(Base):
     source: Mapped[str] = mapped_column(String(20))  # espn | demo | file | flaim
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     connector_config: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)  # Fernet-encrypted JSON
-    sync_interval_hours: Mapped[float] = mapped_column(Float, default=4.0)
+    sync_interval_hours: Mapped[float] = mapped_column(Float, default=1.0)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sync_status: Mapped[str] = mapped_column(String(20), default="never")  # ok | error | running | never
     last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)

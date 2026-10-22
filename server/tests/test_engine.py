@@ -240,3 +240,90 @@ def test_category_league_end_to_end():
     assert st[0].explanation["category_win_prob"]
     g = ctx.cat_valuer.gscores("1")
     assert set(g) == set(snap.settings.scoring.categories)
+
+
+def test_espn_teams_keep_owner_ids():
+    from fbb.connectors.espn import parse_teams
+
+    data = {"members": [{"id": "{A-1}", "displayName": "Pat"}],
+            "teams": [{"id": 4, "name": "Hoopers", "owners": ["{A-1}"]}, {"id": 5, "name": "Bricks"}]}
+    hoopers, bricks = parse_teams(data)
+    assert (hoopers.owner_name, hoopers.owner_ids) == ("Pat", ["{A-1}"])
+    assert bricks.owner_ids == []
+
+
+def test_trade_shortlist_is_not_one_deal_with_every_throw_in():
+    from fbb.trades import TOP_SHARE, _shortlist
+
+    # One deal plus every possible throw-in scores highest; real alternatives (2-for-2s, other partners) score lower.
+    pre = [(100 - i, 2, ("star", f"filler{i}"), ("their_star",)) for i in range(60)]
+    pre += [(30 - i, 3 + i % 4, (f"a{i}", f"b{i}"), (f"c{i}", f"d{i}")) for i in range(40)]
+    pre.sort(key=lambda x: -x[0])
+    short = _shortlist(pre, 40, 2, 2, n_partners=6)
+    copies = [s for s in short if s[2] == ("their_star",)]
+    assert len(short) == len(set(short)) == 40
+    assert len(copies) <= int(40 * TOP_SHARE) + 2  # the reserved top scores, then at most 2 per exact package
+    assert sum(len(give) == 2 == len(get) for _, give, get in short) >= 20
+    assert short[0] == (2, ("star", "filler0"), ("their_star",))  # the best quick score is always simulated
+
+
+def _calendar(season: dict):
+    import datetime as dt
+
+    from fbb.models import ProSchedule
+
+    start = dt.date.fromisoformat(season["period_1"])
+    counts = season["team_games"]
+    return ProSchedule(season=start.year + 1,
+                       period_dates={p: start + dt.timedelta(days=p - 1) for p in range(1, len(counts) + 1)},
+                       games={p: ["T"] * n for p, n in enumerate(counts, 1) if n})
+
+
+def test_espn_matchups_match_real_seasons():
+    """ESPN lists matchup periods as weeks; rebuilding their days must reproduce ESPN's own dates."""
+    import json
+    from pathlib import Path
+
+    from fbb.schedule import espn_matchup_periods
+
+    seasons = json.loads((Path(__file__).parent / "data" / "espn_calendars.json").read_text())
+    for name, season in seasons.items():
+        if name.startswith("_"):
+            continue
+        weeks = {int(k): v for k, v in season["espn_weeks"].items()}
+        days = espn_matchup_periods(_calendar(season), weeks)
+        assert days is not None, f"{name}: a different number of weeks than ESPN's calendar"
+        assert len(days) == len(weeks)
+        for mp, (first, last) in season["espn_days"].items():
+            played = [p for p in days[int(mp)] if season["team_games"][p - 1]]
+            assert (played[0], played[-1]) == (first, last), f"{name} matchup {mp}"
+
+
+def test_espn_matchups_2026_27_calendar():
+    import datetime as dt
+    import json
+    from pathlib import Path
+
+    from fbb.schedule import espn_matchup_periods
+
+    season = json.loads((Path(__file__).parent / "data" / "espn_calendars.json").read_text())["2026-27"]
+    sched = _calendar(season)
+    days = espn_matchup_periods(sched, {int(k): v for k, v in season["espn_weeks"].items()})
+    span = lambda mp: (sched.period_dates[days[mp][0]], sched.period_dates[days[mp][-1]])  # noqa: E731
+    assert span(1) == (dt.date(2026, 10, 20), dt.date(2026, 10, 25))  # opening night to the first Sunday
+    assert span(7) == (dt.date(2026, 11, 30), dt.date(2026, 12, 13))  # NBA Cup knockout weeks, merged
+    assert span(17) == (dt.date(2027, 2, 15), dt.date(2027, 2, 28))  # All-Star break, merged
+    assert span(21) == (dt.date(2027, 3, 29), dt.date(2027, 4, 11))  # final two-week playoff round
+
+
+def test_espn_matchups_fall_back_when_weeks_disagree():
+    import json
+    from pathlib import Path
+
+    from fbb.schedule import build_matchup_periods, espn_matchup_periods
+
+    season = json.loads((Path(__file__).parent / "data" / "espn_calendars.json").read_text())["2026-27"]
+    sched = _calendar(season)
+    assert espn_matchup_periods(sched, {1: [1], 2: [2, 30]}) is None  # ESPN counting 30 weeks: not this season
+    default = build_matchup_periods(sched, 19, [2, 2])
+    assert len(default) == 21 and default[1][0] == 1

@@ -7,7 +7,7 @@ import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmt0, fmt1, pct, relTime, signedPct } from "../lib/format";
-import { useAiStatus, useTeam } from "../lib/queries";
+import { useActivity, useAiStatus, useTeam } from "../lib/queries";
 import { useToast } from "../lib/toast";
 import type { TradeEval, TradeSide, TradeSuggestion } from "../lib/types";
 
@@ -263,7 +263,7 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
   const [give, get] = shape.split("-");
   const q = useQuery({
     queryKey: ["league", league.id, "suggest", team, shape, partner, run],
-    queryFn: () => api<{ suggestions: TradeSuggestion[] }>(
+    queryFn: () => api<{ suggestions: TradeSuggestion[]; checked?: Record<string, number> }>(
       `/api/leagues/${league.id}/trades/suggestions?team_id=${team}&max_give=${give}&max_get=${get}${partner ? `&partner_id=${partner}` : ""}`),
     enabled: run > 0 && team != null,
     staleTime: 5 * 60_000,
@@ -297,6 +297,12 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && <LoadingBlock rows={6} />}
       {q.data && q.data.suggestions.length === 0 && <Panel><Empty title="No mutually acceptable trades found">Try a larger package or a different partner.</Empty></Panel>}
+      {q.data && shape === "2-2" && !q.data.suggestions.some((s) => s.give.length === 2 && s.get.length === 2)
+        && (q.data.checked?.["2-for-2"] ?? 0) > 0 && (
+        <p className="small muted">
+          Fully simulated {q.data.checked!["2-for-2"]} two-for-two packages. None helped you without costing the other team more than 0.4%, so none are listed.
+        </p>
+      )}
       {q.data && q.data.suggestions.length > 0 && (
         <Panel flush>
           <div className="table-wrap">
@@ -335,8 +341,29 @@ interface Post {
   a_gives: string[];
   b_gives: string[];
   note: string;
-  evaluation: TradeEval;
+  // Re-scored after every refresh; status says whether the trade is still possible.
+  evaluation: TradeEval & { status?: "open" | "done" | "stale"; status_note?: string | null; as_of?: string };
   created_at: string;
+}
+
+/** Real trades and waiver moves found in the league's latest refreshes. */
+function RecentMoves() {
+  const { league } = useLeagueCtx();
+  const { data } = useActivity(league.id);
+  const moves = (data ?? []).filter((a) => a.kind === "transaction").slice(0, 8);
+  if (!moves.length) return null;
+  return (
+    <Panel title={`Recent moves${league.source === "espn" ? " on ESPN" : ""}`}>
+      <ul className="list">
+        {moves.map((m) => (
+          <li key={m.id} className="row between">
+            <span>{m.message}</span>
+            <span className="small muted">{relTime(m.created_at)}</span>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
 }
 
 function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
@@ -353,40 +380,58 @@ function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
   });
   if (isLoading) return <LoadingBlock rows={6} />;
   if (error) return <ErrorBox error={error} />;
-  if (!data?.length) return <Panel><Empty title="No trades posted yet">Evaluate a trade and post it to share the numbers with the league. Figures are frozen at posting time.</Empty></Panel>;
-  return (
-    <Panel flush>
-      <div className="table-wrap">
-        <table className="data">
-          <thead><tr><th>Posted</th><th>Trade</th><th className="n">Team A/wk</th><th className="n">Team B/wk</th><th className="hide-sm">Note</th><th /></tr></thead>
-          <tbody>
-            {data.map((p) => {
-              const names = (ids: string[]) => ids.map((id) => p.evaluation.players.find((x) => x.player_id === id)?.name ?? id).join(", ") || "nothing";
-              const [a, b] = p.evaluation.sides;
-              return (
-                <tr key={p.id}>
-                  <td className="muted">{relTime(p.created_at)}<div className="tiny">{p.author}</div></td>
-                  <td className="wrap">
-                    <div><span className="muted">{teamName(p.team_a)}:</span> {names(p.a_gives)}</div>
-                    <div><span className="muted">{teamName(p.team_b)}:</span> {names(p.b_gives)}</div>
-                  </td>
-                  <td className="n"><Delta value={a.delta_per_week} /></td>
-                  <td className="n"><Delta value={b.delta_per_week} /></td>
-                  <td className="wrap hide-sm muted">{p.note || "–"}</td>
-                  <td className="n">
-                    <div className="row" style={{ justifyContent: "flex-end" }}>
-                      <button className="btn" onClick={() => onLoad({ a: p.team_a, b: p.team_b, aGives: p.a_gives, bGives: p.b_gives })}>Re-run</button>
-                      {(p.author_id === user?.id || league.me?.role === "owner") && (
-                        <button className="btn danger" onClick={() => del.mutate(p.id)}>Delete</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+  if (!data?.length) {
+    return (
+      <div className="stack">
+        <RecentMoves />
+        <Panel><Empty title="No trades posted yet">Evaluate a trade and post it to share the numbers with the league. They update automatically after every refresh.</Empty></Panel>
       </div>
-    </Panel>
+    );
+  }
+  return (
+    <div className="stack">
+      <RecentMoves />
+      <Panel flush note="Numbers update automatically after every refresh, so they always reflect the latest stats and rosters.">
+        <div className="table-wrap">
+          <table className="data">
+            <thead><tr><th>Posted</th><th>Trade</th><th className="n">Team A/wk</th><th className="n">Team B/wk</th><th className="hide-sm">Note</th><th /></tr></thead>
+            <tbody>
+              {data.map((p) => {
+                const names = (ids: string[]) => ids.map((id) => p.evaluation.players.find((x) => x.player_id === id)?.name ?? id).join(", ") || "nothing";
+                const [a, b] = p.evaluation.sides;
+                const status = p.evaluation.status ?? "open";
+                return (
+                  <tr key={p.id} className={status === "open" ? "" : "muted"}>
+                    <td className="muted">{relTime(p.created_at)}<div className="tiny">{p.author}</div></td>
+                    <td className="wrap">
+                      <div><span className="muted">{teamName(p.team_a)}:</span> {names(p.a_gives)}</div>
+                      <div><span className="muted">{teamName(p.team_b)}:</span> {names(p.b_gives)}</div>
+                      <div className="tiny">
+                        {status === "done" && <Tag tone="up">Happened</Tag>}
+                        {status === "stale" && <Tag tone="warn">No longer possible</Tag>}{" "}
+                        <span className="faint">
+                          {status === "open" ? `Updated ${relTime(p.evaluation.as_of ?? p.created_at)}` : p.evaluation.status_note}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="n"><Delta value={a.delta_per_week} /></td>
+                    <td className="n"><Delta value={b.delta_per_week} /></td>
+                    <td className="wrap hide-sm muted">{p.note || "–"}</td>
+                    <td className="n">
+                      <div className="row" style={{ justifyContent: "flex-end" }}>
+                        <button className="btn" onClick={() => onLoad({ a: p.team_a, b: p.team_b, aGives: p.a_gives, bGives: p.b_gives })}>Re-run</button>
+                        {(p.author_id === user?.id || league.me?.role === "owner") && (
+                          <button className="btn danger" onClick={() => del.mutate(p.id)}>Delete</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
   );
 }

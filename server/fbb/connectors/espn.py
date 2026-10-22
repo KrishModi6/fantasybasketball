@@ -11,6 +11,7 @@ and ``SWID`` cookies from a browser session that can view the league.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import time
@@ -44,6 +45,7 @@ from ..models import (
 )
 from .base import ConnectorError, ConnectorInfo, LeagueConnector
 
+log = logging.getLogger(__name__)
 FANTASY_BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba"
 SITE_BASE = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
 ATHLETE_URL = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/athletes/{id}"
@@ -369,6 +371,7 @@ def parse_settings(data: dict, season: int) -> LeagueSettings:
         ESPN_SLOT_IDS[int(k)]: int(v) for k, v in slots_raw.items() if int(k) in ESPN_SLOT_IDS and int(v) > 0
     }
     sched = s.get("scheduleSettings", {})
+    # ESPN's weeks per matchup period ({"20": [20, 21]}); fetch_snapshot turns them into days.
     matchup_periods = {int(k): [int(x) for x in v] for k, v in (sched.get("matchupPeriods") or {}).items()}
     reg = int(sched.get("matchupPeriodCount", 19))
     playoff_len = int(sched.get("playoffMatchupPeriodLength", 1))
@@ -414,6 +417,7 @@ def parse_teams(data: dict) -> list[FantasyTeam]:
                 name=name,
                 abbrev=t.get("abbrev", ""),
                 owner_name=owner,
+                owner_ids=[str(o) for o in t.get("owners") or []],
                 roster=roster,
                 wins=int(rec.get("wins", 0)),
                 losses=int(rec.get("losses", 0)),
@@ -548,11 +552,15 @@ class EspnConnector(LeagueConnector):
         status = data.get("status", {})
         current_period = int(data.get("scoringPeriodId") or status.get("latestScoringPeriod") or 1)
         current_mp = int(status.get("currentMatchupPeriod") or 1)
-        if not settings.matchup_periods:
-            from ..schedule import build_matchup_periods
+        from ..schedule import build_matchup_periods, espn_matchup_periods
 
-            settings.matchup_periods = build_matchup_periods(sched, settings.regular_season_matchups,
-                                                             settings.playoff_round_weeks)
+        # ESPN's matchup periods list the weeks they cover; the engine needs their days.
+        days = espn_matchup_periods(sched, settings.matchup_periods) if settings.matchup_periods else None
+        if days is None:
+            if settings.matchup_periods:
+                log.warning("ESPN's calendar doesn't match the NBA schedule's weeks; using the default calendar")
+            days = build_matchup_periods(sched, settings.regular_season_matchups, settings.playoff_round_weeks)
+        settings.matchup_periods = days
         return LeagueSnapshot(
             settings=settings,
             teams=teams,

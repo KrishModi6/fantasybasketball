@@ -194,7 +194,7 @@ export default function AssistantPage() {
       {status.data && !enabled && <Notice level="warn">{offMessage}</Notice>}
       {enabled && myTeamId == null && (
         <Notice level="warn">
-          You haven't claimed a team in this league, so answers can't be about your roster. <Link to={`/l/${league.id}/league`}>Claim your team</Link> first.
+          You haven't claimed a team in this league, so answers can't be about your roster. <Link to={`/l/${league.id}/team`}>Pick your team</Link> once and Courtside remembers it.
         </Notice>
       )}
 
