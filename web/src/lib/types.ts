@@ -170,6 +170,19 @@ export interface TeamStrength {
   };
 }
 
+export interface WeeklyPoints {
+  scoring: string;
+  weeks: { matchup_period: number; start: string | null; end: string | null; days: number; playoffs: boolean; current: boolean }[];
+  teams: {
+    team_id: number;
+    name: string;
+    abbrev: string;
+    owner: string | null;
+    weeks: { matchup_period: number; proj: number; sd: number; scored: number | null; opponent_id: number | null; win_prob: number | null }[];
+  }[];
+  as_of: { date: string | null };
+}
+
 export interface TeamDetail {
   id: number;
   name: string;

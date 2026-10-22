@@ -15,7 +15,7 @@ from ..orm import Activity, PlayerOverrideRow, ProjectionHistory
 from ..realtime import hub
 from ..schemas import OverrideIn
 from ..services.analysis import LeagueAnalysis, get_analysis, invalidate
-from ..services.present import player_detail, player_rows, strength_rows, team_detail
+from ..services.present import player_detail, player_rows, strength_rows, team_detail, weekly_points
 
 router = APIRouter(prefix="/api/leagues/{league_id}", tags=["analysis"])
 
@@ -39,6 +39,12 @@ def _team(a: LeagueAnalysis, team_id: int) -> None:
 async def rankings(a: LeagueAnalysis = Depends(analysis)):
     rows = await run_in_threadpool(strength_rows, a)
     return {"teams": rows, "as_of": _as_of(a), "scoring": a.snapshot.settings.scoring.kind}
+
+
+@router.get("/weekly")
+async def weekly(a: LeagueAnalysis = Depends(analysis)):
+    """Projected points for every team in every remaining week."""
+    return {**await run_in_threadpool(weekly_points, a), "as_of": _as_of(a)}
 
 
 @router.get("/teams/{team_id}")

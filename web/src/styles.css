@@ -848,6 +848,24 @@ table.data tr.mine td:first-child {
 table.data td.wrap {
   white-space: normal;
 }
+/* First column stays put while a wide table scrolls sideways. */
+table.data th.pin,
+table.data td.pin {
+  position: sticky;
+  left: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+table.data th.pin {
+  z-index: 2;
+  background: var(--raised);
+}
+table.data tbody tr:nth-child(even) td.pin {
+  background: var(--raised);
+}
+table.data tbody tr:hover td.pin {
+  background: var(--hover);
+}
 table.data > tbody > tr.detail > td,
 table.data > tbody > tr.detail:nth-child(even) > td,
 table.data > tbody > tr.detail:hover > td {
