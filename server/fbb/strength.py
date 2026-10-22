@@ -22,10 +22,15 @@ from dataclasses import asdict, dataclass, field
 from itertools import combinations
 
 import numpy as np
-from scipy.stats import norm
 
 from .constants import LOWER_IS_BETTER, RATIO_STATS
 from .context import AnalysisContext, WindowResult
+
+
+def normal_cdf(z: float) -> float:
+    """Standard normal CDF. erfc keeps precision in the tails."""
+    return 0.5 * math.erfc(-z / math.sqrt(2.0))
+
 
 N_SIMS = 5000
 
@@ -99,14 +104,14 @@ class MatchupModel:
                 z = (sa.get(key, 0.0) - sb.get(key, 0.0)) / math.sqrt(max(va.get(key, 0.0) + vb.get(key, 0.0), 1e-6))
                 if c in LOWER_IS_BETTER:
                     z = -z
-            out[c] = float(norm.cdf(z))
+            out[c] = normal_cdf(z)
         return out
 
     def p_win(self, a: int, b: int, mp: int) -> float:
         if self.ctx.is_points:
             ma, va = self.dist(a, mp)
             mb, vb = self.dist(b, mp)
-            return float(norm.cdf((ma - mb) / math.sqrt(max(va + vb, 1.0))))
+            return normal_cdf((ma - mb) / math.sqrt(max(va + vb, 1.0)))
         probs = list(self.cat_probs(a, b, mp).values())
         dist = np.zeros(len(probs) + 1)
         dist[0] = 1.0

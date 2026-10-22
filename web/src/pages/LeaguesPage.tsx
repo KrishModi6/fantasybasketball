@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LogOut } from "lucide-react";
 import { BrandMark, FetchLine, ThemeToggle } from "../components/Layout";
 import { Empty, ErrorBox, LoadingBlock, Panel, SubTabs, Tag } from "../components/ui";
-import { api, serverUrl } from "../lib/api";
+import { api, isLocalApp, serverUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { relTime, sourceLabel } from "../lib/format";
 import { useLeagues } from "../lib/queries";
@@ -25,8 +25,12 @@ export function LeaguesPage() {
         <span className="small muted">Leagues</span>
         <span className="spacer" />
         <ThemeToggle />
-        <span className="small muted hide-sm">{user?.display_name}</span>
-        <button className="btn ghost icon" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut /></button>
+        {!isLocalApp() && (
+          <>
+            <span className="small muted hide-sm">{user?.display_name}</span>
+            <button className="btn ghost icon" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut /></button>
+          </>
+        )}
       </header>
       <main className="page-narrow">
         <Panel title="Your leagues" flush>

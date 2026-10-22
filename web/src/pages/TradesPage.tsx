@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, SubTabs, Tag } from "../components/ui";
+import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmt0, fmt1, pct, relTime, signedPct } from "../lib/format";
-import { useTeam } from "../lib/queries";
+import { useAiStatus, useTeam } from "../lib/queries";
 import { useToast } from "../lib/toast";
 import type { TradeEval, TradeSide, TradeSuggestion } from "../lib/types";
 
@@ -96,8 +98,17 @@ function RosterPicker({ side, teamId, picked, onToggle, onTeam, otherTeam }: {
   );
 }
 
+function tradeQuestion(ev: TradeEval): string {
+  const name = (id: string) => ev.players.find((p) => p.player_id === id)?.name ?? id;
+  const [a, b] = ev.sides;
+  return `Explain this trade: ${a.team_name} gives ${a.gives.map(name).join(", ") || "nothing"} to ${b.team_name} for `
+    + `${a.receives.map(name).join(", ") || "nothing"}. Who wins it and why, what are the risks, `
+    + "and is there a better version of this deal?";
+}
+
 function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Draft) => void; autoRun: boolean }) {
   const { league } = useLeagueCtx();
+  const ai = useAiStatus();
   const toast = useToast();
   const qc = useQueryClient();
   const [note, setNote] = useState("");
@@ -149,6 +160,12 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
       {evaluate.data && (
         <>
           <TradeResult ev={evaluate.data} />
+          {ai.data?.enabled && (
+            <div className="toolbar">
+              <Link className="btn" to={askPath(league.id, { prompt: tradeQuestion(evaluate.data) })}>Ask AI about this trade</Link>
+              <span className="small muted">Get a plain-English read on the numbers, the risks, and a message to send.</span>
+            </div>
+          )}
           <Panel title="Post to league board">
             <div className="row wrap">
               <input className="input" style={{ flex: 1, minWidth: 220 }} placeholder="Note (optional)" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} aria-label="Note" />

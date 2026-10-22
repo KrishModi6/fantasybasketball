@@ -1,6 +1,8 @@
 # Courtside
 
-Fantasy basketball analytics for a whole league: player projections, team power rankings, lineup and add/drop advice, a trade analyzer and trade finder, and a shared league hub with invite links. It runs as a website (mobile-friendly, installable as a PWA) and as a desktop app for Windows and macOS built from the same code.
+Fantasy basketball analytics for a whole league: player projections, team power rankings, lineup and add/drop advice, a trade analyzer and trade finder, an AI assistant that explains it all, and a shared league hub with invite links. It runs as a website (mobile-friendly, installable as a PWA) and as a desktop app for Windows and macOS built from the same code.
+
+**[Download the desktop app](https://github.com/KrishModi6/fantasybasketball/releases/latest)**: Windows installer or Mac app, with everything bundled. No server, no Python, no account.
 
 **Statistics come first.** Every number starts from box-score statistics and published projections. Machine learning is used only where a rolling backtest shows it reduces error. News, injuries and trades enter only as bounded, labelled adjustments to minutes and games played. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
@@ -15,6 +17,7 @@ Fantasy basketball analytics for a whole league: player projections, team power 
 | **Team improvement** | Weak spots ranked by points at stake. Add/drop moves are simulated against your lineup. Also: streaming pickups for the current week and daily lineups with a confidence score for every start. |
 | **Matchup simulator** | Plays any week's head-to-head out 10,000 times, box score by box score: who suits up, each player's night, bench fill-ins when a starter sits, and points already scored. You get win probability, score and margin distributions, a day-by-day breakdown, each player's range and "swing", and what-if toggles to sit players. Works for points and category leagues. |
 | **Trades** | The analyzer re-simulates both rosters and handles 2-for-1 roster spots. It shows the math step by step: raw value, lineup-adjusted change, playoff weeks, and playoff and title odds before and after. The verdict is advantageous, neutral or disadvantageous. The finder screens every 1–2 player package and fully simulates the best ones. |
+| **AI assistant** | Ask in plain English: best waiver pickups, a game plan for this week's matchup, trades to pitch, injury impact, season outlook, power-rankings trash talk. The model calls Courtside's own engine (waiver simulation, trade evaluator, matchup simulator, rankings) and may only state numbers those tools return. **Ask AI** buttons on players, trades and matchups. See [docs/AI.md](docs/AI.md). |
 | **League hub** | Accounts, invite links and codes, team claiming, standings, a shared trade board, a live activity feed (WebSockets), injury-change alerts and league-wide projection overrides. |
 | **Data** | An ESPN connector (public, or private with cookies), CSV/JSON import for any platform, an adapter for Flaim (unverified, see below), scheduled refreshes, rate limiting and caching. |
 
@@ -50,11 +53,13 @@ cd desktop
 npm install
 npm start
 ```
-`npm start` builds the web app and opens it in Electron. Installers:
-- **Windows:** `npm run dist:win` → `desktop/release/Courtside Setup 0.1.0.exe` (already built once on this machine).
-- **macOS:** `npm run dist:mac` must run on a Mac. Signing and notarisation need an Apple Developer ID; without one the DMG works but Gatekeeper warns on first open.
+`npm start` builds the web app and opens it in Electron. Release builds bundle the engine (`server/engine.py`, frozen with PyInstaller) and start it on `127.0.0.1` with the database in the user's app-data folder, so the app works with nothing else installed and signs its one local user in automatically.
 
-The desktop app connects to a Courtside server; the address is set on the sign-in screen (default `http://localhost:8000`, or the `COURTSIDE_SERVER` environment variable).
+- **Windows:** `npm run dist:win` → `desktop/release/Courtside-Setup-<version>.exe` (builds and self-tests the engine first).
+- **macOS:** `npm run dist:mac` on a Mac → `Courtside-<version>-mac-arm64.zip`, ad-hoc signed. Without an Apple Developer ID, friends approve it once under System Settings > Privacy & Security.
+- **Releases:** push a tag like `v0.1.0` (matching `desktop/package.json`) and `.github/workflows/release.yml` builds both, self-tests a real Windows install, and publishes a GitHub release with [these notes](desktop/release-notes.md).
+
+Without a bundled engine (plain `npm start` before `npm run build:engine`), the app connects to a Courtside server instead: `COURTSIDE_SERVER`, or `http://localhost:8000`.
 
 ### Mobile
 The website is fully responsive (the tab strip scrolls and tables scroll inside their panels on phones), and it's installable as a PWA (Add to Home Screen) on iOS and Android. Everything syncs through the server in real time.
@@ -91,21 +96,25 @@ server/            FastAPI backend + analytics engine
     matchup_sim.py Monte Carlo matchup simulator
     connectors/    espn, file import, flaim (MCP), demo
     ml/            feature builder + LightGBM wrapper
-  app/             API: auth, leagues, invites, analysis, trades, realtime, scheduler
+  app/             API: auth, leagues, invites, analysis, trades, realtime, scheduler, AI assistant
+  engine.py        desktop engine entry point (PyInstaller: courtside-engine.spec)
   scripts/         build_history, fetch_game_logs, train_model, seed_dev
   data/history/    player-season dataset 2017-18 → today (from ESPN)
   data/model/      trained model + metrics.json (the backtest above)
   tests/           engine unit tests + end-to-end API test
 web/               React + TypeScript + Vite client (also the desktop UI)
-desktop/           Electron shell, installers in desktop/release
+desktop/           Electron shell; starts the bundled engine; installers in desktop/release
+cloudflare/ai-proxy/  Worker + D1 that holds the OpenAI key and meters AI calls for the desktop app
 docs/              methodology, API, user guide, admin guide, connectors
 ```
 
 ## Tests
 
 ```bash
-cd server && .venv/Scripts/python -m pytest      # 31 tests (the API test needs internet once; ESPN data is cached)
-cd web && npm test && npm run typecheck
+cd server && .venv/Scripts/python -m pytest      # 37 tests (the API test needs internet once; ESPN data is cached)
+cd web && npm test && npm run typecheck           # 11 tests
+cd cloudflare/ai-proxy && npm test                # 7 tests: the AI proxy against SQLite and a stubbed OpenAI
+cd server && .venv/Scripts/python engine.py --self-test   # the desktop engine end to end
 ```
 
 ## Deploying for your league
@@ -134,3 +143,4 @@ The server hot-reloads the model when the file changes. Set `FBB_RETRAIN_ENABLED
 - [Admin guide](docs/ADMIN_GUIDE.md)
 - [API reference](docs/API.md) (interactive docs at `/docs` on a running server)
 - [Connectors](docs/CONNECTORS.md)
+- [AI assistant and the Cloudflare proxy](docs/AI.md)

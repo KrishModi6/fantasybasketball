@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     inline_sync: bool = False  # run manual refreshes inside the request instead of a background task
     realtime_enabled: bool = True  # WebSocket push; clients fall back to polling when disabled
     cron_token: str = ""  # enables POST /api/cron/sync when set
+    # AI assistant. Direct: a server-held OpenAI key. Proxy: the Cloudflare Worker in cloudflare/ai-proxy.
+    openai_api_key: str = ""
+    ai_proxy_url: str = ""
+    ai_proxy_token: str = ""
+    ai_model: str = "gpt-6-luna"
+    ai_max_rounds: int = 6
+    ai_user_hourly_limit: int = 30
+    # Desktop app: a single local user signs in automatically (the engine only listens on 127.0.0.1).
+    local_mode: bool = False
 
     @property
     def is_sqlite(self) -> bool:

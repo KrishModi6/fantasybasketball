@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api, getToken, setToken } from "./api";
+import { api, getToken, isLocalApp, setToken } from "./api";
 import type { User } from "./types";
 
 interface AuthState {
@@ -15,25 +15,39 @@ const Ctx = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(Boolean(getToken()));
+  const [loading, setLoading] = useState(Boolean(getToken()) || isLocalApp());
   const qc = useQueryClient();
 
+  const localSignIn = useCallback(async () => {
+    const r = await api<{ token: string; user: User }>("/api/auth/local", { method: "POST" });
+    setToken(r.token);
+    setUser(r.user);
+  }, []);
+
   useEffect(() => {
-    if (!getToken()) return;
+    if (!getToken()) {
+      if (isLocalApp()) localSignIn().catch(() => undefined).finally(() => setLoading(false));
+      return;
+    }
     api<User>("/api/auth/me")
       .then(setUser)
-      .catch(() => setToken(null))
+      .catch(() => {
+        setToken(null);
+        return isLocalApp() ? localSignIn() : undefined;
+      })
+      .catch(() => undefined)
       .finally(() => setLoading(false));
-  }, []);
+  }, [localSignIn]);
 
   useEffect(() => {
     const onOut = () => {
       setUser(null);
       qc.clear();
+      if (isLocalApp()) void localSignIn().catch(() => undefined); // an expired token just renews
     };
     window.addEventListener("cs:signed-out", onOut);
     return () => window.removeEventListener("cs:signed-out", onOut);
-  }, [qc]);
+  }, [qc, localSignIn]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const r = await api<{ token: string; user: User }>("/api/auth/login", { body: { email, password } });

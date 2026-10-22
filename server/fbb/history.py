@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import json
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -13,6 +14,9 @@ from .models import ExpertProjection, SeasonLine
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 HISTORY_DIR = DATA_DIR / "history"
+# Writable cache (ESPN responses, bios fetched at runtime). Installed desktop builds point this at the
+# user's app-data folder, because the bundled data folder may be read-only.
+CACHE_DIR = Path(os.environ.get("FBB_CACHE_DIR") or DATA_DIR / "cache")
 
 
 UNDRAFTED_ADP = 140.0

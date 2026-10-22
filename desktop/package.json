@@ -10,11 +10,12 @@
   "scripts": {
     "build:web": "npm --prefix ../web run build",
     "copy:web": "node scripts/copy-web.mjs",
+    "build:engine": "node scripts/build-engine.mjs",
     "start": "npm run build:web && npm run copy:web && electron .",
     "dev": "electron . --dev",
-    "dist:win": "npm run build:web && npm run copy:web && electron-builder --win nsis",
-    "dist:mac": "npm run build:web && npm run copy:web && electron-builder --mac dmg",
-    "dist:dir": "npm run build:web && npm run copy:web && electron-builder --dir"
+    "dist:win": "npm run build:web && npm run copy:web && npm run build:engine && electron-builder --win nsis --publish never",
+    "dist:mac": "npm run build:web && npm run copy:web && npm run build:engine && electron-builder --mac zip --publish never",
+    "dist:dir": "npm run build:web && npm run copy:web && npm run build:engine && electron-builder --dir --publish never"
   },
   "devDependencies": {
     "electron": "33.2.1",
@@ -23,11 +24,56 @@
   "build": {
     "appId": "app.courtside.desktop",
     "productName": "Courtside",
-    "files": ["main.js", "preload.js", "web-dist/**/*", "package.json"],
-    "directories": { "output": "release", "buildResources": "build" },
-    "win": { "target": ["nsis"], "icon": "build/icon.png" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false },
-    "mac": { "target": ["dmg"], "category": "public.app-category.sports", "icon": "build/icon.png", "hardenedRuntime": true },
-    "linux": { "target": ["AppImage"], "icon": "build/icon.png" }
+    "files": [
+      "main.js",
+      "preload.js",
+      "web-dist/**/*",
+      "package.json",
+      "ai-config.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.sports",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png"
+    },
+    "extraResources": [
+      {
+        "from": "../server/dist/courtside-engine",
+        "to": "engine",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   }
 }

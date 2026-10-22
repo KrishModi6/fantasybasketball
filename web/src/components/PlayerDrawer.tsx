@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
+import { Link } from "react-router-dom";
+import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { fmt0, fmt1, pct, relTime, shortDate, signed } from "../lib/format";
-import { usePlayer } from "../lib/queries";
+import { useAiStatus, usePlayer } from "../lib/queries";
 import { useToast } from "../lib/toast";
 import type { PlayerDetail } from "../lib/types";
 import { Diverging, GameColumns, Sparkline } from "./charts";
@@ -41,11 +43,17 @@ export function PlayerDrawer({ playerId, onClose }: { playerId: string; onClose:
 }
 
 function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
-  const { teamName, league } = useLeagueCtx();
+  const { teamName, league, myTeamId } = useLeagueCtx();
+  const ai = useAiStatus();
   const isPoints = league.settings?.scoring.kind !== "categories";
   const maxEx = Math.max(...p.explanation.map((e) => Math.abs(e.fp_pg)), 0.5);
   const last = [...p.game_log].reverse().slice(-15);
   const owner = p.fantasy_team_id ? teamName(p.fantasy_team_id) : p.on_waivers ? "Waivers" : "Free agent";
+  const question = p.fantasy_team_id == null
+    ? `Should I pick up ${p.name}? Who would I drop, and how many points per week would it add?`
+    : p.fantasy_team_id === myTeamId
+      ? `Should I keep ${p.name}? Compare their rest-of-season value with my best waiver and trade alternatives.`
+      : `Should I trade for ${p.name}? What would a fair offer from my roster be, and would it help me?`;
   return (
     <>
       <header className="drawer-head">
@@ -56,7 +64,10 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
             {p.ownership_pct != null ? ` · ${fmt1(p.ownership_pct)}% rostered on ESPN` : ""}
           </div>
         </div>
-        <button className="btn ghost icon" onClick={onClose} aria-label="Close"><X /></button>
+        <div className="row">
+          {ai.data?.enabled && <Link className="btn" to={askPath(league.id, { prompt: question })}>Ask AI</Link>}
+          <button className="btn ghost icon" onClick={onClose} aria-label="Close"><X /></button>
+        </div>
       </header>
       <div className="drawer-body">
         {p.injury_note && <Notice level="warn">{p.injury_note}</Notice>}

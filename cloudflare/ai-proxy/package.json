@@ -1,0 +1,9 @@
+{
+  "name": "courtside-ai-proxy",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --no-warnings test/*.test.mjs",
+    "deploy": "npx wrangler@4 deploy"
+  }
+}

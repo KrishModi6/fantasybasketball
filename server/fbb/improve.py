@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import math
 
-from scipy.stats import norm
-
 from .context import AnalysisContext, WindowResult
+from .strength import normal_cdf
 from .valuation import player_values, replacement_fp
 
 TOP_FREE_AGENTS = 30
@@ -178,7 +177,7 @@ def lineup_plan(ctx: AnalysisContext, team_id: int, n_days: int = 7) -> list[dic
                 ps, pa = ctx.p_play(pid)[d], ctx.p_play(alt)[d]
                 ms, ma = ctx.proj[pid].fp_pg * ps, ctx.proj[alt].fp_pg * pa
                 sd = math.sqrt(ctx.proj[pid].fp_sd ** 2 + ctx.proj[alt].fp_sd ** 2)
-                conf = float(norm.cdf((ms - ma) / max(sd, 1.0)))
+                conf = normal_cdf((ms - ma) / max(sd, 1.0))
                 alt_name = ctx.proj[alt].name
             starters.append({"player_id": pid, "name": ctx.proj[pid].name, "slot": slot,
                              "projected": ctx.proj[pid].fp_pg * ctx.p_play(pid)[d], "confidence": conf,

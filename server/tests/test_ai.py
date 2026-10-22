@@ -1,0 +1,96 @@
+"""AI assistant: tools run against a real league analysis; the model is a scripted fake."""
+
+from __future__ import annotations
+
+import json
+import os
+
+os.environ.setdefault("FBB_SECRET_KEY", "test-secret-key-not-for-production-use-0123456789")
+
+import pytest  # noqa: E402
+
+from app.services.ai import AIError, ModelTurn, run_assistant, throttle  # noqa: E402
+from app.services.ai_tools import ToolBox, ToolError  # noqa: E402
+from app.services.analysis import LeagueAnalysis  # noqa: E402
+from factories import make_snapshot  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def analysis() -> LeagueAnalysis:
+    return LeagueAnalysis("test-league", 1, make_snapshot())
+
+
+class FakeClient:
+    """Plays back model turns and records what the agent sent."""
+
+    def __init__(self, turns: list[ModelTurn]):
+        self.turns = list(turns)
+        self.requests: list[dict] = []
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        return self.turns.pop(0)
+
+    def close(self):
+        pass
+
+
+def test_every_tool_returns_json(analysis):
+    tb = ToolBox(analysis, my_team_id=1)
+    calls = {
+        "league_overview": {},
+        "team_roster": {},
+        "free_agents": {"sort_by": "games_next_7_days", "limit": 5},
+        "waiver_recommendations": {},
+        "player_details": {"player": "Player 3"},
+        "evaluate_trade": {"other_team": "Team 2", "give": ["Player 1"], "get": ["Player 9"]},
+        "trade_ideas": {},
+        "simulate_matchup": {"week": 2},
+        "league_news": {},
+    }
+    assert set(calls) == {s["name"] for s in ToolBox.schemas()}
+    for name, args in calls.items():
+        out = tb.call(name, args)
+        json.dumps(out)  # must serialise for the model
+    assert len(tb.call("free_agents", {"limit": 5})["players"]) == 5
+    assert tb.call("league_overview", {})["teams"][0]["rank"] == 1
+
+
+def test_name_resolution(analysis):
+    tb = ToolBox(analysis, my_team_id=None)
+    assert tb.player_id("player 12") == "12"
+    with pytest.raises(ToolError):
+        tb.player_id("Nobody Real")
+    with pytest.raises(ToolError):
+        tb.team_id(None)  # no claimed team and none given
+    assert tb.team_id("team 3") == 3
+
+
+def test_agent_runs_tools_then_answers(analysis):
+    throttle.hits.clear()
+    fake = FakeClient([
+        ModelTurn("r1", "", [{"call_id": "c1", "name": "waiver_recommendations", "arguments": "{}"},
+                             {"call_id": "c2", "name": "player_details", "arguments": json.dumps({"player": "Nobody"})}]),
+        ModelTurn("r2", "**Add Free 30.** It adds the most points per week."),
+    ])
+    out = run_assistant(analysis, user_id="u1", my_team_id=1, prompt="Best pickups?", client=fake)
+    assert out["answer"].startswith("**Add")
+    assert [t["name"] for t in out["tools_used"]] == ["waiver_recommendations", "player_details"]
+    assert out["tools_used"][1]["ok"] is False  # unknown player is reported back, not raised
+    follow_up = fake.requests[1]
+    assert follow_up["previous_response_id"] == "r1"
+    sent = {o["call_id"]: json.loads(o["output"]) for o in follow_up["input"]}
+    assert "add_drop_rest_of_season" in sent["c1"] and "error" in sent["c2"]
+    assert "Team 1" in fake.requests[0]["instructions"]  # the user's team is in the context
+
+
+def test_assistant_rate_limit(analysis):
+    throttle.hits.clear()
+    from app.config import get_settings
+
+    limit = get_settings().ai_user_hourly_limit
+    for _ in range(limit):
+        assert throttle.allow("busy", limit)
+    with pytest.raises(AIError) as exc:
+        run_assistant(analysis, user_id="busy", my_team_id=1, prompt="hi", client=FakeClient([]))
+    assert exc.value.status == 429

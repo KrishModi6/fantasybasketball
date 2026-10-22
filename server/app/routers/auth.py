@@ -8,10 +8,12 @@ from ..db import get_db
 from ..deps import current_user
 from ..orm import User
 from ..schemas import LoginIn, RegisterIn
+from ..config import get_settings
 from ..security import RateLimiter, create_token, hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 _login_limiter = RateLimiter(limit=10, window_s=60)
+LOCAL_EMAIL = "local@courtside.app"
 
 
 def _user_out(u: User) -> dict:
@@ -38,6 +40,24 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(func.lower(User.email) == body.email.lower()))
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Email or password is incorrect")
+    return {"token": create_token(user.id), "user": _user_out(user)}
+
+
+@router.post("/local")
+def local_sign_in(request: Request, db: Session = Depends(get_db)):
+    """Desktop app: sign the single local user in without a password.
+
+    Only enabled when the engine runs in local mode, where it listens on 127.0.0.1 only.
+    """
+    if not get_settings().local_mode:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if not request.client or request.client.host not in ("127.0.0.1", "::1"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Local sign-in only works on this computer.")
+    user = db.scalar(select(User).where(User.email == LOCAL_EMAIL))
+    if user is None:
+        user = User(email=LOCAL_EMAIL, display_name="You", password_hash="!local")  # no password can match
+        db.add(user)
+        db.commit()
     return {"token": create_token(user.id), "user": _user_out(user)}
 
 

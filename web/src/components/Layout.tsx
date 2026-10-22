@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useIsFetching, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LogOut, Moon, RefreshCw, Sun } from "lucide-react";
-import { api } from "../lib/api";
+import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
@@ -169,6 +169,7 @@ export function LeagueLayout() {
     { to: `${base}/matchups`, label: "Matchups" },
     { to: `${base}/players`, label: "Players" },
     { to: `${base}/trades`, label: "Trades" },
+    { to: `${base}/assistant`, label: "Assistant" },
     { to: `${base}/league`, label: "League" },
   ];
   const s = league?.settings;
@@ -184,8 +185,12 @@ export function LeagueLayout() {
         <span className="spacer" />
         {league && <SyncStatus league={league} />}
         <ThemeToggle />
-        <span className="small muted hide-sm">{user?.display_name}</span>
-        <button className="btn ghost icon" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut /></button>
+        {!isLocalApp() && (
+          <>
+            <span className="small muted hide-sm">{user?.display_name}</span>
+            <button className="btn ghost icon" onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut /></button>
+          </>
+        )}
       </header>
 
       <nav className="tabstrip" aria-label="Sections">

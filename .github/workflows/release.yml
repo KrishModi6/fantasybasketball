@@ -1,0 +1,124 @@
+name: Build desktop app
+
+# Builds the Courtside desktop app for Windows and macOS with the projection engine bundled,
+# self-tests the engine in the build and in a real Windows installation, and attaches the
+# installers to a GitHub release.
+#
+# Publish: push a tag that matches desktop/package.json's version (v0.1.0), or run this workflow
+# from the Actions tab with "Publish" ticked. Otherwise the files are kept as run artifacts only.
+#
+# The AI assistant is enabled when the COURTSIDE_AI_URL and COURTSIDE_AI_TOKEN repository secrets
+# are set (the Cloudflare Worker in cloudflare/ai-proxy and its CLIENT_TOKEN). See docs/AI.md.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the installers as release v<version> (the version in desktop/package.json)"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # to create the release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+      - name: Read the version
+        id: version
+        shell: bash
+        run: |
+          version=$(node -p "require('./desktop/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but desktop/package.json says $version. Tag v$version, or change the version first."
+            exit 1
+          fi
+      - name: Install dependencies
+        shell: bash
+        run: |
+          pip install -r server/requirements.txt pyinstaller==6.22.3
+          npm ci --prefix web
+          npm ci --prefix desktop
+      - name: Configure the AI assistant
+        shell: bash
+        env:
+          AI_URL: ${{ secrets.COURTSIDE_AI_URL }}
+          AI_TOKEN: ${{ secrets.COURTSIDE_AI_TOKEN }}
+        run: |
+          if [[ -n "$AI_URL" && -n "$AI_TOKEN" ]]; then
+            node -e 'require("fs").writeFileSync("desktop/ai-config.json", JSON.stringify({ url: process.env.AI_URL, token: process.env.AI_TOKEN }))'
+            echo "This build includes the AI assistant."
+          else
+            echo "::warning::COURTSIDE_AI_URL and COURTSIDE_AI_TOKEN are not set, so this build ships without the AI assistant."
+          fi
+      # build-engine runs the engine's self-test on the PyInstaller output before packaging.
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm --prefix desktop run dist:win
+      - name: Build the macOS app
+        if: runner.os == 'macOS'
+        run: npm --prefix desktop run dist:mac
+      - name: Self-test a real installation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\Courtside"
+          $setup = Get-Item desktop\release\Courtside-Setup-*.exe
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/S", "/D=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "The installer failed with exit code $($p.ExitCode)" }
+          $p = Start-Process -FilePath "$dir\resources\engine\courtside-engine.exe" -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "The installed engine failed its self-test with exit code $($p.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Courtside-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            desktop/release/Courtside-Setup-*.exe
+            desktop/release/Courtside-*-mac-*.zip
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag' || inputs.publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.build.outputs.version }}
+        run: |
+          ls -la dist
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "Courtside ${TAG#v}" --notes-file desktop/release-notes.md
+          fi

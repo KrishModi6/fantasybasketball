@@ -21,7 +21,7 @@ from .config import get_settings
 from .db import SessionLocal, init_db
 from .orm import League, LeagueMember
 from .realtime import hub
-from .routers import analysis, auth, cron, leagues, matchups, meta, trades
+from .routers import ai, analysis, auth, cron, leagues, matchups, meta, trades
 from .scheduler import refresh_loop
 from .security import decode_token
 
@@ -49,7 +49,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().origins(), allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
 
-for r in (auth.router, leagues.router, analysis.router, matchups.router, trades.router, meta.router, cron.router):
+for r in (auth.router, leagues.router, analysis.router, matchups.router, trades.router, meta.router, cron.router,
+          ai.router):
     app.include_router(r)
 
 

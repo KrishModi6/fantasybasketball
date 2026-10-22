@@ -381,3 +381,18 @@ export interface SimResult {
     b_cats_mean: number;
   };
 }
+
+export interface AiStatus {
+  mode: "direct" | "proxy" | "off";
+  enabled: boolean;
+  model: string;
+  presets: string[];
+}
+
+export interface AiAnswer {
+  answer: string;
+  response_id: string;
+  tools_used: { name: string; args: Record<string, unknown>; ok: boolean }[];
+  seconds: number;
+  quota: { device_used: number; device_limit: number; resets_at: string } | null;
+}

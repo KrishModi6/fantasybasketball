@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Distribution, MarginChart, SERIES_A, SERIES_B } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, PageHead, Panel, PlayerName } from "../components/ui";
+import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { fmt0, fmt1, pct, shortDate } from "../lib/format";
+import { useAiStatus } from "../lib/queries";
 import type { SimResult, SimTeam, WeekMatchup, WeekOption } from "../lib/types";
 
 interface WeekData {
@@ -19,7 +21,8 @@ const weekLabel = (w: WeekOption) =>
   `${w.is_playoff ? "Playoffs" : `Week ${w.matchup_period}`} (${shortDate(w.start)}–${shortDate(w.end)})${w.is_current ? ", live" : ""}`;
 
 export default function MatchupsPage() {
-  const { league, myTeamId, teams } = useLeagueCtx();
+  const { league, myTeamId, teams, teamName } = useLeagueCtx();
+  const ai = useAiStatus();
   const [params, setParams] = useSearchParams();
   const mpParam = params.get("mp") ? Number(params.get("mp")) : undefined;
   const week = useQuery({
@@ -96,6 +99,12 @@ export default function MatchupsPage() {
             </label>
             {exclude.length > 0 && <button className="btn" onClick={() => setExclude([])}>Reset lineups ({exclude.length} sitting)</button>}
             {sim.isFetching && <span className="small muted">Simulating…</span>}
+            {ai.data?.enabled && a != null && b != null && mp != null && (
+              <Link className="btn" to={askPath(league.id, {
+                prompt: `Game plan for ${teamName(a)} vs ${teamName(b)} in matchup week ${mp}: who is favoured and why, `
+                  + `which players swing it, and which lineup or streaming moves would most help ${teamName(a)}?`,
+              })}>Ask AI</Link>
+            )}
           </div>
 
           {week.data.matchups.length > 0 && (

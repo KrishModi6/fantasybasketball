@@ -1,0 +1,25 @@
+name = "courtside-ai"
+main = "src/worker.mjs"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "courtside-ai"
+database_id = "83459ada-c606-4a08-a668-aefe6ddab213"
+
+[triggers]
+crons = ["17 * * * *"]
+
+# Limits count model calls, not questions: one assistant question usually makes 2 to 4 (at most 7).
+[vars]
+MODEL = "gpt-6-luna"
+MAX_CONCURRENCY = "6"
+PER_MINUTE_LIMIT = "40"
+DAILY_LIMIT = "2000"
+DEVICE_DAILY_LIMIT = "150"
+MAX_OUTPUT_TOKENS = "3000"
+
+# Secrets (never in this file):
+#   OPENAI_API_KEY  add in the Cloudflare dashboard, or: npx wrangler secret put OPENAI_API_KEY
+#   CLIENT_TOKEN    shared with release builds via the COURTSIDE_AI_TOKEN GitHub secret

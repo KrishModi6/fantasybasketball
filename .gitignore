@@ -23,3 +23,8 @@ desktop/release/
 # Local editor/agent config
 .claude/
 *.tsbuildinfo
+
+# Desktop engine build (PyInstaller) and release-only config
+server/build/
+server/dist/
+desktop/ai-config.json

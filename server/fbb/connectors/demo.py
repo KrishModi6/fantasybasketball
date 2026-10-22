@@ -14,13 +14,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..constants import DEFAULT_POINTS_SCORING, DEFAULT_ROSTER_SLOTS
-from ..history import DATA_DIR
+from ..history import CACHE_DIR
 from ..models import FantasyTeam, LeagueSettings, LeagueSnapshot, Matchup, RosterEntry, ScoringSettings
 from ..schedule import build_matchup_periods
 from .base import ConnectorError, ConnectorInfo, LeagueConnector
 from .espn import EspnClient, parse_injury_report, parse_news, parse_player, parse_pro_schedule, attach_injuries
 
-CACHE_DIR = DATA_DIR / "cache"
 POOL_TTL = 6 * 3600
 
 TEAM_NAMES = [

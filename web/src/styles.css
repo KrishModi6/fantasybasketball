@@ -1158,6 +1158,162 @@ table.data > tbody > tr.detail:hover > td {
   overflow-y: auto;
 }
 
+/* ---------- assistant ---------- */
+.transcript {
+  display: grid;
+}
+.turn {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--grid);
+  min-width: 0;
+}
+.turn:first-child {
+  padding-top: 0;
+}
+.turn-q {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.turn-q .who {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent-text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.turn-wait {
+  display: grid;
+  gap: 6px;
+}
+.turn-wait .panel {
+  border: 0;
+  padding: 0;
+  background: none;
+}
+.turn-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11.5px;
+}
+.composer {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.composer textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+}
+.presets > li {
+  padding: 0;
+}
+.preset {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.preset:hover:not([disabled]) {
+  background: var(--hover);
+}
+.preset[disabled] {
+  cursor: default;
+  opacity: 0.55;
+}
+.md {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.md p,
+.md ul,
+.md ol,
+.md blockquote,
+.md pre,
+.md .table-wrap {
+  margin: 0 0 8px;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md h3 {
+  margin: 12px 0 5px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.md h4 {
+  margin: 10px 0 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.md > h3:first-child,
+.md > h4:first-child {
+  margin-top: 0;
+}
+.md ul,
+.md ol {
+  display: grid;
+  gap: 3px;
+  padding-left: 18px;
+}
+.md li::marker {
+  color: var(--muted);
+}
+.md li.d1 {
+  margin-left: 16px;
+}
+.md li.d2 {
+  margin-left: 32px;
+}
+.md strong {
+  font-weight: 600;
+}
+.md code {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 0 3px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.md pre {
+  padding: 8px;
+  overflow-x: auto;
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+.md pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.md blockquote {
+  padding-left: 10px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.md hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid var(--grid);
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 1279px) {
   .workspace {

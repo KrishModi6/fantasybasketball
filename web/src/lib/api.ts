@@ -6,7 +6,7 @@ const SERVER_KEY = "cs.server";
 
 declare global {
   interface Window {
-    courtside?: { defaultServer?: string; platform?: string; version?: string };
+    courtside?: { defaultServer?: string; platform?: string; version?: string; local?: boolean };
   }
 }
 
@@ -27,6 +27,8 @@ function safeSet(key: string, value: string | null) {
 }
 
 export function serverUrl(): string {
+  const cs = window.courtside;
+  if (cs?.local && cs.defaultServer) return cs.defaultServer.replace(/\/$/, ""); // the bundled engine
   const saved = safeGet(SERVER_KEY);
   if (saved) return saved.replace(/\/$/, "");
   if (window.courtside?.defaultServer) return window.courtside.defaultServer.replace(/\/$/, "");
@@ -36,6 +38,8 @@ export function setServerUrl(url: string | null) {
   safeSet(SERVER_KEY, url ? url.trim().replace(/\/$/, "") : null);
 }
 export const isDesktop = () => Boolean(window.courtside);
+/** Desktop app running its own engine: one local user, signed in automatically. */
+export const isLocalApp = () => Boolean(window.courtside?.local);
 
 let token: string | null = safeGet(TOKEN_KEY);
 export const getToken = () => token;

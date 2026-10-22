@@ -12,21 +12,26 @@ import logging
 import threading
 from pathlib import Path
 
-from .history import HISTORY_DIR, load_history
+from .history import CACHE_DIR, HISTORY_DIR, load_history
 from .models import Player
 
 log = logging.getLogger(__name__)
 _BIO_LOCK = threading.Lock()
-BIO_CACHE = HISTORY_DIR / "athletes.json"
+BIO_BUNDLED = HISTORY_DIR / "athletes.json"  # shipped with the training data
+BIO_EXTRA = CACHE_DIR / "athletes_extra.json"  # players first seen at runtime
 
 
-def _load_bios(path: Path = BIO_CACHE) -> dict[str, dict]:
+def _read(path: Path) -> dict[str, dict]:
     if path.exists():
         try:
             return json.loads(path.read_text())
         except json.JSONDecodeError:
             return {}
     return {}
+
+
+def _load_bios() -> dict[str, dict]:
+    return {**_read(BIO_BUNDLED), **_read(BIO_EXTRA)}
 
 
 def fetch_missing_bios(player_ids: list[str], max_fetch: int = 120) -> int:
@@ -48,9 +53,9 @@ def fetch_missing_bios(player_ids: list[str], max_fetch: int = 120) -> int:
                     bios[pid] = {"age": None, "debut_year": None, "error": str(exc)[:60]}
         finally:
             client.close()
-        BIO_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        BIO_CACHE.write_text(json.dumps(bios))
-        load_history.cache_clear()
+        extra = {**_read(BIO_EXTRA), **{pid: bios[pid] for pid in todo}}
+        BIO_EXTRA.parent.mkdir(parents=True, exist_ok=True)
+        BIO_EXTRA.write_text(json.dumps(extra))
         return len(todo)
 
 

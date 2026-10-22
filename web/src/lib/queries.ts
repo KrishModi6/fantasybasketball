@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import type {
+  AiStatus,
   ActivityItem,
   League,
   LeagueSummary,
@@ -80,3 +81,5 @@ export const useActivity = (id: string) =>
 export const useMembers = (id: string) =>
   useQuery({ queryKey: L(id, "members"), queryFn: () => api<Member[]>(`/api/leagues/${id}/members`) });
 export const useModelCard = () => useQuery({ queryKey: ["model"], queryFn: () => api<ModelCard>("/api/model"), staleTime: 3600_000 });
+export const useAiStatus = () =>
+  useQuery({ queryKey: ["ai-status"], queryFn: () => api<AiStatus>("/api/ai/status"), staleTime: 300_000 });

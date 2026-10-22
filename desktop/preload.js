@@ -1,4 +1,4 @@
-// Exposes a tiny, read-only bridge: the default server address and app metadata.
+// Exposes a tiny, read-only bridge: the server address, whether it is the bundled engine, and app metadata.
 const { contextBridge } = require("electron");
 
 function arg(name) {
@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld("courtside", {
   defaultServer: arg("courtside-server"),
   version: arg("courtside-version"),
   platform: process.platform,
+  local: arg("courtside-local") === "1", // talking to the engine bundled with this app
 });
