@@ -80,9 +80,19 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npm --prefix desktop run dist:win
+      # LightGBM's macOS wheel links against OpenMP (libomp) without shipping it. PyInstaller copies
+      # Homebrew's into the engine; the next step checks the app runs once Homebrew's copy is gone.
       - name: Build the macOS app
         if: runner.os == 'macOS'
-        run: npm --prefix desktop run dist:mac
+        run: |
+          brew install libomp
+          npm --prefix desktop run dist:mac
+      - name: Self-test the Mac app without Homebrew's libomp
+        if: runner.os == 'macOS'
+        run: |
+          brew uninstall --ignore-dependencies libomp
+          engine=$(ls -d desktop/release/mac*/Courtside.app)/Contents/Resources/engine/courtside-engine
+          "$engine" --self-test
       - name: Self-test a real installation
         if: runner.os == 'Windows'
         shell: pwsh
