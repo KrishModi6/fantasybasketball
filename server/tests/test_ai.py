@@ -94,3 +94,24 @@ def test_assistant_rate_limit(analysis):
     with pytest.raises(AIError) as exc:
         run_assistant(analysis, user_id="busy", my_team_id=1, prompt="hi", client=FakeClient([]))
     assert exc.value.status == 429
+
+
+def test_users_own_key_goes_straight_to_openai():
+    import httpx
+
+    from app.services.ai import OPENAI_URL, ResponsesClient, ai_mode
+
+    assert ai_mode("sk-user-key") == "direct"
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.update(url=str(req.url), auth=req.headers["authorization"], body=json.loads(req.content))
+        return httpx.Response(200, json={"id": "r1", "output": [
+            {"type": "message", "content": [{"type": "output_text", "text": "Hi"}]}]})
+
+    client = ResponsesClient("device", api_key="sk-user-key")
+    client.http = httpx.Client(transport=httpx.MockTransport(handler))
+    turn = client.create(input=[{"role": "user", "content": "hi"}], instructions="x", tools=[], previous_response_id=None)
+    assert turn.text == "Hi"
+    assert seen["url"] == OPENAI_URL and seen["auth"] == "Bearer sk-user-key"
+    assert seen["body"]["model"]  # direct mode names the model itself

@@ -6,8 +6,10 @@
 // Release builds carry the Courtside engine (server/engine.py, built with PyInstaller) and start
 // it on 127.0.0.1 with the league database in the user's app-data folder: nothing to install or
 // host. Without a bundled engine (development), the app talks to COURTSIDE_SERVER or localhost.
+//
+// Installed builds keep themselves up to date from the GitHub releases (see setupUpdates).
 
-const { app, BrowserWindow, Menu, dialog, net, protocol, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -20,6 +22,12 @@ const HOST = "fbb";
 const WEB_ROOT = path.join(__dirname, "web-dist");
 const ENGINE_NAME = process.platform === "win32" ? "courtside-engine.exe" : "courtside-engine";
 const ENGINE_START_TIMEOUT_MS = 90_000;
+const RELEASES_URL = "https://github.com/KrishModi6/fantasybasketball/releases/latest";
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+// Windows downloads and installs updates by itself. The Mac app is only ad-hoc signed, and macOS
+// won't swap in an update that isn't signed by a registered developer, so there the app says a new
+// version is out and opens the download.
+const CAN_INSTALL_UPDATES = process.platform === "win32";
 
 protocol.registerSchemesAsPrivileged([
   { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -27,6 +35,24 @@ protocol.registerSchemesAsPrivileged([
 
 let engine = null; // { child, url }
 let quitting = false;
+let updater = null; // { check, install } once auto-update is running
+// What the app shows: idle | checking | current | downloading | ready (to install) | available (to download) | error
+let update = { status: "idle" };
+
+const engineRunning = () => Boolean(engine) && engine.child.exitCode === null && engine.child.signalCode === null;
+
+/** Stops the engine and waits (briefly) until it has exited and released its files. */
+function stopEngine() {
+  if (!engineRunning()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 5000);
+    engine.child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    engine.child.kill();
+  });
+}
 
 function engineExecutable() {
   if (process.env.COURTSIDE_SERVER) return null; // explicitly pointed at a server
@@ -149,6 +175,14 @@ i::after{content:"";position:absolute;inset:0;width:40%;background:#3b82f6;anima
 @keyframes s{from{transform:translateX(-100%)}to{transform:translateX(250%)}}</style></head>
 <body><div><b>Courtside</b><span>Starting the projection engine…</span><i></i></div></body></html>`)}`;
 
+// Back/forward through the app's own pages (the React router pushes real history entries).
+function stepHistory(win, delta) {
+  if (!win || win.isDestroyed()) return;
+  const history = win.webContents.navigationHistory ?? win.webContents; // navigationHistory: Electron 32+
+  if (delta < 0 && history.canGoBack()) history.goBack();
+  else if (delta > 0 && history.canGoForward()) history.goForward();
+}
+
 function createWindow(server, local) {
   const win = new BrowserWindow({
     width: 1360,
@@ -173,6 +207,16 @@ function createWindow(server, local) {
   });
   win.once("ready-to-show", () => win.show());
 
+  // Mouse back/forward buttons (Windows, Linux) and trackpad swipes (macOS).
+  win.on("app-command", (_e, cmd) => {
+    if (cmd === "browser-backward") stepHistory(win, -1);
+    else if (cmd === "browser-forward") stepHistory(win, 1);
+  });
+  win.on("swipe", (_e, direction) => {
+    if (direction === "right") stepHistory(win, -1);
+    else if (direction === "left") stepHistory(win, 1);
+  });
+
   // Links to ESPN, docs, etc. open in the system browser, never inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
@@ -192,6 +236,108 @@ function loadApp(win) {
   else win.loadURL(`${SCHEME}://${HOST}/`);
 }
 
+function publishUpdate(next) {
+  update = { ...next, current: app.getVersion(), canInstall: CAN_INSTALL_UPDATES };
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send("courtside:update", update);
+  }
+}
+
+function fileLogger(file) {
+  const write = (level) => (...parts) =>
+    fs.appendFile(file, `${new Date().toISOString()} ${level} ${parts.join(" ")}\n`, () => undefined);
+  return { info: write("INFO"), warn: write("WARN"), error: write("ERROR"), debug: () => undefined };
+}
+
+function promptRestart() {
+  dialog.showMessageBox({
+    type: "info",
+    title: "Courtside",
+    message: `Courtside ${update.version} is ready to install.`,
+    detail: "Restart now, or it installs the next time you close Courtside. Your leagues stay as they are.",
+    buttons: ["Restart now", "Later"],
+    defaultId: 0,
+  }).then(({ response }) => response === 0 && updater?.install());
+}
+
+// Checks the GitHub releases (app-update.yml, written at build time from package.json's "publish")
+// shortly after launch and every few hours. Windows downloads in the background and installs on
+// restart; the Mac only reports the new version (see CAN_INSTALL_UPDATES).
+function setupUpdates() {
+  if (!app.isPackaged) return; // development runs have no release feed
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch (err) {
+    console.error("Auto-update unavailable:", err);
+    return;
+  }
+  const logs = path.join(app.getPath("userData"), "logs");
+  fs.mkdirSync(logs, { recursive: true });
+  autoUpdater.logger = fileLogger(path.join(logs, "updates.log"));
+  autoUpdater.autoDownload = CAN_INSTALL_UPDATES;
+  autoUpdater.autoInstallOnAppQuit = CAN_INSTALL_UPDATES;
+  autoUpdater.disableWebInstaller = true; // releases ship the full installer
+
+  let manual = false; // a check from the Help menu answers "up to date" and errors in a dialog
+  autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking" }));
+  autoUpdater.on("update-not-available", () => {
+    publishUpdate({ status: "current" });
+    if (manual) {
+      dialog.showMessageBox({ type: "info", title: "Courtside", message: "You're up to date.",
+        detail: `Courtside ${app.getVersion()} is the latest version.` });
+    }
+    manual = false;
+  });
+  autoUpdater.on("update-available", (info) => {
+    publishUpdate({ status: CAN_INSTALL_UPDATES ? "downloading" : "available", version: info.version, percent: 0 });
+    manual = false;
+  });
+  autoUpdater.on("download-progress", (p) =>
+    publishUpdate({ status: "downloading", version: update.version, percent: Math.round(p.percent) }));
+  autoUpdater.on("update-downloaded", (info) => publishUpdate({ status: "ready", version: info.version }));
+  autoUpdater.on("error", (err) => {
+    const message = err?.message ?? String(err);
+    publishUpdate({ status: "error", version: update.version, error: message });
+    if (manual) {
+      dialog.showMessageBox({ type: "warning", title: "Courtside", message: "Couldn't check for updates.",
+        detail: `${message.split("\n")[0]}\n\nThe latest version is always at ${RELEASES_URL}` });
+    }
+    manual = false;
+  });
+
+  const check = (fromMenu = false) => {
+    if (update.status === "ready") return fromMenu && promptRestart();
+    if (update.status === "downloading" || update.status === "checking") return;
+    manual = fromMenu;
+    autoUpdater.checkForUpdates().catch(() => undefined); // failures also arrive as "error" events
+  };
+  updater = {
+    check,
+    install: async () => {
+      if (update.status !== "ready") return;
+      // The installer replaces the engine's files, so the engine has to be gone first.
+      quitting = true;
+      await stopEngine();
+      autoUpdater.quitAndInstall(true, true); // install silently, then reopen Courtside
+    },
+  };
+  setTimeout(check, 15_000);
+  setInterval(check, UPDATE_CHECK_INTERVAL_MS);
+}
+
+function setupIpc() {
+  // Only Courtside's own pages may drive updates.
+  const fromApp = (event) => {
+    const url = event.senderFrame?.url ?? "";
+    return url.startsWith(`${SCHEME}://${HOST}/`)
+      || (process.argv.includes("--dev") && url.startsWith(process.env.COURTSIDE_DEV_URL || "http://localhost:5173"));
+  };
+  ipcMain.handle("courtside:update-state", () => update);
+  ipcMain.handle("courtside:update-install", (event) => (fromApp(event) ? updater?.install() : undefined));
+  ipcMain.handle("courtside:update-download", (event) => (fromApp(event) ? shell.openExternal(RELEASES_URL) : undefined));
+}
+
 function buildMenu() {
   const isMac = process.platform === "darwin";
   const template = [
@@ -200,13 +346,24 @@ function buildMenu() {
     { role: "editMenu" },
     {
       label: "View",
-      submenu: [{ role: "reload" }, { role: "toggleDevTools" }, { type: "separator" }, { role: "resetZoom" },
+      submenu: [
+        { label: "Back", accelerator: isMac ? "Cmd+[" : "Alt+Left", click: (_item, win) => stepHistory(win, -1) },
+        { label: "Forward", accelerator: isMac ? "Cmd+]" : "Alt+Right", click: (_item, win) => stepHistory(win, 1) },
+        { type: "separator" },
+        { role: "reload" }, { role: "toggleDevTools" }, { type: "separator" }, { role: "resetZoom" },
         { role: "zoomIn" }, { role: "zoomOut" }, { type: "separator" }, { role: "togglefullscreen" }],
     },
     { role: "windowMenu" },
     {
       role: "help",
       submenu: [
+        {
+          label: "Check for updates…",
+          click: () => (updater ? updater.check(true) : dialog.showMessageBox({ type: "info", title: "Courtside",
+            message: "Updates are checked in installed copies of Courtside.", detail: `Downloads: ${RELEASES_URL}` })),
+        },
+        { label: "Download page", click: () => shell.openExternal(RELEASES_URL) },
+        { type: "separator" },
         { label: "Open engine log", click: () => engine && shell.showItemInFolder(engine.logFile) },
         { role: "about" },
       ],
@@ -217,7 +374,9 @@ function buildMenu() {
 
 async function boot() {
   serveApp();
+  setupIpc();
   buildMenu();
+  setupUpdates();
   const exe = engineExecutable();
   if (!exe) {
     loadApp(createWindow(process.env.COURTSIDE_SERVER || "http://localhost:8000", false));
@@ -261,9 +420,15 @@ if (!app.requestSingleInstanceLock()) {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
   quitting = true;
+  if (update.status === "ready" && engineRunning()) {
+    // A downloaded update installs as Courtside closes, and it can't replace the engine's files while
+    // the engine still runs: stop it, then quit for real.
+    event.preventDefault();
+    stopEngine().then(() => app.quit());
+  }
 });
 app.on("will-quit", () => {
-  if (engine && engine.child.exitCode === null) engine.child.kill();
+  if (engineRunning()) engine.child.kill();
 });

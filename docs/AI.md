@@ -28,6 +28,7 @@ The server picks a transport from its settings (`server/app/services/ai.py`):
 
 | Mode | Settings | Used by |
 |---|---|---|
+| `direct` | The user's own key, saved under **Assistant > Your OpenAI key** | Anyone who wants to use their own OpenAI account; it's checked against OpenAI, stored encrypted, and used only for that user's questions |
 | `direct` | `FBB_OPENAI_API_KEY` | A hosted server that holds its own key |
 | `proxy` | `FBB_AI_PROXY_URL` + `FBB_AI_PROXY_TOKEN` | The desktop app: the key stays in Cloudflare |
 | `off` | neither | The Assistant tab explains how to turn it on |

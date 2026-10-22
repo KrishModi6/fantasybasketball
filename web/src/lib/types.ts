@@ -41,7 +41,7 @@ export interface League {
   season: number;
   source: LeagueSummary["source"];
   sync: { status: string; error: string | null; last_synced_at: string | null; interval_hours: number };
-  connector: { espn_league_id: string | null; has_cookies: boolean | null };
+  connector: { espn_league_id: string | null; has_cookies: boolean | null; shared_by: string | null };
   me: { role: "owner" | "member"; team_id: number | null } | null;
   member_count: number;
   teams: TeamRef[];
@@ -387,6 +387,9 @@ export interface AiStatus {
   enabled: boolean;
   model: string;
   presets: string[];
+  own_key: boolean;
+  own_key_hint: string | null;
+  shared: boolean;
 }
 
 export interface AiAnswer {

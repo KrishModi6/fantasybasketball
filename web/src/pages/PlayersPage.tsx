@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented } from "../components/ui";
 import { fmt0, fmt1 } from "../lib/format";
@@ -20,11 +21,22 @@ const COLUMNS: { key: string; label: string; title: string; hideSm?: boolean }[]
 
 export default function PlayersPage() {
   const { league, teamName, openPlayer } = useLeagueCtx();
-  const [status, setStatus] = useState<Status>("fa");
-  const [pos, setPos] = useState("");
+  // Filters live in the URL so Back (or reopening the app) returns to the same list.
+  const [search, setSearch] = useSearchParams();
+  const status = (search.get("status") as Status) || "fa";
+  const pos = search.get("pos") ?? "";
+  const sort = search.get("sort") || "ros_value";
+  const setParam = (key: string, value: string, fallback: string) => {
+    const next = new URLSearchParams(search);
+    if (value === fallback) next.delete(key);
+    else next.set(key, value);
+    setSearch(next, { replace: true });
+  };
+  const setStatus = (v: Status) => setParam("status", v, "fa");
+  const setPos = (v: string) => setParam("pos", v, "");
+  const setSort = (v: string) => setParam("sort", v, "ros_value");
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
-  const [sort, setSort] = useState("ros_value");
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q), 220);
     return () => clearTimeout(t);

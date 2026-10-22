@@ -2,13 +2,15 @@
 
 ## Getting in
 
-- **Invited by your commissioner?** Open the invite link (or enter the code under *Join with a code*). Create an account, pick your team, and you're in.
+- **Invited by your commissioner?** In the desktop app, choose **Join with invite** and paste the message or code they sent (it starts with `CS1.`). Courtside connects the league for you, with no league ID or ESPN cookies to find. On a shared server, open the invite link instead, create an account and pick your team.
 - **Starting a league hub?** Create an account, then choose one of:
   - **Connect ESPN league:** paste the league URL. Private leagues also need two browser cookies; see the help text in the form.
   - **Import a file:** CSV/JSON rosters, for Yahoo, Sleeper or anything else.
   - **Try a demo league:** explore with a realistic 10-team league.
 
-Then open **League → Invites → New invite** and share the link.
+Then press **Invite** in the top bar. In the desktop app that makes an invite code: copy the invite message (download link, steps and code) and send it to your league. For a private ESPN league the code includes your ESPN cookies, so send it only to people in your league. On a shared server it makes an invite link instead.
+
+Courtside reopens where you left off. The back arrow (or your mouse's back button, or Alt+Left) steps back through pages within the league; **All leagues** in the league menu lists every league.
 
 ## Pages
 

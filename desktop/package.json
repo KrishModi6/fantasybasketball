@@ -1,7 +1,7 @@
 {
   "name": "courtside-desktop",
   "productName": "Courtside",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Courtside fantasy basketball analytics for macOS and Windows",
   "main": "main.js",
   "author": "Courtside",
@@ -17,6 +17,9 @@
     "dist:mac": "npm run build:web && npm run copy:web && npm run build:engine && electron-builder --mac zip --publish never",
     "dist:dir": "npm run build:web && npm run copy:web && npm run build:engine && electron-builder --dir --publish never"
   },
+  "dependencies": {
+    "electron-updater": "6.3.9"
+  },
   "devDependencies": {
     "electron": "33.2.1",
     "electron-builder": "25.1.8"
@@ -24,6 +27,14 @@
   "build": {
     "appId": "app.courtside.desktop",
     "productName": "Courtside",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "KrishModi6",
+        "repo": "fantasybasketball",
+        "releaseType": "release"
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",

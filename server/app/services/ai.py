@@ -1,7 +1,8 @@
 """AI assistant: an OpenAI Responses-API agent that answers with Courtside's own numbers.
 
 Two transports, chosen by configuration:
-  direct  FBB_OPENAI_API_KEY is set (a hosted server holding its own key)
+  direct  the user saved their own OpenAI key in the app, or FBB_OPENAI_API_KEY is set (a hosted
+          server holding its own key)
   proxy   FBB_AI_PROXY_URL + FBB_AI_PROXY_TOKEN (the desktop app; the key lives only in the
           Cloudflare Worker in cloudflare/ai-proxy, which also enforces rate limits)
 
@@ -46,21 +47,40 @@ class ModelTurn:
     quota: dict | None = None  # proxy only: {device_used, device_limit, resets_at}
 
 
-def ai_mode() -> str:
+def ai_mode(user_key: str | None = None) -> str:
     s = get_settings()
-    if s.openai_api_key:
+    if user_key or s.openai_api_key:
         return "direct"
     if s.ai_proxy_url and s.ai_proxy_token:
         return "proxy"
     return "off"
 
 
+def check_openai_key(api_key: str) -> None:
+    """Confirm OpenAI accepts the key and it can use the configured model; raises AIError if not."""
+    model = get_settings().ai_model
+    try:
+        r = httpx.get(f"https://api.openai.com/v1/models/{model}", headers={"Authorization": f"Bearer {api_key}"},
+                      timeout=20.0)
+    except httpx.HTTPError as exc:
+        raise AIError(502, "Couldn't reach OpenAI to check the key. Check your internet connection.") from exc
+    if r.status_code == 401:
+        raise AIError(400, "OpenAI didn't accept that key. Copy it again from platform.openai.com/api-keys.")
+    if r.status_code == 404:
+        raise AIError(400, f"OpenAI accepted the key, but its project can't use {model}. "
+                           "Allow that model for the project at platform.openai.com, or use another key.")
+    # 403 means a restricted key without permission to list models; it can still call the Responses API.
+    if r.status_code >= 400 and r.status_code != 403:
+        raise AIError(400, _error_message(r))
+
+
 class ResponsesClient:
     """Minimal OpenAI Responses API client (direct, or through the Courtside AI proxy)."""
 
-    def __init__(self, device_id: str, timeout: float = 120.0):
+    def __init__(self, device_id: str, timeout: float = 120.0, api_key: str | None = None):
         self.s = get_settings()
-        self.mode = ai_mode()
+        self.mode = ai_mode(api_key)
+        self.api_key = api_key or self.s.openai_api_key
         self.device_id = device_id
         self.http = httpx.Client(timeout=timeout)
 
@@ -73,7 +93,7 @@ class ResponsesClient:
             body["previous_response_id"] = previous_response_id
         if self.mode == "direct":
             body.update({"model": self.s.ai_model, "reasoning": {"effort": "low"}, "max_output_tokens": 3000})
-            url, headers = OPENAI_URL, {"Authorization": f"Bearer {self.s.openai_api_key}"}
+            url, headers = OPENAI_URL, {"Authorization": f"Bearer {self.api_key}"}
         elif self.mode == "proxy":
             url = self.s.ai_proxy_url.rstrip("/") + "/v1/responses"
             headers = {"Authorization": f"Bearer {self.s.ai_proxy_token}", "X-Device-Id": self.device_id}
@@ -185,7 +205,8 @@ def _context(a: LeagueAnalysis, my_team_id: int | None) -> str:
 
 
 def run_assistant(a: LeagueAnalysis, *, user_id: str, my_team_id: int | None, prompt: str,
-                  previous_response_id: str | None = None, client: ResponsesClient | None = None) -> dict:
+                  previous_response_id: str | None = None, client: ResponsesClient | None = None,
+                  api_key: str | None = None) -> dict:
     s = get_settings()
     if not throttle.allow(user_id, s.ai_user_hourly_limit):
         raise AIError(429, f"You've used the assistant {s.ai_user_hourly_limit} times this hour. Try again later.")
@@ -193,7 +214,7 @@ def run_assistant(a: LeagueAnalysis, *, user_id: str, my_team_id: int | None, pr
     schemas = ToolBox.schemas()
     instructions = SYSTEM + "\n" + _context(a, my_team_id)
     own_client = client is None
-    client = client or ResponsesClient(device_id_for(user_id))
+    client = client or ResponsesClient(device_id_for(user_id), api_key=api_key)
     used: list[dict] = []
     started = time.monotonic()
     try:

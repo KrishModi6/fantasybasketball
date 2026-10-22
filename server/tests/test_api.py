@@ -111,6 +111,54 @@ def test_full_flow(client):
     assert det2["mpg"] > det["mpg"]
 
 
+def test_league_code_join(client):
+    """A league code lets someone on another copy of Courtside connect the same league in one step."""
+    owner = _auth(client, "code-owner@example.com", "Code Owner")
+    lg = client.post("/api/leagues", json={"source": "demo", "name": "Code League", "team_count": 8}, headers=owner).json()
+    team = lg["teams"][3]["id"]
+    r = client.post(f"/api/leagues/{lg['id']}/share-code", json={"team_id": team}, headers=owner)
+    assert r.status_code == 200, r.text
+    code = r.json()["code"]
+    assert code.startswith("CS1.") and r.json()["includes_login"] is False
+
+    friend = _auth(client, "code-friend@example.com", "Friend")
+    wrapped = "Join us! " + "\n".join(code[i:i + 60] for i in range(0, len(code), 60))  # as a chat app wraps it
+    r = client.post("/api/join-code", json={"code": wrapped}, headers=friend)
+    assert r.status_code == 201, r.text
+    joined = r.json()
+    assert joined["id"] != lg["id"] and joined["name"] == "Code League" and len(joined["teams"]) == 8
+    assert joined["me"] == {"role": "owner", "team_id": team}  # their own copy, with the team picked for them
+    assert joined["connector"]["shared_by"] == "Code Owner"
+
+    # Members can't make codes; damaged codes get a plain message.
+    assert client.post(f"/api/leagues/{lg['id']}/share-code", json={}, headers=friend).status_code == 404
+    bad = client.post("/api/join-code", json={"code": code[:-12]}, headers=friend)
+    assert bad.status_code == 422 and "incomplete" in bad.json()["detail"]
+    assert client.post("/api/join-code", json={"code": "7KQ2MZ4P-not-a-code"}, headers=friend).status_code == 422
+
+
+def test_own_openai_key(client, monkeypatch):
+    import app.routers.ai as ai_router
+    from app.services.ai import AIError
+
+    def fake_check(key):
+        if key.endswith("bad"):
+            raise AIError(400, "OpenAI didn't accept that key.")
+
+    monkeypatch.setattr(ai_router, "check_openai_key", fake_check)
+    user = _auth(client, "keyholder@example.com", "Key Holder")
+    st = client.get("/api/ai/status", headers=user).json()
+    assert st["own_key"] is False
+    assert client.put("/api/ai/key", json={"api_key": "not-a-key-at-all-xxxxxxxx"}, headers=user).status_code == 422
+    assert client.put("/api/ai/key", json={"api_key": "sk-test-0123456789abcdefbad"}, headers=user).status_code == 400
+    r = client.put("/api/ai/key", json={"api_key": " sk-test-0123456789abcdefWXYZ "}, headers=user)
+    assert r.status_code == 200, r.text
+    assert r.json().items() >= {"own_key": True, "own_key_hint": "WXYZ", "mode": "direct", "enabled": True}.items()
+    other = _auth(client, "nokey@example.com", "No Key")
+    assert client.get("/api/ai/status", headers=other).json()["own_key"] is False  # keys are per user
+    r = client.delete("/api/ai/key", headers=user)
+    assert r.json()["own_key"] is False and r.json()["own_key_hint"] is None
+
 def test_auth_errors(client):
     assert client.get("/api/leagues").status_code == 401
     r = client.post("/api/auth/login", json={"email": "nobody@example.com", "password": "whatever123"})

@@ -4,9 +4,30 @@
 const TOKEN_KEY = "cs.token";
 const SERVER_KEY = "cs.server";
 
+/** Auto-update status from the desktop app (see desktop/main.js). */
+export interface UpdateState {
+  status: "idle" | "checking" | "current" | "downloading" | "ready" | "available" | "error";
+  current?: string;
+  version?: string;
+  percent?: number;
+  error?: string;
+  canInstall?: boolean;
+}
+
 declare global {
   interface Window {
-    courtside?: { defaultServer?: string; platform?: string; version?: string; local?: boolean };
+    courtside?: {
+      defaultServer?: string;
+      platform?: string;
+      version?: string;
+      local?: boolean;
+      updates?: {
+        state: () => Promise<UpdateState>;
+        install: () => Promise<void>;
+        download: () => Promise<void>;
+        onChange: (callback: (state: UpdateState) => void) => () => void;
+      };
+    };
   }
 }
 
