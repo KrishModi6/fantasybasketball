@@ -143,6 +143,7 @@ jobs:
           ls -la dist
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file desktop/release-notes.md
           else
             gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "Courtside ${TAG#v}" --notes-file desktop/release-notes.md
           fi
