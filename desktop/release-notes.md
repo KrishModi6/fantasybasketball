@@ -8,7 +8,7 @@ Courtside runs on your computer: projections, power rankings, matchup simulation
 - **See which version you're on.** The top bar shows your version (v0.2.3) and whether it's up to date. Click it to check for updates now, or to get the new version when one is out.
 - **Update checks at least once a day.** Courtside already checked when it opened and every 4 hours, but those timers pause while the computer sleeps. It now also checks when your computer wakes up or when you come back to Courtside after a few hours, so a new version shows up within a day.
 
-Already on 0.2.0 or later? This update installs itself. Restart Courtside when it asks.
+Already on 0.2.0 or later? On Windows this update installs itself: restart Courtside when it asks. On a Mac, follow **Updating on a Mac** below.
 
 ## Install on Windows
 
@@ -22,13 +22,53 @@ Start Courtside from the Start menu or the desktop shortcut. To remove it, use *
 
 ## Install on a Mac (Apple Silicon: M1 or newer)
 
-1. Download **Courtside-<version>-mac-arm64.zip** below and double-click it to unzip.
-2. Drag **Courtside** into your **Applications** folder.
-3. Open it. macOS will say it can't verify the developer, because the app isn't notarized by Apple. Click **Done**, open **System Settings > Privacy & Security**, scroll down and click **Open Anyway** next to Courtside, then confirm.
+The Mac app isn't signed with a paid Apple developer certificate, so macOS makes you approve it once. These steps are written for macOS Sequoia (15) and later; older versions work the same way.
 
-You only do step 3 once.
+### 1. Download and unzip
 
-When a new version is out, Courtside shows a banner with a **Download** button. Replace the old app in Applications with the new one; your leagues stay. (Macs can't update by themselves because the app isn't signed with a paid Apple developer certificate.)
+1. Download **Courtside-<version>-mac-arm64.zip** below.
+2. Open **Downloads** in Finder and double-click the zip. A **Courtside** app (basketball icon) appears next to it.
+
+### 2. Move it to Applications
+
+1. Click the Finder icon in the Dock, then press **Cmd + Shift + A** (or choose **Go > Applications** in the menu bar). The Applications folder opens.
+2. Open a second Finder window with **Cmd + N** and go to **Downloads** with **Cmd + Option + L**.
+3. Drag **Courtside** from Downloads into the Applications window. If it asks to replace an older Courtside, click **Replace**. Your leagues are stored separately, so they stay.
+
+Don't see Applications in the Finder sidebar? Choose **Finder > Settings**, open the **Sidebar** tab and tick **Applications**.
+
+### 3. Let macOS open it (first time only)
+
+1. Open **Terminal**: press **Cmd + Space**, type **Terminal** and press **Return**.
+2. Copy this line, paste it into Terminal with **Cmd + V** and press **Return**. Nothing prints if it worked.
+
+   ```
+   xattr -cr /Applications/Courtside.app
+   ```
+
+3. Open Courtside from Applications, or press **Cmd + Space**, type **Courtside** and press **Return**.
+
+Why this step? macOS flags apps downloaded in a browser, and for apps without a paid Apple signature it says **"Courtside is damaged and can't be opened"** with **Cancel** and **Move to Trash**. It isn't damaged. Click **Cancel** (never Move to Trash) and run the command above; it clears the download flag.
+
+**If you see a different message:**
+
+- **"Apple could not verify 'Courtside' is free of malware"** with **Done**: click **Done**, open **Apple menu > System Settings > Privacy & Security**, scroll down to **Security**, click **Open Anyway** next to Courtside and enter your Mac password. Open Courtside again and click **Open Anyway**. (Right-click > Open no longer works for this since macOS Sequoia.)
+- **"Terminal would like to modify apps on your Mac"**: click **Allow**, then run the command again.
+- **"Operation not permitted"** in Terminal: open **System Settings > Privacy & Security > App Management**, turn on **Terminal**, quit Terminal (**Cmd + Q**), reopen it and run the command again.
+- **"No such file or directory"** in Terminal: Courtside isn't in Applications yet. Go back to step 2.
+- **"You can't open the application because it is not supported on this type of Mac"**: this build is for Apple Silicon (M1 or newer) only. Intel Macs aren't supported yet.
+- It shows **"Starting the projection engine…"** and then **"Courtside could not start"**: run the Terminal command from step 3 again and reopen Courtside. If it still fails, the details are in `~/Library/Application Support/Courtside/logs/engine.log`.
+
+To keep Courtside in the Dock, right-click its icon while it's open and choose **Options > Keep in Dock**. You can delete the zip from Downloads afterwards.
+
+### Updating on a Mac
+
+Macs can't install updates by themselves (that needs the paid certificate), so Courtside tells you instead. It checks at least once a day; when a new version is out, the version label in the top bar turns blue (for example **0.2.4 available**) and a banner offers **Download**.
+
+1. Click **Download** (or the version label) and unzip the new zip from Downloads.
+2. Quit Courtside with **Cmd + Q**.
+3. Drag the new **Courtside** into Applications and click **Replace**.
+4. Run the Terminal command from step 3 again, then open Courtside. Your leagues stay.
 
 ## First run
 

@@ -1,0 +1,29 @@
+name: Update release notes
+
+# Replaces a published release's notes with desktop/release-notes.md, without rebuilding the
+# installers (installed apps keep the files they already downloaded). Run it from the Actions tab
+# after editing the notes on main.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (leave empty for v<the version in desktop/package.json>)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write # to edit the release
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          tag="${TAG:-v$(node -p "require('./desktop/package.json').version")}"
+          gh release edit "$tag" --notes-file desktop/release-notes.md
+          echo "Updated the notes of $tag"
