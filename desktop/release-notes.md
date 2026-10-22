@@ -1,13 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.2.1
+## What's new in 0.2.2
 
-- **Fantasy weeks match ESPN.** ESPN leagues showed every "week" as a single day, so matchup odds, weekly projections and playoff odds were based on one day. Weeks now match ESPN's calendar, including the two-week NBA Cup and All-Star matchups.
-- **Your team is remembered.** Pick it once (Overview or the Team tab) and every page opens on it. If you connected an ESPN league with your own cookies, Courtside finds your team for you.
-- **Better trade finder.** "Up to 2-for-2" now returns a varied list from several teams, with 2-for-2 deals when one works for both sides.
-- **The league board stays current.** Trades and waiver moves made on ESPN show up in the league feed and under Trades > League board, shared trade ideas are re-scored after every refresh, and data refreshes every hour and whenever you open the app.
+- **Much bigger AI allowance.** Each computer can now make about three times as many assistant requests a day (450 model calls, roughly 110-220 questions), and the app's hourly cap went from 30 to 100 questions. If you add your own OpenAI key on the Assistant tab, there's no hourly cap at all.
+- Projection weighting was re-checked against every game of the last two seasons. Leaning harder on the latest games made projections less accurate, so the model is unchanged.
 
-Already on 0.2.0? This update installs itself. Restart Courtside when it asks.
+Already on 0.2.0 or later? This update installs itself. Restart Courtside when it asks.
 
 ## Install on Windows
 

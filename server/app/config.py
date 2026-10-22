@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     ai_proxy_token: str = ""
     ai_model: str = "gpt-6-luna"
     ai_max_rounds: int = 6
-    ai_user_hourly_limit: int = 30
+    ai_user_hourly_limit: int = 100  # questions per user per hour on the shared key or proxy (own keys: no limit)
     # Desktop app: a single local user signs in automatically (the engine only listens on 127.0.0.1).
     local_mode: bool = False
 

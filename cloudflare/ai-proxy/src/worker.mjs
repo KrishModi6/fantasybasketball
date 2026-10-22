@@ -21,10 +21,10 @@ export class HttpError extends Error {
 const limit = (value, fallback) => /^\d+$/.test(String(value)) && Number(value) > 0 ? Number(value) : fallback;
 export function limits(env) {
   return {
-    concurrency: limit(env.MAX_CONCURRENCY, 6),
-    perMinute: limit(env.PER_MINUTE_LIMIT, 40),
-    perDay: limit(env.DAILY_LIMIT, 2000),
-    perDeviceDay: limit(env.DEVICE_DAILY_LIMIT, 150),
+    concurrency: limit(env.MAX_CONCURRENCY, 12),
+    perMinute: limit(env.PER_MINUTE_LIMIT, 120),
+    perDay: limit(env.DAILY_LIMIT, 6000),
+    perDeviceDay: limit(env.DEVICE_DAILY_LIMIT, 450),
     maxOutputTokens: limit(env.MAX_OUTPUT_TOKENS, 3000),
   };
 }

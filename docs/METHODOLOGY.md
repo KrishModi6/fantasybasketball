@@ -82,6 +82,8 @@ rate = (K · preseason_rate + Σ w_g · stat_g) / (K + Σ w_g · minutes_g)
 
 Steals need about 3× more minutes than rebounds before this season's sample dominates. Minutes per game update faster: 8 games of prior weight with a 10-game half-life, because roles change.
 
+How quickly old evidence fades is tested, not assumed. `scripts/backtest_recency.py` replays every game of 2024-25 and 2025-26: each player starts from the preseason projection the app would have made (ML refit on earlier seasons only), takes in his first 3 to 35 games, and is scored on his rest-of-season FP/G. Fading faster (12- and 5-game half-lives) was about 0.4% less accurate, and no recency weighting was 1.0-1.4% less accurate. Down-weighting older seasons in the preseason baseline (6/2/0 instead of 6/3/1) helps SPS on its own by 0.8% but changes the blended projection by under 0.05%, because the ML model already learns how much each past season counts from separate last-season and two-seasons-ago inputs.
+
 Game-to-game volatility of fantasy points is the player's recent standard deviation, shrunk toward the population coefficient of variation (0.51, measured).
 
 ### 1.6 Bounded adjustments (the "news" layer)

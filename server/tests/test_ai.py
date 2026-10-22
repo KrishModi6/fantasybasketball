@@ -115,3 +115,14 @@ def test_users_own_key_goes_straight_to_openai():
     assert turn.text == "Hi"
     assert seen["url"] == OPENAI_URL and seen["auth"] == "Bearer sk-user-key"
     assert seen["body"]["model"]  # direct mode names the model itself
+
+
+def test_own_key_is_not_rationed(analysis):
+    from app.config import get_settings
+
+    throttle.hits.clear()
+    for _ in range(get_settings().ai_user_hourly_limit):
+        assert throttle.allow("keyholder", get_settings().ai_user_hourly_limit)
+    out = run_assistant(analysis, user_id="keyholder", my_team_id=1, prompt="hi", api_key="sk-own",
+                        client=FakeClient([ModelTurn("r1", "Sure.")]))
+    assert out["answer"] == "Sure."  # the shared hourly cap doesn't apply to their own key
