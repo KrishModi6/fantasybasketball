@@ -3,7 +3,9 @@
 Per-minute rates follow Basketball-Reference's Simple Projection System (SPS),
 itself modelled on Tom Tango's Marcel:
 
-  * the last three seasons weighted 6 / 3 / 1,
+  * the last two seasons weighted 6 / 2 (2024-25 and 2025-26 for a 2026-27
+    projection). SPS uses three seasons at 6 / 3 / 1; dropping the oldest was
+    slightly more accurate in the backtest (scripts/train_model.py),
   * regressed toward league average by adding 1,000 minutes of league-average
     production,
   * an aging multiplier of (28 - age) * 0.004 below 28 and (28 - age) * 0.002
@@ -26,7 +28,8 @@ from .models import SeasonLine
 RATE_STATS = ["REB", "AST", "STL", "BLK", "TO", "FGM", "FGMI", "FTM", "FTMI", "3PM", "3PMI", "DD", "TD", "PF"]
 NEGATIVE_STATS = {"TO", "FGMI", "FTMI", "3PMI", "PF"}
 
-SEASON_WEIGHTS = (6.0, 3.0, 1.0)
+SEASON_WEIGHTS = (6.0, 2.0)  # last season, two seasons ago
+HISTORY_SEASONS = len(SEASON_WEIGHTS)
 REGRESSION_MINUTES = 1000.0
 PRIME_AGE = 28.0
 
@@ -41,7 +44,12 @@ FALLBACK_LEAGUE_RATES = {
 MPG_PRIOR = 18.0
 MPG_PRIOR_GAMES = 6.0
 AVAIL_PRIOR = 0.76
-AVAIL_PRIOR_GAMES = 160.0  # in weighted games (season weights 6/3/1)
+AVAIL_PRIOR_GAMES = 128.0  # in weighted games (season weights 6/2)
+
+
+def first_season_used(target_season: int) -> int:
+    """Oldest completed season a projection for ``target_season`` reads (2025, i.e. 2024-25, for 2027)."""
+    return target_season - HISTORY_SEASONS
 
 
 def line_rates(line: SeasonLine) -> dict[str, float]:
@@ -106,7 +114,7 @@ def sps_projection(history: list[SeasonLine], target_season: int, age: float | N
     """Project a player's per-minute rates, minutes and availability for ``target_season``."""
     prior = sorted((h for h in history if h.season < target_season and h.minutes > 0),
                    key=lambda h: h.season, reverse=True)
-    used = [h for h in prior if h.season >= target_season - 3][:3]
+    used = [h for h in prior if h.season >= first_season_used(target_season)][:HISTORY_SEASONS]
 
     w_stat: dict[str, float] = defaultdict(float)
     w_lg: dict[str, float] = defaultdict(float)
@@ -114,7 +122,8 @@ def sps_projection(history: list[SeasonLine], target_season: int, age: float | N
     w_gp = 0.0
     w_sg = 0.0
     for h in used:
-        w = SEASON_WEIGHTS[target_season - 1 - h.season] if 0 <= target_season - 1 - h.season < 3 else 0.0
+        back = target_season - 1 - h.season
+        w = SEASON_WEIGHTS[back] if 0 <= back < HISTORY_SEASONS else 0.0
         if w == 0:
             continue
         totals = line_rates(h)

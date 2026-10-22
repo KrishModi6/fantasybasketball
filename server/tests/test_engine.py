@@ -11,8 +11,9 @@ from fbb.baseline import FALLBACK_LEAGUE_RATES, RATE_STATS, aging_factor, per_ga
 from fbb.connectors.espn import parse_settings
 from fbb.connectors.fileimport import normalize_name, parse_upload
 from fbb.context import AnalysisContext
+from fbb.enrich import enrich_players
 from fbb.lineup import SlotModel, solve_day
-from fbb.models import ScoringSettings
+from fbb.models import GameLog, Player, ScoringSettings
 from fbb.projections import MANUAL_LIMIT, ProjectionEngine, games_from_injury_note
 from fbb.strength import league_strength, round_robin
 from fbb.trades import TradeEvaluator, apply_trade, find_trades
@@ -54,6 +55,24 @@ def test_sps_regresses_small_samples_more():
     lg_ast = FALLBACK_LEAGUE_RATES["AST"]
     # Same underlying talent; the small sample sits much closer to league average.
     assert abs(b_small.rates["AST"] - lg_ast) < abs(b_big.rates["AST"] - lg_ast)
+
+
+def test_sps_reads_2024_25_onward():
+    recent = [make_line(2025, 70, 30, 1.0), make_line(2026, 70, 30, 1.0)]
+    older = make_line(2024, 80, 36, 2.0)  # a much better 2023-24, which a 2026-27 projection ignores
+    a = sps_projection(recent, 2027, 27, {})
+    b = sps_projection([older] + recent, 2027, 27, {})
+    assert b.rates == a.rates and b.mpg == a.mpg and b.availability == a.availability
+    assert b.seasons_used == [2026, 2025]
+
+
+def test_enrich_keeps_seasons_from_2024_25():
+    lines = [make_line(s, 60, 30, 1.0) for s in (2022, 2023, 2024, 2025, 2026)]
+    players = {"x": Player(id="x", name="Not in the dataset", history=lines),
+               "3112335": Player(id="3112335", name="Nikola Jokic")}  # filled from the bundled history
+    enrich_players(players, 2027)
+    assert [h.season for h in players["x"].history] == [2025, 2026]
+    assert [h.season for h in players["3112335"].history] == [2025, 2026]
 
 
 def test_aging_curve_direction():
@@ -135,6 +154,33 @@ def test_manual_override_is_bounded():
     snap.overrides = [PlayerOverride(player_id="2", minutes_pct=0.9, note="huge role")]
     pr = ProjectionEngine(snap, model=None).project_all()["2"]
     assert pr.mpg / base.mpg <= 1 + MANUAL_LIMIT + 0.081  # manual cap plus at most the team-budget cap
+
+
+# ---- in-season update -------------------------------------------------------------
+
+BIG_GAME = {"PTS": 42, "REB": 12, "AST": 9, "STL": 2, "BLK": 1, "TO": 2, "FGM": 15, "FGA": 25, "FTM": 8, "FTA": 9,
+            "3PM": 4, "3PA": 9}
+
+
+def _with_games(seasons: list[int]):
+    snap = make_snapshot()
+    p = snap.players["1"]
+    p.recent_games = [GameLog(season=s, period=160 + i if s == 2026 else 1 + i, team=p.pro_team, minutes=36,
+                              stats=BIG_GAME) for i, s in enumerate(seasons)]
+    return ProjectionEngine(snap, model=None).project_all()["1"]
+
+
+def test_last_seasons_closing_games_count_before_this_season_starts():
+    base = _with_games([])
+    pr = _with_games([2026] * 15)
+    assert pr.fp_pg > base.fp_pg
+    assert pr.carryover_games == 10 and pr.carryover_weight > 0 and pr.in_season_weight == 0
+    assert pr.recent_fp_pg == pytest.approx(ScoringSettings().fantasy_points(BIG_GAME))
+
+
+def test_this_seasons_games_count_more_than_last_seasons():
+    base = _with_games([]).fp_pg
+    assert _with_games([2027]).fp_pg - base > 2 * (_with_games([2026]).fp_pg - base) > 0
 
 
 # ---- calendar --------------------------------------------------------------------

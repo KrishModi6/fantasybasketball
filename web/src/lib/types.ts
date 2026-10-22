@@ -122,6 +122,8 @@ export interface PlayerDetail extends PlayerRow {
   adjustments: Adjustment[];
   explanation: { factor: string; fp_pg: number }[];
   in_season_weight: number;
+  carryover_games: number;
+  carryover_weight: number;
   fp_breakdown: Record<string, number>;
   game_log: { season: number; period: number; date: string | null; team: string; min: number; fp: number; [k: string]: number | string | null }[];
   seasons: { season: number; label: string; team: string; gp: number; mpg: number | null; fp_pg: number | null; [k: string]: number | string | null }[];

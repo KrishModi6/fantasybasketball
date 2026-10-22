@@ -6,7 +6,7 @@ age, the SPS baseline, and published preseason projections (ESPN).
 
 from __future__ import annotations
 
-from ..baseline import RATE_STATS, Baseline, line_rates, rates_from_per_game, sps_projection
+from ..baseline import RATE_STATS, Baseline, first_season_used, line_rates, rates_from_per_game, sps_projection
 from ..constants import season_games
 from ..models import ExpertProjection, SeasonLine
 
@@ -14,7 +14,7 @@ NAN = float("nan")
 
 # Feature groups used to summarise SHAP attributions in plain language.
 FEATURE_GROUPS = {
-    "sps": "3-season weighted baseline",
+    "sps": "2-season weighted baseline",
     "l1": "Last season's production",
     "l2": "Two seasons ago",
     "espn": "ESPN projection",
@@ -54,7 +54,7 @@ def build_features(history: list[SeasonLine], season: int, age: float | None, ye
     f: dict[str, float] = {
         "age": age if age is not None else NAN,
         "years_pro": years_pro if years_pro is not None else NAN,
-        "n_seasons": float(len([h for h in prior if h.season >= season - 3])),
+        "n_seasons": float(len([h for h in prior if h.season >= first_season_used(season)])),
         "w_min": base.weighted_minutes,
         "sps_mpg": base.mpg,
         "sps_avail": base.availability,

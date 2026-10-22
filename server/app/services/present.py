@@ -90,6 +90,8 @@ def player_detail(a: LeagueAnalysis, pid: str, history_rows: list | None = None)
         "adjustments": [asdict(x) for x in pr.adjustments],
         "explanation": a.engine.explain(pr),
         "in_season_weight": _r(pr.in_season_weight, 3),
+        "carryover_games": pr.carryover_games,
+        "carryover_weight": _r(pr.carryover_weight, 3),
         "fp_breakdown": {k: _r(v) for k, v in a.engine.fp_scoring.breakdown(pr.per_game).items()},
         "game_log": games,
         "seasons": seasons,

@@ -1,8 +1,9 @@
-"""Attach multi-season history, ages and debut years to snapshot players.
+"""Attach recent season history, ages and debut years to snapshot players.
 
 Live league feeds only carry the current and previous season, but the SPS
-baseline and ML features want three seasons plus age. This fills the gaps from
-the local history dataset and an on-disk bio cache.
+baseline and ML features want the last two completed seasons plus age. This
+fills the gaps from the local history dataset and an on-disk bio cache, and
+drops anything older, so a 2026-27 league works from 2024-25 onward.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import logging
 import threading
 from pathlib import Path
 
+from .baseline import first_season_used
 from .history import CACHE_DIR, HISTORY_DIR, load_history
 from .models import Player
 
@@ -62,11 +64,11 @@ def fetch_missing_bios(player_ids: list[str], max_fetch: int = 120) -> int:
 def enrich_players(players: dict[str, Player], season: int) -> None:
     ds = load_history()
     bios = _load_bios()
+    first = first_season_used(season)
     for pid, p in players.items():
         known = {h.season for h in p.history}
-        extra = [h for h in ds.lines.get(pid, []) if h.season < season and h.season not in known]
-        if extra:
-            p.history = sorted(p.history + extra, key=lambda h: h.season)
+        extra = [h for h in ds.lines.get(pid, []) if first <= h.season < season and h.season not in known]
+        p.history = sorted((h for h in p.history + extra if h.season >= first), key=lambda h: h.season)
         bio = bios.get(pid) or {}
         if p.age is None and bio.get("age") is not None:
             # Bios record age "now" (start of the 2026-27 season); shift to the projected season.

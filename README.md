@@ -81,11 +81,11 @@ Rolling origin: each season is predicted using only earlier seasons. Error is in
 
 | Method | FP/G MAE | FP/G RMSE | Season-total MAE | Rank ρ |
 |---|---|---|---|---|
-| Last season repeated | 4.78 | 6.06 | 515 | 0.667 |
-| Statistical baseline (SPS) | 4.62 | 5.89 | 469 | 0.700 |
-| ESPN preseason projection | 4.57 | 5.79 | 507 | **0.736** |
-| LightGBM alone | 4.39 | 5.58 | 459 | 0.721 |
-| **Courtside ensemble** | **4.34** | **5.49** | **448** | 0.732 |
+| Last season repeated | 4.80 | 6.08 | 514 | 0.668 |
+| Statistical baseline (SPS) | 4.56 | 5.83 | 469 | 0.704 |
+| ESPN preseason projection | 4.57 | 5.79 | 507 | 0.736 |
+| LightGBM alone | 4.41 | 5.60 | 456 | 0.729 |
+| **Courtside ensemble** | **4.33** | **5.49** | **446** | **0.737** |
 
 The ensemble is 5% more accurate than ESPN per game and 12% more accurate on season totals, and it beat ESPN in every one of these seasons; ranking accuracy is a statistical tie. A data audit excluded ESPN's stored projections for 2019‑20 and 2022‑23, because they were refreshed in-season, and removed ADP as a feature because ESPN overwrites it for past seasons. Both choices are documented in the methodology.
 
