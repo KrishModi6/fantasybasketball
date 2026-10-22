@@ -53,8 +53,8 @@ Uncheck a player to see the odds if he sits, e.g. to decide on a questionable st
 
 **Trades**
 - **Analyze a trade:** pick both teams and tick players. The result shows each side's gain per week and for the rest of the season, the fantasy-playoff weeks, and playoff and title odds before and after, then a numbered list of the math. "Uneven" trades automatically drop the weakest player or pick up the best free agent, just like in real life.
-- **Find trades:** searches every 1- and 2-player package with every team and lists the ones that help you without hurting the other side (so they might accept).
-- **League board:** share a trade idea (with a note) so the whole league can see the numbers. "Re-run with today's data" re-evaluates it.
+- **Find trades:** searches every 1- and 2-player package with every team and lists the ones that help you without hurting the other side (so they might accept). Results mix partners and package sizes; if no 2-for-2 qualifies, it says how many it checked.
+- **League board:** share a trade idea (with a note) so the whole league can see the numbers. They're re-scored after every refresh; ideas that went through on ESPN are marked **Happened**, and ones a roster move ruled out are marked **No longer possible**. Above the ideas, **Recent moves** lists the league's real trades, pickups and drops.
 
 **League.** Standings, scoring rules, members and which team each manages. Owners also see invite links, refresh settings, ESPN cookies, and delete.
 
@@ -73,4 +73,4 @@ If you know something the data doesn't yet (a confirmed starting role, an absenc
 
 **Why does a trade that adds value still say "neutral"?** The verdict is based on your *lineup-adjusted* output. Two good players who play the same days or positions may not both start. The threshold is ±1% of your rest-of-season points.
 
-**How often does data update?** Automatically every few hours (set by the league owner), and anyone can press **Refresh** in the top bar.
+**How often does data update?** Every hour by default (the league owner can change it), and again whenever you open Courtside and the data is more than 30 minutes old. Anyone can press **Refresh** in the top bar. Trades and waiver moves made on ESPN show up in the league feed and under **Trades > League board** after the next refresh.

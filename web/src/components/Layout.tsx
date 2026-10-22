@@ -7,7 +7,7 @@ import { useAuth } from "../lib/auth";
 import { pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
 import { canGoBack, rememberPath } from "../lib/nav";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
-import { useLeagueSocket, useRefreshOnSync } from "../lib/realtime";
+import { useAutoRefresh, useLeagueSocket, useRefreshOnSync } from "../lib/realtime";
 import { useToast } from "../lib/toast";
 import type { League, TeamRef } from "../lib/types";
 import { InviteButton } from "./Invite";
@@ -155,6 +155,7 @@ export function LeagueLayout() {
   useEffect(() => rememberPath(loc.pathname, loc.search), [loc.pathname, loc.search]);
   useLeagueSocket(leagueId);
   useRefreshOnSync(leagueId, league ? league.sync.last_synced_at : undefined);
+  useAutoRefresh(league);
 
   const ctx = useMemo<LeagueCtx | null>(() => {
     if (!league) return null;

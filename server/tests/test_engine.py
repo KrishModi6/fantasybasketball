@@ -250,3 +250,18 @@ def test_espn_teams_keep_owner_ids():
     hoopers, bricks = parse_teams(data)
     assert (hoopers.owner_name, hoopers.owner_ids) == ("Pat", ["{A-1}"])
     assert bricks.owner_ids == []
+
+
+def test_trade_shortlist_is_not_one_deal_with_every_throw_in():
+    from fbb.trades import TOP_SHARE, _shortlist
+
+    # One deal plus every possible throw-in scores highest; real alternatives (2-for-2s, other partners) score lower.
+    pre = [(100 - i, 2, ("star", f"filler{i}"), ("their_star",)) for i in range(60)]
+    pre += [(30 - i, 3 + i % 4, (f"a{i}", f"b{i}"), (f"c{i}", f"d{i}")) for i in range(40)]
+    pre.sort(key=lambda x: -x[0])
+    short = _shortlist(pre, 40, 2, 2, n_partners=6)
+    copies = [s for s in short if s[2] == ("their_star",)]
+    assert len(short) == len(set(short)) == 40
+    assert len(copies) <= int(40 * TOP_SHARE) + 2  # the reserved top scores, then at most 2 per exact package
+    assert sum(len(give) == 2 == len(get) for _, give, get in short) >= 20
+    assert short[0] == (2, ("star", "filler0"), ("their_star",))  # the best quick score is always simulated

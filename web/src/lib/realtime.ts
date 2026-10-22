@@ -1,9 +1,42 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { wsUrl } from "./api";
+import { api, wsUrl } from "./api";
 import { useToast } from "./toast";
+import type { League } from "./types";
 
 const POLL_MS = 60_000;
+const STALE_MS = 30 * 60_000; // refresh league data older than this while someone is looking at it
+const AUTO_RETRY_MS = 10 * 60_000;
+
+/**
+ * Refresh the league when it's opened, or looked at again, with data more than 30 minutes old, so stats
+ * don't wait for the next scheduled refresh. Skipped after a failed refresh (the Refresh button retries).
+ */
+export function useAutoRefresh(league: League | undefined) {
+  const qc = useQueryClient();
+  const lastTry = useRef(0);
+  const id = league?.id;
+  const status = league?.sync.status;
+  const synced = league?.sync.last_synced_at;
+  useEffect(() => {
+    if (!id) return;
+    const check = () => {
+      if (document.visibilityState !== "visible" || status !== "ok") return;
+      if (Date.now() - (synced ? Date.parse(synced) : 0) < STALE_MS || Date.now() - lastTry.current < AUTO_RETRY_MS) return;
+      lastTry.current = Date.now();
+      api(`/api/leagues/${id}/sync`, { method: "POST" })
+        .then(() => qc.invalidateQueries({ queryKey: ["league", id, "meta"] }))
+        .catch(() => undefined); // e.g. someone else refreshed moments ago
+    };
+    check();
+    const timer = setInterval(check, 5 * 60_000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [id, status, synced, qc]);
+}
 
 /**
  * When a league's data is re-synced (by anyone, or by the server's cron), refresh every query for it.
@@ -91,6 +124,13 @@ export function useLeagueSocket(leagueId: string | undefined) {
           case "trade_removed":
             qc.invalidateQueries({ queryKey: [...key, "board"] });
             break;
+          case "roster_moves": {
+            qc.invalidateQueries({ queryKey: [...key, "activity"] });
+            qc.invalidateQueries({ queryKey: [...key, "board"] });
+            const more = Number(ev.count) > 1 ? ` (+${Number(ev.count) - 1} more in the league feed)` : "";
+            toast(`${String(ev.first)}${more}`);
+            break;
+          }
           case "member_joined":
             toast(`${String(ev.name)} joined the league.`);
             qc.invalidateQueries({ queryKey: key });

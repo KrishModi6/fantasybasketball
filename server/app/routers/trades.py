@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
@@ -40,11 +42,13 @@ async def suggestions(team_id: int, a: LeagueAnalysis = Depends(analysis),
     if team_id not in {t.id for t in a.snapshot.teams}:
         raise HTTPException(404, "Team not found")
     partners = [partner_id] if partner_id else None
-    rows = await run_in_threadpool(find_trades, a.ctx, team_id, a.evaluator(), max_give, max_get, partners)
+    checked: Counter = Counter()
+    rows = await run_in_threadpool(find_trades, a.ctx, team_id, a.evaluator(), max_give, max_get, partners,
+                                   checked=checked)
     for r in rows:
         r["give_names"] = [a.proj[p].name for p in r["give"]]
         r["get_names"] = [a.proj[p].name for p in r["get"]]
-    return {"suggestions": rows}
+    return {"suggestions": rows, "checked": dict(checked)}
 
 
 @router.get("/board")

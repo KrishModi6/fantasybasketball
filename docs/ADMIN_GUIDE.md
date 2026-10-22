@@ -25,7 +25,7 @@ Environment variables (prefix `FBB_`), or a `server/.env` file. See `server/.env
 | `FBB_SECRET_KEY` | auto-generated into `data/secret.key` | Signs sessions and encrypts stored ESPN cookies. **Set it in production and keep it stable**; changing it signs everyone out and makes stored cookies unreadable |
 | `FBB_PUBLIC_URL` | `http://localhost:5173` | Used to build invite links |
 | `FBB_CORS_ORIGINS` | localhost + `app://fbb` | Comma-separated allowed browser origins. Keep `app://fbb` for the desktop app |
-| `FBB_SYNC_INTERVAL_HOURS` | `4` | Default refresh cadence for new leagues; owners can change it per league |
+| `FBB_SYNC_INTERVAL_HOURS` | `1` | Default refresh cadence for new leagues; owners can change it per league. Open apps also refresh data older than 30 minutes |
 | `FBB_SCHEDULER_ENABLED` | `true` | Background refresh loop |
 | `FBB_MIN_MANUAL_SYNC_MINUTES` | `5` | Members' manual refresh cooldown |
 | `FBB_RETRAIN_ENABLED` / `FBB_RETRAIN_INTERVAL_DAYS` | `false` / `7` | Periodic history refresh + retrain (hot-reloaded) |
