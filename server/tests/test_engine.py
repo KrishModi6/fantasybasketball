@@ -240,3 +240,13 @@ def test_category_league_end_to_end():
     assert st[0].explanation["category_win_prob"]
     g = ctx.cat_valuer.gscores("1")
     assert set(g) == set(snap.settings.scoring.categories)
+
+
+def test_espn_teams_keep_owner_ids():
+    from fbb.connectors.espn import parse_teams
+
+    data = {"members": [{"id": "{A-1}", "displayName": "Pat"}],
+            "teams": [{"id": 4, "name": "Hoopers", "owners": ["{A-1}"]}, {"id": 5, "name": "Bricks"}]}
+    hoopers, bricks = parse_teams(data)
+    assert (hoopers.owner_name, hoopers.owner_ids) == ("Pat", ["{A-1}"])
+    assert bricks.owner_ids == []

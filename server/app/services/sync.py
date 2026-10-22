@@ -18,7 +18,7 @@ from fbb.projections import ProjectionEngine
 
 from ..config import get_settings
 from ..db import SessionLocal
-from ..orm import Activity, League, ProjectionHistory, Snapshot
+from ..orm import Activity, League, LeagueMember, ProjectionHistory, Snapshot
 from ..realtime import hub
 from ..security import decrypt_json
 from .analysis import invalidate, latest_snapshot_row, models, pack_snapshot, unpack_snapshot
@@ -98,6 +98,7 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
             _log(db, league_id, "warning", w)
 
         _record_projection_history(db, league_id, snap)
+        claim_own_team(db, league, snap)
         league.last_synced_at = datetime.now(timezone.utc)
         league.last_sync_status = "ok"
         league.last_sync_error = None
@@ -107,6 +108,35 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
         hub.publish(league_id, {"type": "sync_completed", "reason": reason, "warnings": len(snap.warnings)})
     finally:
         db.close()
+
+
+def _swid(value: str | None) -> str:
+    return (value or "").strip().strip("{}").upper()
+
+
+def claim_own_team(db, league: League, snap: LeagueSnapshot) -> None:
+    """Give whoever connected an ESPN league the team ESPN says their login owns, if they have none yet.
+
+    ESPN lists each team's owners by member id, which is the same GUID as the SWID cookie. Copies
+    joined with an invite code are skipped: their cookies belong to whoever sent the code.
+    """
+    if league.source != "espn":
+        return
+    cfg = decrypt_json(league.connector_config)
+    swid = _swid(cfg.get("swid"))
+    if not swid or cfg.get("shared_by"):
+        return
+    creator = db.scalar(select(LeagueMember).where(LeagueMember.league_id == league.id,
+                                                   LeagueMember.user_id == league.owner_id))
+    if creator is None or creator.team_id is not None:
+        return
+    team = next((t for t in snap.teams if swid in {_swid(o) for o in t.owner_ids}), None)
+    taken = team is not None and db.scalar(select(LeagueMember).where(LeagueMember.league_id == league.id,
+                                                                     LeagueMember.team_id == team.id))
+    if team is None or taken:
+        return
+    creator.team_id = team.id
+    _log(db, league.id, "member", f"{team.name} was matched to the ESPN login that owns it", {"team_id": team.id})
 
 
 def _fail(db, league: League, message: str) -> None:

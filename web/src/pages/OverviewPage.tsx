@@ -1,10 +1,9 @@
 import { Link } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Notice, PageHead, Panel, PlayerName } from "../components/ui";
-import { api } from "../lib/api";
 import { fmt0, pct, record, relTime, shortDate } from "../lib/format";
-import { useActivity, useNews, useRankings, useTeamReport } from "../lib/queries";
+import { useActivity, useClaimTeam, useNews, useRankings, useTeamReport } from "../lib/queries";
+import { useToast } from "../lib/toast";
 import type { TeamStrength } from "../lib/types";
 
 export function OverviewPage() {
@@ -22,7 +21,7 @@ export function OverviewPage() {
         title={mine ? mine.name : league.name}
         desc={mine ? mine.explanation.summary : "League view. Claim your team to get recommendations for it."}
       />
-      {!myTeamId && s && <ClaimTeam />}
+      {myTeamId == null && s && <ClaimTeam />}
       {rankings.error && <ErrorBox error={rankings.error} />}
       {rankings.isLoading && <LoadingBlock rows={10} />}
       {mine && (
@@ -109,17 +108,16 @@ function ThisWeek({ me, opp }: { me: TeamStrength; opp: TeamStrength }) {
 }
 
 function ClaimTeam() {
-  const { league, teams } = useLeagueCtx();
-  const qc = useQueryClient();
-  const claim = useMutation({
-    mutationFn: (team_id: number) => api(`/api/leagues/${league.id}/members/me/team`, { body: { team_id } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["league", league.id] }),
-  });
+  const { league, teams, teamName } = useLeagueCtx();
+  const toast = useToast();
+  const claim = useClaimTeam(league.id);
+  const pick = (id: number) =>
+    claim.mutate(id, { onSuccess: () => toast(`Saved. Courtside will open ${teamName(id)} as your team from now on.`) });
   return (
     <Notice>
       <div className="row wrap between">
-        <span>Select the team you manage to get lineup advice, add/drop moves and trade suggestions for it.</span>
-        <select className="select" defaultValue="" onChange={(e) => e.target.value && claim.mutate(Number(e.target.value))} aria-label="Claim a team">
+        <span>Which team is yours? Pick it once and Courtside remembers it, with lineup advice, add/drop moves and trade ideas for it.</span>
+        <select className="select" defaultValue="" onChange={(e) => e.target.value && pick(Number(e.target.value))} aria-label="Claim a team">
           <option value="" disabled>Choose team…</option>
           {teams.map((t) => <option key={t.id} value={t.id} disabled={Boolean(t.claimed_by)}>{t.name}{t.claimed_by ? ` (${t.claimed_by})` : ""}</option>)}
         </select>

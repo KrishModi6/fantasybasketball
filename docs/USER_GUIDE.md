@@ -10,6 +10,8 @@
 
 Then press **Invite** in the top bar. In the desktop app that makes an invite code: copy the invite message (download link, steps and code) and send it to your league. For a private ESPN league the code includes your ESPN cookies, so send it only to people in your league. On a shared server it makes an invite link instead.
 
+Pick your team once, on Overview or the Team tab, and Courtside remembers it: every page opens on your team after that. If you connected an ESPN league with your own cookies, Courtside recognizes your team from your ESPN login on its next refresh, so there's nothing to pick. You can change it later under **League > Members**.
+
 Courtside reopens where you left off. The back arrow (or your mouse's back button, or Alt+Left) steps back through pages within the league; **All leagues** in the league menu lists every league.
 
 ## Pages

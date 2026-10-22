@@ -4,14 +4,15 @@ import { RangeBar } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Meter, PageHead, Panel, PlayerName, SubTabs, Tag } from "../components/ui";
 import { fmt0, fmt1, pct, record, shortDate } from "../lib/format";
-import { useLineup, useTeam, useTeamReport } from "../lib/queries";
+import { useClaimTeam, useLineup, useTeam, useTeamReport } from "../lib/queries";
+import { useToast } from "../lib/toast";
 import type { TeamDetail } from "../lib/types";
 
 type Tab = "roster" | "lineup" | "improve" | "schedule";
 
 export default function TeamPage() {
   const { teamId } = useParams();
-  const { league, myTeamId, teams } = useLeagueCtx();
+  const { league, myTeamId, teams, teamName } = useLeagueCtx();
   const nav = useNavigate();
   const [search, setSearch] = useSearchParams();
   const tid = teamId ? Number(teamId) : myTeamId;
@@ -23,11 +24,15 @@ export default function TeamPage() {
   };
   const { data, error, isLoading } = useTeam(league.id, tid);
   const isPoints = league.settings?.scoring.kind !== "categories";
+  const toast = useToast();
+  const claim = useClaimTeam(league.id);
+  const claimTeam = (id: number) =>
+    claim.mutate(id, { onSuccess: () => toast(`Saved. Courtside will open ${teamName(id)} as your team from now on.`) });
 
   const switcher = (
     <label className="field-inline"><span className="label">Team</span>
       <select className="select" value={tid ?? ""} aria-label="Team"
-        onChange={(e) => nav(`../team/${e.target.value}${tab !== "roster" ? `?tab=${tab}` : ""}`, { relative: "path" })}>
+        onChange={(e) => nav(`/l/${league.id}/team/${e.target.value}${tab !== "roster" ? `?tab=${tab}` : ""}`)}>
         {tid == null && <option value="">Choose…</option>}
         {teams.map((t) => <option key={t.id} value={t.id}>{t.name}{t.id === myTeamId ? " (you)" : ""}</option>)}
       </select>
@@ -37,15 +42,41 @@ export default function TeamPage() {
   if (tid == null) {
     return (
       <>
-        <PageHead title="Team" desc="You haven't claimed a team. Pick any team to view it, or claim yours on the Overview tab." actions={switcher} />
-        <Panel><Empty title="No team selected" /></Panel>
+        <PageHead title="Which team is yours?"
+          desc="Pick it once and Courtside remembers it: this tab, trades, matchups and the assistant all start from your team." />
+        <Panel>
+          <div className="form">
+            <div className="field" style={{ maxWidth: 360 }}>
+              <label htmlFor="my-team">Your team</label>
+              <select id="my-team" className="select" defaultValue="" disabled={claim.isPending}
+                onChange={(e) => e.target.value && claimTeam(Number(e.target.value))}>
+                <option value="" disabled>Choose your team…</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id} disabled={Boolean(t.claimed_by)}>
+                    {t.name}{t.owner_name ? ` (${t.owner_name})` : ""}{t.claimed_by ? `, claimed by ${t.claimed_by}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {claim.error && <ErrorBox error={claim.error} />}
+            <div className="small muted">Just looking around? {switcher}</div>
+          </div>
+        </Panel>
       </>
     );
   }
   const st = data?.strength;
+  const viewed = teams.find((t) => t.id === tid);
+  const makeMine = myTeamId == null && viewed && (
+    <button className="btn primary" onClick={() => claimTeam(tid)} disabled={Boolean(viewed.claimed_by) || claim.isPending}
+      title={viewed.claimed_by ? `${viewed.claimed_by} already manages this team` : undefined}>
+      This is my team
+    </button>
+  );
   return (
     <>
-      <PageHead title={data?.name ?? "Team"} desc={st?.explanation.summary} actions={switcher} />
+      <PageHead title={data?.name ?? "Team"} desc={st?.explanation.summary} actions={<>{makeMine}{switcher}</>} />
+      {claim.error && <ErrorBox error={claim.error} />}
       {error && <ErrorBox error={error} />}
       {isLoading && <LoadingBlock rows={10} />}
       {data && (

@@ -159,6 +159,48 @@ def test_own_openai_key(client, monkeypatch):
     r = client.delete("/api/ai/key", headers=user)
     assert r.json()["own_key"] is False and r.json()["own_key_hint"] is None
 
+def test_espn_login_claims_its_own_team(client):
+    """An ESPN league connected with your own cookies opens on your team, with nothing to pick."""
+    from app.db import SessionLocal
+    from app.orm import League, LeagueMember, User
+    from app.security import encrypt_json
+    from app.services.sync import claim_own_team
+    from factories import make_snapshot
+
+    snap = make_snapshot()
+    snap.teams[2].owner_ids = ["{ABCDEF12-3456-7890-ABCD-EF1234567890}"]
+    db = SessionLocal()
+    try:
+        user = User(email="espn-owner@example.com", display_name="Espn Owner", password_hash="!")
+        db.add(user)
+        db.flush()
+
+        def connect(cfg):
+            lg = League(name="ESPN", season=2027, source="espn", owner_id=user.id, connector_config=encrypt_json(cfg))
+            db.add(lg)
+            db.flush()
+            me = LeagueMember(league_id=lg.id, user_id=user.id, role="owner")
+            db.add(me)
+            db.flush()
+            return lg, me
+
+        # The SWID cookie may be pasted without braces or in lower case.
+        lg, me = connect({"league_id": "1", "espn_s2": "x", "swid": "abcdef12-3456-7890-abcd-ef1234567890"})
+        claim_own_team(db, lg, snap)
+        assert me.team_id == snap.teams[2].id
+        me.team_id = snap.teams[0].id  # a team picked by hand is never replaced
+        claim_own_team(db, lg, snap)
+        assert me.team_id == snap.teams[0].id
+
+        # A copy joined with an invite code runs on the sender's cookies, so their team isn't yours.
+        lg2, me2 = connect({"league_id": "1", "espn_s2": "x", "swid": "{ABCDEF12-3456-7890-ABCD-EF1234567890}",
+                            "shared_by": "Pal"})
+        claim_own_team(db, lg2, snap)
+        assert me2.team_id is None
+    finally:
+        db.rollback()
+        db.close()
+
 def test_auth_errors(client):
     assert client.get("/api/leagues").status_code == 401
     r = client.post("/api/auth/login", json={"email": "nobody@example.com", "password": "whatever123"})

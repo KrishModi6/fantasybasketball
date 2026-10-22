@@ -24,7 +24,9 @@ When a new version is out, Courtside shows a banner with a **Download** button. 
 
 Got an invite from your league owner? Choose **Join with invite** and paste it. That's all: no league ID or cookies needed.
 
-Setting up your league yourself? Pick **Connect ESPN** and paste your league's URL. Private leagues also need the `espn_s2` and `SWID` cookies from your browser (the app explains where to find them). Or start with **Demo league** to look around.
+Then pick your team once (on Overview or the Team tab). Courtside remembers it and opens every page on it from then on.
+
+Setting up your league yourself? Pick **Connect ESPN** and paste your league's URL. If you add your own ESPN cookies, Courtside recognizes your team automatically. Private leagues also need the `espn_s2` and `SWID` cookies from your browser (the app explains where to find them). Or start with **Demo league** to look around.
 
 Your leagues are stored on your computer only: `%APPDATA%\Courtside` on Windows, `~/Library/Application Support/Courtside` on a Mac.
 

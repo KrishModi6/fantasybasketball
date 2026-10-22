@@ -414,6 +414,7 @@ def parse_teams(data: dict) -> list[FantasyTeam]:
                 name=name,
                 abbrev=t.get("abbrev", ""),
                 owner_name=owner,
+                owner_ids=[str(o) for o in t.get("owners") or []],
                 roster=roster,
                 wins=int(rec.get("wins", 0)),
                 losses=int(rec.get("losses", 0)),
