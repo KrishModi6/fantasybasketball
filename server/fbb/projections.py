@@ -49,9 +49,13 @@ DEFAULT_PRIOR_MINUTES = {
     "REB": 900, "AST": 900, "STL": 2500, "BLK": 1800, "TO": 1500, "FGM": 900, "FGMI": 900, "FTM": 1200,
     "FTMI": 2500, "3PM": 1200, "3PMI": 1200, "DD": 2000, "TD": 4000, "PF": 1200,
 }
+# In-season weighting. scripts/backtest_recency.py replays every game of 2024-25 and 2025-26 from
+# out-of-sample preseason projections: these settings beat both faster fading (12/5-game half-lives
+# were about 0.4% less accurate) and no recency weighting at all (1.0-1.4% less accurate).
 MINUTES_PRIOR_GAMES = 8.0
 RATE_HALF_LIFE_GAMES = 25.0
 MINUTES_HALF_LIFE_GAMES = 10.0
+PRIOR_STRENGTH_SCALE = 1.0  # multiplier on the learned per-stat prior strengths (the backtest tests 2.0)
 POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
 
 INJURY_DEFAULT_GAMES = {
@@ -160,8 +164,8 @@ class ProjectionEngine:
     def _prior_k(self, stat: str, weighted_minutes: float) -> float:
         """Prior strength in minutes; established players (more history) get a stronger prior."""
         k = self.prior_minutes.get(stat, 1000.0)
-        if isinstance(k, dict):
-            return k["high"] if weighted_minutes >= k["split"] else k["low"]
+        if isinstance(k, dict):  # learned in training
+            return (k["high"] if weighted_minutes >= k["split"] else k["low"]) * PRIOR_STRENGTH_SCALE
         return float(k)
 
     def _fp(self, per_game: dict[str, float]) -> float:

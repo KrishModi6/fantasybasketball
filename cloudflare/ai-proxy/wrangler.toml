@@ -14,10 +14,10 @@ crons = ["17 * * * *"]
 # Limits count model calls, not questions: one assistant question usually makes 2 to 4 (at most 7).
 [vars]
 MODEL = "gpt-6-luna"
-MAX_CONCURRENCY = "6"
-PER_MINUTE_LIMIT = "40"
-DAILY_LIMIT = "2000"
-DEVICE_DAILY_LIMIT = "150"
+MAX_CONCURRENCY = "12"
+PER_MINUTE_LIMIT = "120"
+DAILY_LIMIT = "6000"
+DEVICE_DAILY_LIMIT = "450"
 MAX_OUTPUT_TOKENS = "3000"
 
 # Secrets (never in this file):

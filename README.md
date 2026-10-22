@@ -112,7 +112,7 @@ docs/              methodology, API, user guide, admin guide, connectors
 ## Tests
 
 ```bash
-cd server && .venv/Scripts/python -m pytest      # 40 tests (the API test needs internet once; ESPN data is cached)
+cd server && .venv/Scripts/python -m pytest      # 51 tests (the API test needs internet once; ESPN data is cached)
 cd web && npm test && npm run typecheck           # 11 tests
 cd cloudflare/ai-proxy && npm test                # 7 tests: the AI proxy against SQLite and a stubbed OpenAI
 cd server && .venv/Scripts/python engine.py --self-test   # the desktop engine end to end

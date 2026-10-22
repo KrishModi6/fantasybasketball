@@ -208,7 +208,8 @@ def run_assistant(a: LeagueAnalysis, *, user_id: str, my_team_id: int | None, pr
                   previous_response_id: str | None = None, client: ResponsesClient | None = None,
                   api_key: str | None = None) -> dict:
     s = get_settings()
-    if not throttle.allow(user_id, s.ai_user_hourly_limit):
+    # People using their own OpenAI key pay for it, so only shared keys are rationed here.
+    if api_key is None and not throttle.allow(user_id, s.ai_user_hourly_limit):
         raise AIError(429, f"You've used the assistant {s.ai_user_hourly_limit} times this hour. Try again later.")
     tools = ToolBox(a, my_team_id)
     schemas = ToolBox.schemas()

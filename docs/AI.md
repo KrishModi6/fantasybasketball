@@ -47,10 +47,10 @@ The limits count model calls, not questions; one question usually takes 2 to 4 c
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DEVICE_DAILY_LIMIT` | 150 | Calls per computer per UTC day |
-| `DAILY_LIMIT` | 2000 | Calls per UTC day across everyone |
-| `PER_MINUTE_LIMIT` | 40 | Calls per minute across everyone |
-| `MAX_CONCURRENCY` | 6 | Calls in flight at once |
+| `DEVICE_DAILY_LIMIT` | 450 | Calls per computer per UTC day (about 110-220 questions) |
+| `DAILY_LIMIT` | 6000 | Calls per UTC day across everyone |
+| `PER_MINUTE_LIMIT` | 120 | Calls per minute across everyone |
+| `MAX_CONCURRENCY` | 12 | Calls in flight at once |
 | `MAX_OUTPUT_TOKENS` | 3000 | Cap per model call |
 
 The client token ships inside every release, so treat it as an app identifier rather than a secret: anyone who unpacks the app can read it. The limits above are what bound your OpenAI spend. To cut off old builds, change `CLIENT_TOKEN` and publish a new release.
@@ -95,7 +95,7 @@ The release workflow writes them into `desktop/ai-config.json` (never committed)
 
 ### Hosted server instead
 
-Set `FBB_OPENAI_API_KEY` on the server, or point `FBB_AI_PROXY_URL` and `FBB_AI_PROXY_TOKEN` at the Worker. `FBB_AI_USER_HOURLY_LIMIT` (default 30) caps questions per user per hour on top of the proxy's limits; `FBB_AI_MAX_ROUNDS` (default 6) caps tool rounds per question.
+Set `FBB_OPENAI_API_KEY` on the server, or point `FBB_AI_PROXY_URL` and `FBB_AI_PROXY_TOKEN` at the Worker. `FBB_AI_USER_HOURLY_LIMIT` (default 100) caps questions per user per hour on top of the proxy's limits (users with their own OpenAI key aren't capped); `FBB_AI_MAX_ROUNDS` (default 6) caps tool rounds per question.
 
 ## Tests
 
