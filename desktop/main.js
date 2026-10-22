@@ -9,7 +9,7 @@
 //
 // Installed builds keep themselves up to date from the GitHub releases (see setupUpdates).
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, powerMonitor, protocol, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -261,8 +261,9 @@ function promptRestart() {
 }
 
 // Checks the GitHub releases (app-update.yml, written at build time from package.json's "publish")
-// shortly after launch and every few hours. Windows downloads in the background and installs on
-// restart; the Mac only reports the new version (see CAN_INSTALL_UPDATES).
+// shortly after launch, every few hours, and when the computer wakes up or Courtside comes back to the
+// front after a while, so even a laptop that mostly sleeps checks at least once a day. Windows downloads
+// in the background and installs on restart; the Mac only reports the new version (see CAN_INSTALL_UPDATES).
 function setupUpdates() {
   if (!app.isPackaged) return; // development runs have no release feed
   let autoUpdater;
@@ -306,12 +307,16 @@ function setupUpdates() {
     manual = false;
   });
 
+  let lastCheck = Date.now(); // wall-clock time of the last check (the launch check below counts)
   const check = (fromMenu = false) => {
     if (update.status === "ready") return fromMenu && promptRestart();
     if (update.status === "downloading" || update.status === "checking") return;
     manual = fromMenu;
+    lastCheck = Date.now();
     autoUpdater.checkForUpdates().catch(() => undefined); // failures also arrive as "error" events
   };
+  // Timers stop while the computer sleeps, so the interval alone can go days without firing on a laptop.
+  const checkIfDue = () => Date.now() - lastCheck >= UPDATE_CHECK_INTERVAL_MS && check();
   updater = {
     check,
     install: async () => {
@@ -324,6 +329,8 @@ function setupUpdates() {
   };
   setTimeout(check, 15_000);
   setInterval(check, UPDATE_CHECK_INTERVAL_MS);
+  powerMonitor.on("resume", () => setTimeout(checkIfDue, 30_000)); // give the network a moment after waking
+  app.on("browser-window-focus", checkIfDue);
 }
 
 function setupIpc() {
