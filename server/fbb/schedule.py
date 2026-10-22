@@ -3,60 +3,81 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from statistics import median
 
 from .models import LeagueSnapshot, ProSchedule
 
 
-def build_matchup_periods(sched: ProSchedule, regular_matchups: int, playoff_round_weeks: list[int],
-                          min_game_days: int = 4) -> dict[int, list[int]]:
-    """Group scoring periods into Monday-Sunday fantasy weeks, ESPN style.
+LIGHT_WEEK_SHARE = 0.8  # a week with fewer team-games than this share of a typical week is "light"
 
-    Week 1 runs from opening night to the first Sunday. A week with fewer than
-    ``min_game_days`` game days (the All-Star break) is merged into the next
-    week, which is how ESPN builds its default calendar. Each playoff round
-    spans ``playoff_round_weeks[i]`` weeks.
+
+def week_units(sched: ProSchedule, light_share: float = LIGHT_WEEK_SHARE) -> list[list[int]]:
+    """Group scoring periods (days) into fantasy weeks the way ESPN builds its calendar.
+
+    Week 1 runs from opening night to the first Sunday, then weeks run Monday to Sunday. Back-to-back
+    weeks that are each light on games (fewer team-games than ``light_share`` of a typical week), such
+    as the All-Star break or the NBA Cup knockout round, form a single week, and a short, light final
+    week joins the one before it. A lone light week stays on its own. This reproduces ESPN's own
+    matchup dates for 2018-19 through 2023-24 and its week count for 2026-27; ESPN's matchup periods
+    are numbered lists of these weeks.
     """
     if not sched.period_dates:
-        return {}
-    periods = sorted(sched.period_dates)
+        return []
     weeks: list[list[int]] = []
     current: list[int] = []
-    for p in periods:
+    for p in sorted(sched.period_dates):
         current.append(p)
         if sched.period_dates[p].weekday() == 6:  # Sunday closes a week
             weeks.append(current)
             current = []
     if current:
         weeks.append(current)
-
-    merged: list[list[int]] = []
-    carry: list[int] = []
-    for i, wk in enumerate(weeks):
-        wk = carry + wk
-        carry = []
-        game_days = sum(1 for p in wk if sched.games.get(p))
-        if i > 0 and game_days < min_game_days and i < len(weeks) - 1:
-            carry = wk
-            continue
-        merged.append(wk)
     # Drop trailing weeks without games (calendar padding after the season).
-    while merged and not any(sched.games.get(p) for p in merged[-1]):
-        merged.pop()
+    while weeks and not any(sched.games.get(p) for p in weeks[-1]):
+        weeks.pop()
+    if not weeks:
+        return []
+    load = [sum(len(sched.games.get(p, ())) for p in w) for w in weeks]
+    light = [n < light_share * median(load) for n in load]
+    units: list[list[int]] = []
+    i = 0
+    while i < len(weeks):
+        j = i
+        while light[i] and j + 1 < len(weeks) and light[j + 1]:
+            j += 1
+        units.append([p for w in weeks[i:j + 1] for p in w])
+        i = j + 1
+    if len(units) > 1 and light[-1] and len(weeks[-1]) < 7 and units[-1] == weeks[-1]:
+        last = units.pop()
+        units[-1] = units[-1] + last
+    return units
 
+
+def espn_matchup_periods(sched: ProSchedule, espn_weeks: dict[int, list[int]]) -> dict[int, list[int]] | None:
+    """Turn ESPN's matchup periods into days.
+
+    ESPN lists each matchup period as the numbered weeks it covers ({3: [3], 20: [20, 21]}), not as
+    days. Returns None if ESPN counts a different number of weeks than the NBA schedule gives, so the
+    caller can build the calendar itself instead.
+    """
+    units = week_units(sched)
+    needed = max((w for ws in espn_weeks.values() for w in ws), default=0)
+    if not units or needed != len(units):
+        return None
+    return {mp: [p for w in sorted(ws) for p in units[w - 1]] for mp, ws in sorted(espn_weeks.items())}
+
+
+def build_matchup_periods(sched: ProSchedule, regular_matchups: int, playoff_round_weeks: list[int]) -> dict[int, list[int]]:
+    """A default ESPN-style calendar: one week per regular-season matchup, then each playoff round
+    spans ``playoff_round_weeks[i]`` weeks (see week_units for how weeks are formed)."""
+    units = week_units(sched)
     out: dict[int, list[int]] = {}
-    idx = 0
-    for mp in range(1, regular_matchups + 1):
-        if idx >= len(merged):
-            break
-        out[mp] = merged[idx]
-        idx += 1
-    mp = regular_matchups
+    for mp in range(1, min(regular_matchups, len(units)) + 1):
+        out[mp] = units[mp - 1]
+    idx = mp = len(out)
     for weeks_in_round in playoff_round_weeks:
-        days: list[int] = []
-        for _ in range(weeks_in_round):
-            if idx < len(merged):
-                days += merged[idx]
-                idx += 1
+        days = [p for u in units[idx: idx + weeks_in_round] for p in u]
+        idx += weeks_in_round
         if days:
             mp += 1
             out[mp] = days
