@@ -144,7 +144,7 @@ Using them would leak in-season information into training and flatter ESPN, so t
 3. **Depth.** When a starter sits, the best playing bench player fills the expected vacancy, so depth has value.
 4. **Weekly distribution.** Mean = sum of expected starts × FP/G. Variance = sum of `q·σ² + q(1−q)·μ²` over starts (game volatility plus play/no-play). A sum of ~35 player-games is close to Normal.
 5. **Matchups.** `P(A beats B) = Φ((μA − μB) / √(σA² + σB²))`. The current week adds points already scored. Category leagues use Normal per-category totals (percentages via the delta method) and a Poisson-binomial count of categories won.
-6. **Power score.** The expected all-play win rate: every team against every other team in every remaining regular-season week. This removes schedule luck.
+6. **Power score.** `played/season × record win% + (1 − played/season) × projected all-play win%`, where *played* is games played so far, *season* the regular-season length, ties count as half a win, and the projected all-play win rate is every team against every other team in every remaining regular-season week. It is each team's projected final win rate with an average opponent in every remaining week: week 1 is all projection, halfway is half each, and the last week is almost all record. The future part removes schedule luck; the record part is what actually happened, luck included.
 7. **Season simulation.** 5,000 runs of the real remaining schedule, then seeding (wins, tiebreak by strength) and your bracket, including two-week rounds and byes. The outputs are projected record, playoff odds, title odds and average seed.
 8. **Explanation.** Each rank is explained by:
    - fantasy points per week from each scoring stat vs the league average;

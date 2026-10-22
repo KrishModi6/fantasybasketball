@@ -83,7 +83,7 @@ export default function TeamPage() {
         <>
           <Kpis label="Team summary">
             <Kpi k="Record" v={record(data.record.wins, data.record.losses, data.record.ties)} s={`${fmt0(data.record.points_for)} points for`} />
-            <Kpi k="Power rank" v={st ? `${st.rank} / ${teams.length}` : "–"} s={st ? `${pct(st.power_score)} all-play` : undefined} />
+            <Kpi k="Power rank" v={st ? `${st.rank} / ${teams.length}` : "–"} s={st ? `${pct(st.power_score)} power score` : undefined} />
             {isPoints && <Kpi k="Points per week" v={fmt0(st?.ppw)} s={st ? <><Delta value={st.ppw_vs_avg} digits={0} /> vs average</> : undefined} />}
             <Kpi k="Projected record" v={st ? `${fmt0(st.proj_wins)}–${fmt0(st.proj_losses)}` : "–"} />
             <Kpi k="Playoffs / title" v={st ? `${pct(st.playoff_odds)} / ${pct(st.title_odds)}` : "–"} />

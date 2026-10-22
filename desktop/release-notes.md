@@ -1,12 +1,15 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.2.3
+## What's new in 0.2.4
 
-- **Projected points by week for every team.** Power rankings now has a grid of each team's projected points for every remaining week, with this week counting the points already scored. Switch it to **Win odds** to see each team's chance against that week's opponent. Hover a cell for the opponent and range.
-- **Projections start at 2024-25.** The statistical baseline now uses only the last two seasons (2024-25 and 2025-26) instead of three, and player pages show seasons from 2024-25 on. Retested on past seasons, this was slightly more accurate.
-- **Recent games count from day one.** Until this season has enough games, each player's last 10 games of 2025-26 also feed the projection, at a quarter of the weight of a game this season. Replaying the last two seasons, this made early-season projections about 1% more accurate. The **Last 10** column and the player page now include those games too, so they aren't blank in the first week.
-- **See which version you're on.** The top bar shows your version (v0.2.3) and whether it's up to date. Click it to check for updates now, or to get the new version when one is out.
-- **Update checks at least once a day.** Courtside already checked when it opened and every 4 hours, but those timers pause while the computer sleeps. It now also checks when your computer wakes up or when you come back to Courtside after a few hours, so a new version shows up within a day.
+- **Power rankings count this season's record.** The power score used to be projection only. Now your record counts for the share of the regular season already played, and the projection counts for the rest: in week 1 it's all projection, halfway through it's half each, and by the last week it's almost all record. Hover a team's power score to see the mix.
+
+## In 0.2.3
+
+- **Projected points by week** for every team on Power rankings, with a **Win odds** toggle.
+- **Projections start at 2024-25**, and each player's last 10 games of 2025-26 count until this season has enough games.
+- **The top bar shows your version** and whether it's up to date; click it to check now.
+- **Update checks at least once a day**, including when your computer wakes up.
 
 Already on 0.2.0 or later? On Windows this update installs itself: restart Courtside when it asks. On a Mac, follow **Updating on a Mac** below.
 
@@ -63,7 +66,7 @@ To keep Courtside in the Dock, right-click its icon while it's open and choose *
 
 ### Updating on a Mac
 
-Macs can't install updates by themselves (that needs the paid certificate), so Courtside tells you instead. It checks at least once a day; when a new version is out, the version label in the top bar turns blue (for example **0.2.4 available**) and a banner offers **Download**.
+Macs can't install updates by themselves (that needs the paid certificate), so Courtside tells you instead. It checks at least once a day; when a new version is out, the version label in the top bar turns blue (for example **0.2.5 available**) and a banner offers **Download**.
 
 1. Click **Download** (or the version label) and unzip the new zip from Downloads.
 2. Quit Courtside with **Cmd + Q**.

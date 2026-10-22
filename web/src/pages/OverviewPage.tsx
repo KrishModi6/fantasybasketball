@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Notice, PageHead, Panel, PlayerName } from "../components/ui";
-import { fmt0, pct, record, relTime, shortDate } from "../lib/format";
+import { fmt0, pct, powerMix, record, relTime, shortDate } from "../lib/format";
 import { useActivity, useClaimTeam, useNews, useRankings, useTeamReport } from "../lib/queries";
 import { useToast } from "../lib/toast";
 import type { TeamStrength } from "../lib/types";
@@ -26,7 +26,7 @@ export function OverviewPage() {
       {rankings.isLoading && <LoadingBlock rows={10} />}
       {mine && (
         <Kpis label="Your team">
-          <Kpi k="Power rank" v={`${mine.rank} / ${teams.length}`} s={`${pct(mine.power_score)} all-play win rate`} />
+          <Kpi k="Power rank" v={`${mine.rank} / ${teams.length}`} s={`${pct(mine.power_score)} power score`} />
           {isPoints && <Kpi k="Points per week" v={fmt0(mine.ppw)} s={<><Delta value={mine.ppw_vs_avg} digits={0} /> vs league average</>} />}
           <Kpi k="Projected record" v={`${fmt0(mine.proj_wins)}–${fmt0(mine.proj_losses)}`} s={`currently ${record(mine.wins, mine.losses, mine.ties)}`} />
           <Kpi k="Playoff odds" v={pct(mine.playoff_odds)} s={mine.avg_seed ? `average seed ${mine.avg_seed.toFixed(1)}` : "5,000 simulated seasons"} />
@@ -48,7 +48,7 @@ export function OverviewPage() {
                   <thead>
                     <tr>
                       <th className="n">#</th><th>Team</th>{isPoints && <th className="n">Pts/wk</th>}{isPoints && <th className="n hide-sm">vs avg</th>}
-                      <th className="n">All-play</th><th className="n hide-sm">Record</th><th className="n hide-sm">Proj.</th><th className="n">Playoffs</th><th className="n">Title</th>
+                      <th className="n">Power</th><th className="n hide-sm">Record</th><th className="n hide-sm">Proj.</th><th className="n">Playoffs</th><th className="n">Title</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -58,7 +58,7 @@ export function OverviewPage() {
                         <td><Link to={`team/${t.team_id}`} style={{ color: "var(--text)" }}>{t.name}</Link></td>
                         {isPoints && <td className="n">{fmt0(t.ppw)}</td>}
                         {isPoints && <td className="n hide-sm"><Delta value={t.ppw_vs_avg} digits={0} /></td>}
-                        <td className="n">{pct(t.power_score)}</td>
+                        <td className="n" title={powerMix(t)}>{pct(t.power_score)}</td>
                         <td className="n hide-sm">{record(t.wins, t.losses, t.ties)}</td>
                         <td className="n hide-sm">{fmt0(t.proj_wins)}–{fmt0(t.proj_losses)}</td>
                         <td className="n">{pct(t.playoff_odds)}</td>
@@ -68,7 +68,7 @@ export function OverviewPage() {
                   </tbody>
                 </table>
               </div>
-              <p className="panel-foot">All-play: expected share of wins against every team in every remaining week. Odds from 5,000 simulated seasons of the actual schedule.</p>
+              <p className="panel-foot">Power: this season's record for the share of the season played, plus the expected share of wins against every team in every remaining week for the rest. Odds from 5,000 simulated seasons of the actual schedule.</p>
             </Panel>
             {myTeamId != null && <QuickMoves teamId={myTeamId} />}
           </div>

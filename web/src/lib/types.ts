@@ -148,6 +148,9 @@ export interface TeamStrength {
   owner: string | null;
   rank: number;
   power_score: number;
+  projected_allplay: number;
+  record_pct: number | null;
+  record_weight: number;
   ppw: number;
   ppw_vs_avg: number;
   wins: number;
