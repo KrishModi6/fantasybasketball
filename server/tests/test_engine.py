@@ -257,6 +257,16 @@ def test_trade_finder_returns_gains(snapshot):
         assert s["partner_delta_pct"] >= -0.004
 
 
+def test_trade_finder_exact_package_size(snapshot):
+    from collections import Counter
+
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    checked: Counter = Counter()
+    rows = find_trades(ctx, 2, max_give=2, max_get=2, candidates=40, checked=checked, exact=True)
+    assert set(checked) == {"2-for-2"}  # no 1-for-1, 2-for-1 or 1-for-2 is even simulated
+    assert all(len(s["give"]) == len(s["get"]) == 2 for s in rows)
+
+
 # ---- parsers -------------------------------------------------------------------------
 
 

@@ -235,10 +235,11 @@ def _fairness(a: TradeSide, b: TradeSide) -> dict:
 def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | None = None,
                 max_give: int = 2, max_get: int = 2, partners: list[int] | None = None,
                 candidates: int = 90, limit: int = 12, min_partner_pct: float = -0.004,
-                checked: Counter | None = None) -> list[dict]:
+                checked: Counter | None = None, exact: bool = False) -> list[dict]:
     """Search 1-for-1 up to max_give-for-max_get trades with every other team.
 
-    Stage 1 scores every package pair by raw ROS value (with roster-spot
+    With exact=True only packages of exactly max_give and max_get players are
+    considered (e.g. strictly 2-for-2). Stage 1 scores every package pair by raw ROS value (with roster-spot
     replacement) and keeps plausible ones; stage 2 runs the full lineup
     simulation for both teams on the best candidates; results are ranked by our
     gain among trades the partner's model also likes (or barely dislikes). If given, `checked`
@@ -253,7 +254,7 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
 
     def packages(roster: list[str], k: int) -> list[tuple[str, ...]]:
         out = []
-        for n in range(1, k + 1):
+        for n in range(k if exact else 1, k + 1):
             out.extend(combinations(roster, n))
         return out
 
@@ -312,13 +313,15 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
         })
     results.sort(key=lambda x: -x["my_delta_ros"])
     # Diversify: at most 3 suggestions per partner and per outgoing player, and room for every package
-    # size the user asked for (half the list at most for any one of 1-for-1, 2-for-1, 2-for-2, ...).
+    # size the user asked for (half the list at most for any one of 1-for-1, 2-for-1, 2-for-2, ...,
+    # unless only one size was asked for).
+    shape_cap = limit if exact or max_give * max_get == 1 else max(limit // 2, 1)
     counts: Counter = Counter()
     out = []
     for r in results:
         keys = [("partner", r["partner_id"]), *(("give", p) for p in r["give"]),
                 ("shape", len(r["give"]), len(r["get"]))]
-        caps = [3, *(3 for _ in r["give"]), max(limit // 2, 1)]
+        caps = [3, *(3 for _ in r["give"]), shape_cap]
         if any(counts[k] >= cap for k, cap in zip(keys, caps)):
             continue
         counts.update(keys)

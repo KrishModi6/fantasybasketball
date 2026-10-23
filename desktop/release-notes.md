@@ -1,6 +1,10 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.2.4
+## What's new in 0.2.5
+
+- **Find trades: 2-for-2 means 2-for-2.** The **Package** option that used to say "Up to 2-for-2" is now **2-for-2** and lists only trades with exactly two players each way, instead of filling up with 2-for-1s. **1-for-1** and **2-for-2** now list up to 12 trades (they stopped at 6). For 2-for-1 deals, pick **Give up to 2, get 1**.
+
+## In 0.2.4
 
 - **Power rankings count this season's record.** The power score used to be projection only. Now your record counts for the share of the regular season already played, and the projection counts for the rest: in week 1 it's all projection, halfway through it's half each, and by the last week it's almost all record. Hover a team's power score to see the mix.
 

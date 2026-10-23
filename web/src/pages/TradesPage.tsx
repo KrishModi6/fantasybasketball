@@ -261,10 +261,12 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
   const [partner, setPartner] = useState("");
   const [run, setRun] = useState(0);
   const [give, get] = shape.split("-");
+  // 2-for-2 means exactly two each way; "give up to 2, get 1" still allows 1-for-1.
+  const exact = shape === "2-2";
   const q = useQuery({
     queryKey: ["league", league.id, "suggest", team, shape, partner, run],
     queryFn: () => api<{ suggestions: TradeSuggestion[]; checked?: Record<string, number> }>(
-      `/api/leagues/${league.id}/trades/suggestions?team_id=${team}&max_give=${give}&max_get=${get}${partner ? `&partner_id=${partner}` : ""}`),
+      `/api/leagues/${league.id}/trades/suggestions?team_id=${team}&max_give=${give}&max_get=${get}&exact=${exact}${partner ? `&partner_id=${partner}` : ""}`),
     enabled: run > 0 && team != null,
     staleTime: 5 * 60_000,
   });
@@ -279,7 +281,7 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
         <label className="field-inline"><span className="label">Package</span>
           <select className="select" value={shape} onChange={(e) => setShape(e.target.value)}>
             <option value="1-1">1-for-1</option>
-            <option value="2-2">Up to 2-for-2</option>
+            <option value="2-2">2-for-2</option>
             <option value="2-1">Give up to 2, get 1</option>
           </select>
         </label>
