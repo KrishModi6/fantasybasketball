@@ -12,7 +12,7 @@ from typing import Any, Callable
 from fbb.connectors.fileimport import normalize_name
 from fbb.improve import add_drop_moves, diagnose, streaming_moves
 from fbb.matchup_sim import MatchupSimulator
-from fbb.trades import find_trades
+from fbb.trades import EVEN_SIZES, find_trades
 
 from .analysis import LeagueAnalysis
 from .present import player_detail, player_rows, team_detail
@@ -92,7 +92,9 @@ class ToolBox:
                    "my_team": {"type": "string", "description": "Optional; defaults to the user's team."},
                }, ["other_team", "give", "get"]),
             fn("trade_ideas", "Search 1-for-1 and 2-for-2 trades that help a team and that the partner's projection also "
-               "accepts.", {"team": team, "partner": {"type": "string", "description": "Optional partner team."}}),
+               "accepts.", {"team": team, "partner": {"type": "string", "description": "Optional partner team."},
+                            "uneven": {"type": "boolean", "description": "Also search 2-for-1 and 1-for-2 packages. "
+                                       "Only when the user asks for them."}}),
             fn("simulate_matchup", "Monte Carlo simulation (10,000 runs) of a head-to-head week: win probabilities, score "
                "ranges, swing players and what happens if players sit.", {
                    "team_a": {"type": "string", "description": "Defaults to the user's team."},
@@ -265,10 +267,11 @@ class ToolBox:
                              if k in ("name", "fp_pg", "ros_games", "ros_points", "vorp", "injury_status", "games_out")}
                             for p in ev["players"]]}
 
-    def trade_ideas(self, team: str | None = None, partner: str | None = None) -> dict:
+    def trade_ideas(self, team: str | None = None, partner: str | None = None, uneven: bool = False) -> dict:
         tid = self.team_id(team)
         partners = [self.team_id(partner, default_mine=False)] if partner else None
-        rows = find_trades(self.ctx, tid, self.a.evaluator(), 2, 2, partners, limit=6)
+        rows = find_trades(self.ctx, tid, self.a.evaluator(), 2, 2, partners, limit=6,
+                           sizes=None if uneven else EVEN_SIZES)
         return {"team": self.snap.team(tid).name, "ideas": [{
             "partner": r["partner_name"], "give": [self._name(p) for p in r["give"]],
             "get": [self._name(p) for p in r["get"]], "my_pts_per_week_gain": _r(r["my_delta_per_week"]),

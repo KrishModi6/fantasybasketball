@@ -24,6 +24,7 @@ SIM_RUNS = 3000
 # suggestions from about 6 partners in every package size, while keeping each team's best deal.
 PARTNER_LOSS_WEIGHT = 1.5  # how much the quick score counts the partner's raw-value loss
 TOP_SHARE = 0.25  # share of the shortlist taken straight from the top quick scores
+EVEN_SIZES = frozenset({(1, 1), (2, 2)})  # the default: the same number of players each way
 
 
 @dataclass
@@ -235,11 +236,12 @@ def _fairness(a: TradeSide, b: TradeSide) -> dict:
 def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | None = None,
                 max_give: int = 2, max_get: int = 2, partners: list[int] | None = None,
                 candidates: int = 90, limit: int = 12, min_partner_pct: float = -0.004,
-                checked: Counter | None = None, exact: bool = False) -> list[dict]:
-    """Search 1-for-1 up to max_give-for-max_get trades with every other team.
+                checked: Counter | None = None, exact: bool = False,
+                sizes: frozenset[tuple[int, int]] | None = None) -> list[dict]:
+    """Search trades with every other team.
 
-    With exact=True only packages of exactly max_give and max_get players are
-    considered (e.g. strictly 2-for-2). Stage 1 scores every package pair by raw ROS value (with roster-spot
+    Package sizes: the (give, get) pairs in ``sizes`` (EVEN_SIZES for 1-for-1 and 2-for-2); else with
+    exact=True only max_give-for-max_get; else every size up to max_give-for-max_get. Stage 1 scores every package pair by raw ROS value (with roster-spot
     replacement) and keeps plausible ones; stage 2 runs the full lineup
     simulation for both teams on the best candidates; results are ranked by our
     gain among trades the partner's model also likes (or barely dislikes). If given, `checked`
@@ -251,10 +253,16 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     replacement = fa_vals[2] if len(fa_vals) > 2 else 0.0
     mine = ctx.team_roster(team_id)
     partners = partners or [t.id for t in ctx.s.teams if t.id != team_id]
+    if sizes:
+        allowed = set(sizes)
+    elif exact:
+        allowed = {(max_give, max_get)}
+    else:
+        allowed = {(g, r) for g in range(1, max_give + 1) for r in range(1, max_get + 1)}
 
-    def packages(roster: list[str], k: int) -> list[tuple[str, ...]]:
+    def packages(roster: list[str], counts: set[int]) -> list[tuple[str, ...]]:
         out = []
-        for n in range(k if exact else 1, k + 1):
+        for n in sorted(counts):
             out.extend(combinations(roster, n))
         return out
 
@@ -266,14 +274,16 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
             return replacement * (n_out - n_in)
         return 0.0
 
-    my_pkgs = [p for p in packages(mine, max_give) if all(vals[x] > replacement * 0.5 for x in p)]
+    my_pkgs = [p for p in packages(mine, {g for g, _ in allowed}) if all(vals[x] > replacement * 0.5 for x in p)]
     pre: list[tuple[float, int, tuple, tuple]] = []
     for pt in partners:
         theirs = ctx.team_roster(pt)
-        their_pkgs = packages(theirs, max_get)
+        their_pkgs = packages(theirs, {r for _, r in allowed})
         for give in my_pkgs:
             v_out = sum(vals[x] for x in give)
             for get in their_pkgs:
+                if (len(give), len(get)) not in allowed:
+                    continue
                 v_in = sum(vals[x] for x in get)
                 if v_in < 0.7 * v_out or v_in > 1.6 * v_out:
                     continue
@@ -288,7 +298,7 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     pre.sort(key=lambda x: -x[0])
 
     results = []
-    for pt, give, get in _shortlist(pre, candidates, max_give, max_get, len(partners)):
+    for pt, give, get in _shortlist(pre, candidates, len(allowed), len(partners)):
         if checked is not None:
             checked[f"{len(give)}-for-{len(get)}"] += 1
         try:
@@ -315,7 +325,7 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     # Diversify: at most 3 suggestions per partner and per outgoing player, and room for every package
     # size the user asked for (half the list at most for any one of 1-for-1, 2-for-1, 2-for-2, ...,
     # unless only one size was asked for).
-    shape_cap = limit if exact or max_give * max_get == 1 else max(limit // 2, 1)
+    shape_cap = limit if len(allowed) == 1 else max(limit // 2, 1)
     counts: Counter = Counter()
     out = []
     for r in results:
@@ -331,7 +341,7 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     return out
 
 
-def _shortlist(pre: list[tuple[float, int, tuple, tuple]], candidates: int, max_give: int, max_get: int,
+def _shortlist(pre: list[tuple[float, int, tuple, tuple]], candidates: int, n_shapes: int,
                n_partners: int) -> list[tuple[int, tuple, tuple]]:
     """Pick which quick-scored packages get the full simulation, keeping the mix varied.
 
@@ -340,8 +350,7 @@ def _shortlist(pre: list[tuple[float, int, tuple, tuple]], candidates: int, max_
     sizes (2-for-2 especially) never get simulated. So cap each package size, each partner, each
     exact package and each player per partner; if that leaves room, top up in score order.
     """
-    shapes = max_give * max_get
-    caps = {"shape": max(candidates // shapes, 8), "partner": max(candidates // max(n_partners, 1), 6),
+    caps = {"shape": max(candidates // n_shapes, 8), "partner": max(candidates // max(n_partners, 1), 6),
             "package": 2, "player": 4}
     counts: Counter = Counter()
     # The very best quick scores always get simulated, whatever their mix.

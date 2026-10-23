@@ -330,7 +330,7 @@ def test_trade_shortlist_is_not_one_deal_with_every_throw_in():
     pre = [(100 - i, 2, ("star", f"filler{i}"), ("their_star",)) for i in range(60)]
     pre += [(30 - i, 3 + i % 4, (f"a{i}", f"b{i}"), (f"c{i}", f"d{i}")) for i in range(40)]
     pre.sort(key=lambda x: -x[0])
-    short = _shortlist(pre, 40, 2, 2, n_partners=6)
+    short = _shortlist(pre, 40, 4, n_partners=6)
     copies = [s for s in short if s[2] == ("their_star",)]
     assert len(short) == len(set(short)) == 40
     assert len(copies) <= int(40 * TOP_SHARE) + 2  # the reserved top scores, then at most 2 per exact package
@@ -398,3 +398,18 @@ def test_espn_matchups_fall_back_when_weeks_disagree():
     assert espn_matchup_periods(sched, {1: [1], 2: [2, 30]}) is None  # ESPN counting 30 weeks: not this season
     default = build_matchup_periods(sched, 19, [2, 2])
     assert len(default) == 21 and default[1][0] == 1
+
+
+def test_trade_finder_searches_only_the_sizes_asked_for(snapshot):
+    from collections import Counter
+
+    from fbb.trades import EVEN_SIZES
+
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    checked: Counter = Counter()
+    rows = find_trades(ctx, 2, candidates=40, sizes=EVEN_SIZES, checked=checked)
+    assert checked and set(checked) <= {"1-for-1", "2-for-2"}  # no 2-for-1 or 1-for-2 is even simulated
+    assert all(len(r["give"]) == len(r["get"]) for r in rows)
+    checked.clear()
+    find_trades(ctx, 2, candidates=40, sizes=frozenset({(2, 1)}), checked=checked)
+    assert set(checked) == {"2-for-1"}
