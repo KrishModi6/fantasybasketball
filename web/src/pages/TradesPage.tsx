@@ -254,19 +254,27 @@ export function TradeResult({ ev }: { ev: TradeEval }) {
   );
 }
 
+// Package sizes the finder searches (give-get). Even trades are the default; uneven ones are opt-in.
+const PACKAGES: Record<string, { label: string; sizes: string }> = {
+  even: { label: "1-for-1 and 2-for-2", sizes: "1-1,2-2" },
+  "1-1": { label: "1-for-1 only", sizes: "1-1" },
+  "2-2": { label: "2-for-2 only", sizes: "2-2" },
+  "2-1": { label: "Give 2, get 1", sizes: "2-1" },
+  "1-2": { label: "Give 1, get 2", sizes: "1-2" },
+  any: { label: "Any size up to 2-for-2", sizes: "1-1,1-2,2-1,2-2" },
+};
+
 function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
   const { league, myTeamId, teams } = useLeagueCtx();
   const [team, setTeam] = useState<number | null>(myTeamId ?? teams[0]?.id ?? null);
-  const [shape, setShape] = useState("2-2");
+  const [shape, setShape] = useState("even");
   const [partner, setPartner] = useState("");
   const [run, setRun] = useState(0);
-  const [give, get] = shape.split("-");
-  // 2-for-2 means exactly two each way; "give up to 2, get 1" still allows 1-for-1.
-  const exact = shape === "2-2";
+  const sizes = PACKAGES[shape]!.sizes;
   const q = useQuery({
     queryKey: ["league", league.id, "suggest", team, shape, partner, run],
     queryFn: () => api<{ suggestions: TradeSuggestion[]; checked?: Record<string, number> }>(
-      `/api/leagues/${league.id}/trades/suggestions?team_id=${team}&max_give=${give}&max_get=${get}&exact=${exact}${partner ? `&partner_id=${partner}` : ""}`),
+      `/api/leagues/${league.id}/trades/suggestions?team_id=${team}&sizes=${sizes}${partner ? `&partner_id=${partner}` : ""}`),
     enabled: run > 0 && team != null,
     staleTime: 5 * 60_000,
   });
@@ -280,9 +288,7 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
         </label>
         <label className="field-inline"><span className="label">Package</span>
           <select className="select" value={shape} onChange={(e) => setShape(e.target.value)}>
-            <option value="1-1">1-for-1</option>
-            <option value="2-2">2-for-2</option>
-            <option value="2-1">Give up to 2, get 1</option>
+            {Object.entries(PACKAGES).map(([value, p]) => <option key={value} value={value}>{p.label}</option>)}
           </select>
         </label>
         <label className="field-inline"><span className="label">Partner</span>
@@ -299,7 +305,7 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && <LoadingBlock rows={6} />}
       {q.data && q.data.suggestions.length === 0 && <Panel><Empty title="No mutually acceptable trades found">Try a larger package or a different partner.</Empty></Panel>}
-      {q.data && shape === "2-2" && !q.data.suggestions.some((s) => s.give.length === 2 && s.get.length === 2)
+      {q.data && sizes.includes("2-2") && !q.data.suggestions.some((s) => s.give.length === 2 && s.get.length === 2)
         && (q.data.checked?.["2-for-2"] ?? 0) > 0 && (
         <p className="small muted">
           Fully simulated {q.data.checked!["2-for-2"]} two-for-two packages. None helped you without costing the other team more than 0.4%, so none are listed.

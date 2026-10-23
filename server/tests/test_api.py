@@ -82,6 +82,10 @@ def test_full_flow(client):
     assert sug.status_code == 200, sug.text
     assert set(sug.json()["checked"]) == {"2-for-2"}
     assert all(len(s["give"]) == len(s["get"]) == 2 for s in sug.json()["suggestions"])
+    even = client.get(f"/api/leagues/{lid}/trades/suggestions?team_id={tid}&sizes=1-1,2-2", headers=owner).json()
+    assert set(even["checked"]) <= {"1-for-1", "2-for-2"}
+    assert all(len(s["give"]) == len(s["get"]) for s in even["suggestions"])
+    assert client.get(f"/api/leagues/{lid}/trades/suggestions?team_id={tid}&sizes=2for1", headers=owner).status_code == 422
 
     # Matchups + simulator
     wk = client.get(f"/api/leagues/{lid}/matchups", headers=owner).json()
