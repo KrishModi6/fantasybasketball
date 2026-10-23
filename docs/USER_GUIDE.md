@@ -53,7 +53,7 @@ Uncheck a player to see the odds if he sits, e.g. to decide on a questionable st
 
 **Trades**
 - **Analyze a trade:** pick both teams and tick players. The result shows each side's gain per week and for the rest of the season, the fantasy-playoff weeks, and playoff and title odds before and after, then a numbered list of the math. "Uneven" trades automatically drop the weakest player or pick up the best free agent, just like in real life.
-- **Find trades:** searches every 1- and 2-player package with every team and lists the ones that help you without hurting the other side (so they might accept). Results mix partners and package sizes; if no 2-for-2 qualifies, it says how many it checked.
+- **Find trades:** searches 1- and 2-player packages with every team and lists the ones that help you without hurting the other side (so they might accept). Pick **1-for-1**, **2-for-2** (exactly two players each way) or **Give up to 2, get 1**. Results mix partners; if no 2-for-2 qualifies, it says how many it checked.
 - **League board:** share a trade idea (with a note) so the whole league can see the numbers. They're re-scored after every refresh; ideas that went through on ESPN are marked **Happened**, and ones a roster move ruled out are marked **No longer possible**. Above the ideas, **Recent moves** lists the league's real trades, pickups and drops.
 
 **League.** Standings, scoring rules, members and which team each manages. Owners also see invite links, refresh settings, ESPN cookies, and delete.

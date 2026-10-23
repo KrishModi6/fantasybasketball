@@ -38,13 +38,13 @@ async def evaluate(body: TradeIn, a: LeagueAnalysis = Depends(analysis)):
 @router.get("/suggestions")
 async def suggestions(team_id: int, a: LeagueAnalysis = Depends(analysis),
                       max_give: int = Query(2, ge=1, le=3), max_get: int = Query(2, ge=1, le=3),
-                      partner_id: int | None = None):
+                      partner_id: int | None = None, exact: bool = False):
     if team_id not in {t.id for t in a.snapshot.teams}:
         raise HTTPException(404, "Team not found")
     partners = [partner_id] if partner_id else None
     checked: Counter = Counter()
     rows = await run_in_threadpool(find_trades, a.ctx, team_id, a.evaluator(), max_give, max_get, partners,
-                                   checked=checked)
+                                   checked=checked, exact=exact)
     for r in rows:
         r["give_names"] = [a.proj[p].name for p in r["give"]]
         r["get_names"] = [a.proj[p].name for p in r["get"]]

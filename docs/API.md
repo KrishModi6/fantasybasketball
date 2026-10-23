@@ -66,7 +66,7 @@ A league with no data yet returns `409` from analytics endpoints, with the last 
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/api/leagues/{id}/trades/evaluate` | `{team_a, team_b, a_gives: [player_id], b_gives: [player_id]}` → `{sides[2], players, math, summary, fairness}` |
-| GET | `/api/leagues/{id}/trades/suggestions?team_id=&max_give=2&max_get=2&partner_id=` | Ranked trade ideas |
+| GET | `/api/leagues/{id}/trades/suggestions?team_id=&max_give=2&max_get=2&exact=false&partner_id=` | Ranked trade ideas (`exact=true` keeps only max_give-for-max_get packages) |
 | GET / POST | `/api/leagues/{id}/trades/board` | POST = evaluate + share `{…trade, note}`; the evaluation is frozen at posting time |
 | DELETE | `/api/leagues/{id}/trades/board/{post_id}` | Author or owner |
 
