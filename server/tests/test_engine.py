@@ -453,3 +453,52 @@ def test_trade_finder_searches_only_the_sizes_asked_for(snapshot):
     checked.clear()
     find_trades(ctx, 2, candidates=40, sizes=frozenset({(2, 1)}), checked=checked)
     assert set(checked) == {"2-for-1"}
+    checked.clear()
+    rows = find_trades(ctx, 2, candidates=40, sizes=frozenset({(3, 3)}), checked=checked)
+    assert set(checked) == {"3-for-3"}
+    assert rows and all(len(r["give"]) == len(r["get"]) == 3 for r in rows)
+
+
+def test_offer_finder_prices_the_players_you_pick(snapshot):
+    from collections import Counter
+
+    from fbb.trades import find_offers
+
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    target = ctx.team_roster(3)[0]
+    checked: Counter = Counter()
+    r = find_offers(ctx, 1, [target], ev, checked=checked)
+    assert r["partner_id"] == 3 and r["get"] == [target]
+    assert set(checked) <= {"1-for-1", "2-for-1", "3-for-1"}
+    assert r["offers"] or r["closest"]
+    gains = [o["my_delta_ros"] for o in r["offers"]]
+    assert gains == sorted(gains, reverse=True)  # best for you first
+    mine = set(ctx.team_roster(1))
+    assert all(set(o["give"]) <= mine and o["partner_delta_pct"] >= -0.004 for o in r["offers"])
+    assert all(o["partner_delta_pct"] < -0.004 for o in r["closest"])
+
+    checked.clear()
+    one = find_offers(ctx, 1, [target], ev, frozenset({1}), checked=checked)
+    assert set(checked) == {"1-for-1"} and all(len(o["give"]) == 1 for o in one["offers"])
+    two = find_offers(ctx, 1, ctx.team_roster(3)[:2], ev, frozenset({2}))
+    assert all(len(o["give"]) == 2 for o in two["offers"] + two["closest"])
+
+
+def test_offer_finder_rejects_bad_picks(snapshot):
+    from fbb.trades import find_offers
+
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    fa = snapshot.free_agents()[0].id
+    cases = {
+        "at least one": [],
+        "up to 3": ctx.team_roster(2)[:4],
+        "already on": [ctx.team_roster(1)[0]],
+        "free agent": [fa],
+        "one team": [ctx.team_roster(2)[0], ctx.team_roster(3)[0]],
+        "isn't in this league": ["no-such-player"],
+    }
+    for msg, targets in cases.items():
+        with pytest.raises(ValueError, match=msg):
+            find_offers(ctx, 1, targets, ev)

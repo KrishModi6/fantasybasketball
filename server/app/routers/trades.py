@@ -7,7 +7,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from fbb.trades import find_trades
+from fbb.trades import find_offers, find_trades
 
 from ..db import get_db
 from ..deps import Membership, membership
@@ -52,6 +52,25 @@ async def suggestions(team_id: int, a: LeagueAnalysis = Depends(analysis),
         r["give_names"] = [a.proj[p].name for p in r["give"]]
         r["get_names"] = [a.proj[p].name for p in r["get"]]
     return {"suggestions": rows, "checked": dict(checked)}
+
+
+@router.get("/offers")
+async def offers(team_id: int, a: LeagueAnalysis = Depends(analysis),
+                 target: list[str] = Query([], description="Players you want: 1 to 3 from one team (repeat it)"),
+                 give: str = Query("1,2,3", pattern=r"^[1-3](,[1-3])*$",
+                                   description="How many of your players an offer may include, e.g. 1,2")):
+    if team_id not in {t.id for t in a.snapshot.teams}:
+        raise HTTPException(404, "Team not found")
+    counts = frozenset(int(n) for n in give.split(","))
+    checked: Counter = Counter()
+    try:
+        res = await run_in_threadpool(find_offers, a.ctx, team_id, target, a.evaluator(), counts, checked=checked)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    for r in res["offers"] + res["closest"]:
+        r["give_names"] = [a.proj[p].name for p in r["give"]]
+    res["get_names"] = [a.proj[p].name for p in res["get"]]
+    return {**res, "checked": dict(checked)}
 
 
 @router.get("/board")

@@ -279,6 +279,19 @@ export interface TradeSuggestion {
   summary: string;
 }
 
+export type TradeOffer = Omit<TradeSuggestion, "partner_id" | "partner_name" | "get" | "get_names">;
+
+/** What to offer for players on another team: offers the partner accepts, else the closest refusals. */
+export interface TradeOffers {
+  partner_id: number;
+  partner_name: string;
+  get: string[];
+  get_names: string[];
+  offers: TradeOffer[];
+  closest: TradeOffer[];
+  checked: Record<string, number>;
+}
+
 export interface Member {
   user_id: string;
   display_name: string;

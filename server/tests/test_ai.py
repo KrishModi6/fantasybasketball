@@ -45,6 +45,7 @@ def test_every_tool_returns_json(analysis):
         "player_details": {"player": "Player 3"},
         "evaluate_trade": {"other_team": "Team 2", "give": ["Player 1"], "get": ["Player 9"]},
         "trade_ideas": {},
+        "trade_offers": {"players": ["Player 9"]},
         "simulate_matchup": {"week": 2},
         "league_news": {},
     }

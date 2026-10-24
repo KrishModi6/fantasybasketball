@@ -6,12 +6,12 @@ import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, 
 import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { fmt0, fmt1, pct, relTime, signedPct } from "../lib/format";
+import { count, fmt0, fmt1, pct, relTime, signed, signedPct } from "../lib/format";
 import { useActivity, useAiStatus, useTeam } from "../lib/queries";
 import { useToast } from "../lib/toast";
-import type { TradeEval, TradeSide, TradeSuggestion } from "../lib/types";
+import type { TradeEval, TradeOffer, TradeOffers, TradeSide, TradeSuggestion } from "../lib/types";
 
-type Tab = "analyze" | "find" | "board";
+type Tab = "analyze" | "find" | "target" | "board";
 interface Draft {
   a: number | null;
   b: number | null;
@@ -51,11 +51,13 @@ export default function TradesPage() {
         <SubTabs label="Trade tools" value={tab} onChange={setTab} tabs={[
           { value: "analyze", label: "Analyze" },
           { value: "find", label: "Find trades" },
+          { value: "target", label: "Target a player" },
           { value: "board", label: "League board" },
         ]} />
         <div style={{ paddingTop: 10 }}>
           {tab === "analyze" && <Analyzer draft={draft} setDraft={setDraft} autoRun={autoRun} />}
           {tab === "find" && <Finder onLoad={load} />}
+          {tab === "target" && <Targeter key={search.get("target") ?? ""} onLoad={load} />}
           {tab === "board" && <Board onLoad={load} />}
         </div>
       </div>
@@ -63,8 +65,9 @@ export default function TradesPage() {
   );
 }
 
-function RosterPicker({ side, teamId, picked, onToggle, onTeam, otherTeam }: {
-  side: "A" | "B";
+function RosterPicker({ title, label, teamId, picked, onToggle, onTeam, otherTeam }: {
+  title: string;
+  label: string;
   teamId: number | null;
   picked: string[];
   onToggle: (id: string) => void;
@@ -74,8 +77,8 @@ function RosterPicker({ side, teamId, picked, onToggle, onTeam, otherTeam }: {
   const { league, teams, myTeamId } = useLeagueCtx();
   const { data, isLoading } = useTeam(league.id, teamId);
   return (
-    <Panel title={`Team ${side} gives`} flush actions={
-      <select className="select" value={teamId ?? ""} onChange={(e) => onTeam(Number(e.target.value))} aria-label={`Team ${side}`}>
+    <Panel title={title} flush actions={
+      <select className="select" value={teamId ?? ""} onChange={(e) => onTeam(Number(e.target.value))} aria-label={label}>
         {teams.map((t) => <option key={t.id} value={t.id} disabled={t.id === otherTeam}>{t.name}{t.id === myTeamId ? " (you)" : ""}</option>)}
       </select>
     }>
@@ -150,9 +153,9 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
   return (
     <div className="stack">
       <div className="grid cols-2" style={{ alignItems: "start" }}>
-        <RosterPicker side="A" teamId={draft.a} picked={draft.aGives} onToggle={(id) => toggle("aGives", id)} otherTeam={draft.b}
+        <RosterPicker title="Team A gives" label="Team A" teamId={draft.a} picked={draft.aGives} onToggle={(id) => toggle("aGives", id)} otherTeam={draft.b}
           onTeam={(id) => setDraft({ ...draft, a: id, aGives: [] })} />
-        <RosterPicker side="B" teamId={draft.b} picked={draft.bGives} onToggle={(id) => toggle("bGives", id)} otherTeam={draft.a}
+        <RosterPicker title="Team B gives" label="Team B" teamId={draft.b} picked={draft.bGives} onToggle={(id) => toggle("bGives", id)} otherTeam={draft.a}
           onTeam={(id) => setDraft({ ...draft, b: id, bGives: [] })} />
       </div>
       <div className="toolbar">
@@ -259,6 +262,7 @@ const PACKAGES: Record<string, { label: string; sizes: string }> = {
   even: { label: "1-for-1 and 2-for-2", sizes: "1-1,2-2" },
   "1-1": { label: "1-for-1 only", sizes: "1-1" },
   "2-2": { label: "2-for-2 only", sizes: "2-2" },
+  "3-3": { label: "3-for-3 only", sizes: "3-3" },
   "2-1": { label: "Give 2, get 1", sizes: "2-1" },
   "1-2": { label: "Give 1, get 2", sizes: "1-2" },
   any: { label: "Any size up to 2-for-2", sizes: "1-1,1-2,2-1,2-2" },
@@ -305,12 +309,16 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && <LoadingBlock rows={6} />}
       {q.data && q.data.suggestions.length === 0 && <Panel><Empty title="No mutually acceptable trades found">Try a larger package or a different partner.</Empty></Panel>}
-      {q.data && sizes.includes("2-2") && !q.data.suggestions.some((s) => s.give.length === 2 && s.get.length === 2)
-        && (q.data.checked?.["2-for-2"] ?? 0) > 0 && (
-        <p className="small muted">
-          Fully simulated {q.data.checked!["2-for-2"]} two-for-two packages. None helped you without costing the other team more than 0.4%, so none are listed.
-        </p>
-      )}
+      {q.data && (["two", "three"] as const).map((word, i) => {
+        const n = i + 2;
+        const simulated = q.data.checked?.[`${n}-for-${n}`] ?? 0;
+        if (!sizes.includes(`${n}-${n}`) || !simulated || q.data.suggestions.some((s) => s.give.length === n && s.get.length === n)) return null;
+        return (
+          <p key={n} className="small muted">
+            Fully simulated {simulated} {word}-for-{word} packages. None helped you without costing the other team more than 0.4%, so none are listed.
+          </p>
+        );
+      })}
       {q.data && q.data.suggestions.length > 0 && (
         <Panel flush>
           <div className="table-wrap">
@@ -337,6 +345,150 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
         </Panel>
       )}
     </div>
+  );
+}
+
+// How many of your players an offer may include (the offers endpoint's give=).
+const OFFER_SIZES: Record<string, { label: string; give: string }> = {
+  "3": { label: "Up to 3 players", give: "1,2,3" },
+  "2": { label: "Up to 2 players", give: "1,2" },
+  "1": { label: "1 player", give: "1" },
+};
+const MAX_TARGETS = 3;
+
+interface TargetSearch {
+  team: number | null;
+  from: number | null;
+  targets: string[];
+  size: string;
+}
+
+const andList = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0] ?? "");
+
+/** Pick players on another team; lists what to offer for them. */
+function Targeter({ onLoad }: { onLoad: (d: Draft) => void }) {
+  const { league, myTeamId, teams } = useLeagueCtx();
+  const toast = useToast();
+  // A player's card links here with ?target=<player>&from=<their team> and searches straight away.
+  const [search] = useSearchParams();
+  const linked = search.get("target");
+  const linkedFrom = Number(search.get("from")) || null;
+  const [team, setTeam] = useState<number | null>(myTeamId ?? teams.find((t) => t.id !== linkedFrom)?.id ?? null);
+  const [from, setFrom] = useState<number | null>(linkedFrom ?? teams.find((t) => t.id !== team)?.id ?? null);
+  const [targets, setTargets] = useState<string[]>(linked && linkedFrom ? [linked] : []);
+  const [size, setSize] = useState("3");
+  const current: TargetSearch = { team, from, targets, size };
+  const ready = team != null && from != null && team !== from && targets.length > 0;
+  // The list shows whatever was last searched; changing the picks marks it as out of date.
+  const [submitted, setSubmitted] = useState<TargetSearch | null>(ready ? current : null);
+  const q = useQuery({
+    queryKey: ["league", league.id, "offers", submitted],
+    queryFn: () => {
+      const params = new URLSearchParams({ team_id: String(submitted!.team), give: OFFER_SIZES[submitted!.size]!.give });
+      submitted!.targets.forEach((id) => params.append("target", id));
+      return api<TradeOffers>(`/api/leagues/${league.id}/trades/offers?${params}`);
+    },
+    enabled: submitted != null,
+    staleTime: 5 * 60_000,
+  });
+  const stale = submitted != null && JSON.stringify(submitted) !== JSON.stringify(current);
+  const toggle = (id: string) => {
+    if (targets.includes(id)) setTargets(targets.filter((x) => x !== id));
+    else if (targets.length >= MAX_TARGETS) toast(`You can target up to ${MAX_TARGETS} players at once. Untick one to pick someone else.`, "err");
+    else setTargets([...targets, id]);
+  };
+  return (
+    <div className="stack">
+      <div className="toolbar">
+        <label className="field-inline"><span className="label">For</span>
+          <select className="select" value={team ?? ""} onChange={(e) => setTeam(Number(e.target.value))}>
+            {teams.map((t) => <option key={t.id} value={t.id} disabled={t.id === from}>{t.name}{t.id === myTeamId ? " (you)" : ""}</option>)}
+          </select>
+        </label>
+        <label className="field-inline"><span className="label">Offer</span>
+          <select className="select" value={size} onChange={(e) => setSize(e.target.value)}>
+            {Object.entries(OFFER_SIZES).map(([value, o]) => <option key={value} value={value}>{o.label}</option>)}
+          </select>
+        </label>
+        <button className="btn primary" disabled={!ready || q.isFetching} onClick={() => setSubmitted(current)}>
+          {q.isFetching ? "Searching…" : "Find offers"}
+        </button>
+        <span className="small muted">{targets.length ? `${targets.length} of ${MAX_TARGETS} picked` : "Tick the players you want below."}</span>
+      </div>
+      <RosterPicker title="Players you want" label="Their team" teamId={from} picked={targets} onToggle={toggle} otherTeam={team}
+        onTeam={(id) => { setFrom(id); setTargets([]); }} />
+      <p className="small muted">
+        Tries every package of your players for them, fully simulates the most promising for both teams, and lists the offers the other team gains from or loses at most 0.4% on, best for you first. Offering more players than you get opens roster spots, filled with the best free agents.
+      </p>
+      {q.error && <ErrorBox error={q.error} />}
+      {q.isFetching && !q.data && <LoadingBlock rows={6} />}
+      {stale && q.data && <Notice level="warn">Your picks changed since this search. Find offers again to update the list.</Notice>}
+      {q.data && <OfferResults data={q.data} team={submitted!.team!} onLoad={onLoad} />}
+    </div>
+  );
+}
+
+function OfferResults({ data, team, onLoad }: { data: TradeOffers; team: number; onLoad: (d: Draft) => void }) {
+  const { league } = useLeagueCtx();
+  const ai = useAiStatus();
+  const want = andList(data.get_names);
+  const analyze = (o: TradeOffer) => onLoad({ a: team, b: data.partner_id, aGives: o.give, bGives: data.get });
+  const best = data.offers[0];
+  const askAi = ai.data?.enabled && (
+    <div className="toolbar">
+      <Link className="btn" to={askPath(league.id, { prompt: `What should I offer ${data.partner_name} for ${want}? Compare the best offers, say which one to send first, and write a short message I could send them.` })}>Ask AI about these offers</Link>
+    </div>
+  );
+  if (!best) {
+    return (
+      <div className="stack">
+        <Panel>
+          <Empty title={`No offer ${data.partner_name} should accept for ${want}`}>
+            {data.closest.length ? "These came closest, but the other team loses more than 0.4% on each. Try offering more players, or target someone else." : "Try offering more players, or target someone else."}
+          </Empty>
+        </Panel>
+        {data.closest.length > 0 && <OfferTable title="Closest offers" offers={data.closest} onAnalyze={analyze} />}
+        {askAi}
+      </div>
+    );
+  }
+  return (
+    <div className="stack">
+      <Notice>
+        <strong>Best offer for {want}:</strong> {andList(best.give_names)}. Your team: {signed(best.my_delta_per_week)} per week ({signedPct(best.my_delta_pct)} rest of season). {data.partner_name}: {signedPct(best.partner_delta_pct)}.
+      </Notice>
+      {[1, 2, 3].map((n) => {
+        const group = data.offers.filter((o) => o.give.length === n);
+        return group.length > 0 && <OfferTable key={n} title={`Offer ${count(n, "player")}`} offers={group} onAnalyze={analyze} />;
+      })}
+      {askAi}
+    </div>
+  );
+}
+
+function OfferTable({ title, offers, onAnalyze }: { title: string; offers: TradeOffer[]; onAnalyze: (o: TradeOffer) => void }) {
+  return (
+    <Panel title={title} flush>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr><th style={{ width: "45%" }}>You give</th><th className="n">You/wk</th><th className="n hide-sm">You ROS</th><th className="n">Partner</th><th className="hide-sm">Fit</th><th /></tr>
+          </thead>
+          <tbody>
+            {offers.map((o) => (
+              <tr key={o.give.join()}>
+                <td className="wrap">{o.give_names.join(", ")}</td>
+                <td className="n"><Delta value={o.my_delta_per_week} /></td>
+                <td className="n hide-sm">{signedPct(o.my_delta_pct)}</td>
+                <td className="n">{signedPct(o.partner_delta_pct)}</td>
+                <td className="hide-sm"><Tag tone={o.fairness.label === "win-win" ? "up" : undefined}>{o.fairness.label}</Tag></td>
+                <td className="n"><button className="btn" onClick={() => onAnalyze(o)}>Analyze</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 

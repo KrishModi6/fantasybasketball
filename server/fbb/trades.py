@@ -23,6 +23,10 @@ SIM_RUNS = 3000
 # Trade finder shortlist, tuned on a 10-team demo league: these give each team a full list of
 # suggestions from about 6 partners in every package size, while keeping each team's best deal.
 PARTNER_LOSS_WEIGHT = 1.5  # how much the quick score counts the partner's raw-value loss
+# Share of the loss the partner accepts (min_partner_pct) that the quick score treats as free. At 0 it
+# shortlisted only swaps of equal raw value, which the simulation scores near 0 for both sides (the best
+# 2-for-2 gained 0.45 pts/week, 3-for-3 0.35); at 0.8 they gain about 4. At 1 more land just past the line.
+PARTNER_SLACK = 0.8
 TOP_SHARE = 0.25  # share of the shortlist taken straight from the top quick scores
 EVEN_SIZES = frozenset({(1, 1), (2, 2)})  # the default: the same number of players each way
 
@@ -233,6 +237,23 @@ def _fairness(a: TradeSide, b: TradeSide) -> dict:
     return {"label": label, "partner_accept_likelihood": accept}
 
 
+def _replacement(ctx: AnalysisContext, vals: dict[str, float]) -> float:
+    """ROS value of the free agent a freed roster spot picks up (the third best, as the best go fast)."""
+    fa_vals = sorted((vals[p.id] for p in ctx.s.free_agents() if p.id in vals), reverse=True)
+    return fa_vals[2] if len(fa_vals) > 2 else 0.0
+
+
+def _spot_adjust(vals: dict[str, float], replacement: float, roster: list[str], outgoing: tuple, n_in: int) -> float:
+    """Raw value of the roster spots a package frees (a free agent fills them) or costs (the worst players go)."""
+    n_out = len(outgoing)
+    if n_in > n_out:  # must drop worst players
+        pool = sorted(vals[p] for p in roster if p not in outgoing)
+        return -sum(pool[: n_in - n_out])
+    if n_out > n_in:
+        return replacement * (n_out - n_in)
+    return 0.0
+
+
 def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | None = None,
                 max_give: int = 2, max_get: int = 2, partners: list[int] | None = None,
                 candidates: int = 90, limit: int = 12, min_partner_pct: float = -0.004,
@@ -249,8 +270,7 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     """
     ev = evaluator or TradeEvaluator(ctx)
     vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
-    fa_vals = sorted((vals[p.id] for p in ctx.s.free_agents() if p.id in vals), reverse=True)
-    replacement = fa_vals[2] if len(fa_vals) > 2 else 0.0
+    replacement = _replacement(ctx, vals)
     mine = ctx.team_roster(team_id)
     partners = partners or [t.id for t in ctx.s.teams if t.id != team_id]
     if sizes:
@@ -260,41 +280,38 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     else:
         allowed = {(g, r) for g in range(1, max_give + 1) for r in range(1, max_get + 1)}
 
-    def packages(roster: list[str], counts: set[int]) -> list[tuple[str, ...]]:
+    def packages(roster: list[str], counts: set[int]) -> list[tuple[tuple[str, ...], float]]:
+        """Every package of `counts` players with its raw value, summed once instead of once per pairing."""
         out = []
         for n in sorted(counts):
-            out.extend(combinations(roster, n))
+            out.extend((p, sum(vals[x] for x in p)) for p in combinations(roster, n))
         return out
 
-    def spot_adjust(n_out: int, n_in: int, roster: list[str], incoming: tuple) -> float:
-        if n_in > n_out:  # must drop worst players
-            pool = sorted((vals[p] for p in roster if p not in incoming))
-            return -sum(pool[: n_in - n_out])
-        if n_out > n_in:
-            return replacement * (n_out - n_in)
-        return 0.0
-
-    my_pkgs = [p for p in packages(mine, {g for g, _ in allowed}) if all(vals[x] > replacement * 0.5 for x in p)]
+    # 3-for-3 pairs 286 packages a side on a 13-man roster, so this loop stays lean: package values are
+    # summed once, and the roster spot math only runs for uneven sizes (even trades free no spot).
+    my_pkgs = [(p, v) for p, v in packages(mine, {g for g, _ in allowed}) if all(vals[x] > replacement * 0.5 for x in p)]
     pre: list[tuple[float, int, tuple, tuple]] = []
     for pt in partners:
         theirs = ctx.team_roster(pt)
+        slack = PARTNER_SLACK * -min_partner_pct * ev.base[pt].mean  # raw value they can lose and still accept
         their_pkgs = packages(theirs, {r for _, r in allowed})
-        for give in my_pkgs:
-            v_out = sum(vals[x] for x in give)
-            for get in their_pkgs:
+        for give, v_out in my_pkgs:
+            for get, v_in in their_pkgs:
                 if (len(give), len(get)) not in allowed:
                     continue
-                v_in = sum(vals[x] for x in get)
                 if v_in < 0.7 * v_out or v_in > 1.6 * v_out:
                     continue
-                my_raw = v_in - v_out + spot_adjust(len(give), len(get), [p for p in mine if p not in give], get)
-                their_raw = v_out - v_in + spot_adjust(len(get), len(give), [p for p in theirs if p not in get], give)
+                my_raw = v_in - v_out
+                their_raw = v_out - v_in
+                if len(give) != len(get):
+                    my_raw += _spot_adjust(vals, replacement, mine, give, len(get))
+                    their_raw += _spot_adjust(vals, replacement, theirs, get, len(give))
                 scale = max(v_out, v_in)
                 if their_raw < -0.12 * scale or my_raw < -0.15 * scale:
                     continue
-                # Prefer trades good for us that the partner wouldn't lose by: the full simulation drops
-                # anything that costs them more than min_partner_pct, so shortlisting lopsided deals wastes it.
-                pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw, 0.0), pt, give, get))
+                # Prefer trades good for us that the partner still accepts: the full simulation drops anything
+                # that costs them more than min_partner_pct, so shortlisting lopsided deals wastes it.
+                pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw + slack, 0.0), pt, give, get))
     pre.sort(key=lambda x: -x[0])
 
     results = []
@@ -372,3 +389,104 @@ def _shortlist(pre: list[tuple[float, int, tuple, tuple]], candidates: int, n_sh
             picked.add((pt, give, get))
             chosen.append((pt, give, get))
     return chosen
+
+
+def find_offers(ctx: AnalysisContext, team_id: int, targets: list[str], evaluator: TradeEvaluator | None = None,
+                give_counts: frozenset[int] = frozenset({1, 2, 3}), candidates: int = 48, limit: int = 10,
+                min_partner_pct: float = -0.004, checked: Counter | None = None) -> dict:
+    """What to offer for one to three players on another team.
+
+    What you get is fixed. Every package of your players in the ``give_counts`` sizes is screened by raw
+    ROS value (with roster-spot replacement), the most promising are fully simulated for both teams, and
+    the offers the partner's projection accepts (falls no more than min_partner_pct, as in find_trades)
+    are ranked by your gain, so the first is the cheapest offer that should get it done. If none
+    qualifies, ``closest`` holds the offers the partner refuses by the least. ValueError (with a message
+    for the user) if the targets aren't 1 to 3 players on one other team.
+    """
+    targets = list(dict.fromkeys(targets))
+    if not targets:
+        raise ValueError("Pick at least one player you want.")
+    if len(targets) > 3:
+        raise ValueError("Pick up to 3 players you want. Untick one and search again.")
+    owner = {e.player_id: t.id for t in ctx.s.teams for e in t.roster}
+    for pid in targets:
+        name = ctx.s.players[pid].name if pid in ctx.s.players else None
+        if name is None:
+            raise ValueError("That player isn't in this league anymore. Refresh the page and pick again.")
+        if pid not in owner:
+            raise ValueError(f"{name} is a free agent, so there's no one to trade with. Add them from the Players page.")
+        if pid not in ctx.proj:
+            raise ValueError(f"Courtside has no projection for {name} yet, so it can't value a trade for them.")
+        if owner[pid] == team_id:
+            raise ValueError(f"{name} is already on {ctx.s.team(team_id).name}. Pick a player from another team.")
+    partners = {owner[pid] for pid in targets}
+    if len(partners) > 1:
+        raise ValueError("Pick players from one team. For players on two teams, search each team separately.")
+    partner = partners.pop()
+    if not give_counts or not give_counts <= {1, 2, 3}:
+        raise ValueError("Offer 1, 2 or 3 of your players.")
+
+    ev = evaluator or TradeEvaluator(ctx)
+    vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
+    replacement = _replacement(ctx, vals)
+    mine, theirs = ctx.team_roster(team_id), ctx.team_roster(partner)
+    v_in = sum(vals[x] for x in targets)
+    slack = PARTNER_SLACK * -min_partner_pct * ev.base[partner].mean  # as in find_trades
+    pre: list[tuple[float, tuple]] = []
+    for n in sorted(give_counts):
+        for give in combinations(mine, n):
+            if not all(vals[x] > replacement * 0.5 for x in give):
+                continue
+            v_out = sum(vals[x] for x in give)
+            my_raw = v_in - v_out + _spot_adjust(vals, replacement, mine, give, len(targets))
+            their_raw = v_out - v_in + _spot_adjust(vals, replacement, theirs, tuple(targets), n)
+            # Highest for the offer that keeps the most for you while the partner still accepts it.
+            pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw + slack, 0.0), give))
+    pre.sort(key=lambda x: -x[0])
+
+    # The best quick scores, then a mix, so the shortlist isn't one of your players plus every throw-in.
+    chosen = [give for _, give in pre[: int(candidates * TOP_SHARE)]]
+    picked = set(chosen)
+    caps = {"size": max(candidates // len(give_counts), 8), "player": max(candidates // 4, 4)}
+    counts: Counter = Counter(k for give in chosen for k in [("size", len(give)), *(("player", p) for p in give)])
+    for relaxed in (False, True):
+        for _, give in pre:
+            if len(chosen) >= candidates:
+                break
+            keys = [("size", len(give)), *(("player", p) for p in give)]
+            if give in picked or (not relaxed and any(counts[k] >= caps[k[0]] for k in keys)):
+                continue
+            counts.update(keys)
+            picked.add(give)
+            chosen.append(give)
+
+    accepted, refused = [], []
+    for give in chosen:
+        if checked is not None:
+            checked[f"{len(give)}-for-{len(targets)}"] += 1
+        try:
+            r = ev.evaluate(team_id, partner, list(give), targets, with_sim=False)
+        except ValueError:
+            continue
+        a, b = r["sides"]
+        row = {"give": list(give), "my_delta_ros": a["delta_ros"], "my_delta_per_week": a["delta_per_week"],
+               "my_delta_pct": a["delta_pct"], "partner_delta_ros": b["delta_ros"], "partner_delta_pct": b["delta_pct"],
+               "fairness": r["fairness"], "summary": r["summary"]}
+        (accepted if b["delta_pct"] >= min_partner_pct else refused).append(row)
+    accepted.sort(key=lambda x: -x["my_delta_ros"])
+    # Diversify as find_trades does: at most 3 offers built on any one of your players, and room for
+    # every offer size asked for.
+    size_cap = limit if len(give_counts) == 1 else max(limit // 2, 1)
+    used: Counter = Counter()
+    offers = []
+    for r in accepted:
+        keys = [("size", len(r["give"])), *(("player", p) for p in r["give"])]
+        if any(used[k] >= (size_cap if k[0] == "size" else 3) for k in keys):
+            continue
+        used.update(keys)
+        offers.append(r)
+        if len(offers) >= limit:
+            break
+    refused.sort(key=lambda x: -x["partner_delta_pct"])
+    return {"partner_id": partner, "partner_name": ctx.s.team(partner).name, "get": targets,
+            "offers": offers, "closest": [] if offers else refused[:3]}

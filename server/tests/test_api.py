@@ -91,6 +91,21 @@ def test_full_flow(client):
     assert set(even["checked"]) <= {"1-for-1", "2-for-2"}
     assert all(len(s["give"]) == len(s["get"]) for s in even["suggestions"])
     assert client.get(f"/api/leagues/{lid}/trades/suggestions?team_id={tid}&sizes=2for1", headers=owner).status_code == 422
+    three = client.get(f"/api/leagues/{lid}/trades/suggestions?team_id={tid}&sizes=3-3", headers=owner).json()
+    assert set(three["checked"]) == {"3-for-3"}
+    assert all(len(s["give"]) == len(s["get"]) == 3 for s in three["suggestions"])
+
+    want = other_roster[0]["id"]
+    off = client.get(f"/api/leagues/{lid}/trades/offers?team_id={tid}&target={want}&give=1,2", headers=owner)
+    assert off.status_code == 200, off.text
+    off = off.json()
+    assert off["partner_id"] == other and off["get"] == [want] and off["get_names"] == [other_roster[0]["name"]]
+    assert set(off["checked"]) <= {"1-for-1", "2-for-1"}
+    assert all(len(o["give_names"]) == len(o["give"]) <= 2 for o in off["offers"] + off["closest"])
+    mine = client.get(f"/api/leagues/{lid}/trades/offers?team_id={tid}&target={team['roster'][0]['id']}", headers=owner)
+    assert mine.status_code == 422 and "Pick a player from another team" in mine.json()["detail"]
+    assert client.get(f"/api/leagues/{lid}/trades/offers?team_id={tid}", headers=owner).status_code == 422
+    assert client.get(f"/api/leagues/{lid}/trades/offers?team_id={tid}&target={want}&give=4", headers=owner).status_code == 422
 
     # Matchups + simulator
     wk = client.get(f"/api/leagues/{lid}/matchups", headers=owner).json()

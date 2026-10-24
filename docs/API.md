@@ -66,7 +66,8 @@ A league with no data yet returns `409` from analytics endpoints, with the last 
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/api/leagues/{id}/trades/evaluate` | `{team_a, team_b, a_gives: [player_id], b_gives: [player_id]}` → `{sides[2], players, math, summary, fairness}` |
-| GET | `/api/leagues/{id}/trades/suggestions?team_id=&sizes=1-1,2-2&partner_id=` | Ranked trade ideas for the listed package sizes (give-get). Without `sizes`: every size up to `max_give`-for-`max_get` (default 2), or only that size with `exact=true` |
+| GET | `/api/leagues/{id}/trades/suggestions?team_id=&sizes=1-1,2-2&partner_id=` | Ranked trade ideas for the listed package sizes (give-get, 1 to 3 each way, e.g. `sizes=3-3`). Without `sizes`: every size up to `max_give`-for-`max_get` (default 2, at most 3), or only that size with `exact=true` |
+| GET | `/api/leagues/{id}/trades/offers?team_id=&target=&target=&give=1,2,3` | What to offer for 1 to 3 players (`target`, repeated) who are all on one other team. `give` lists how many of your players an offer may include. → `{partner_id, partner_name, get, get_names, offers, closest, checked}`: `offers` are the ones the partner's projection accepts (falls 0.4% at most), best for you first; `closest` (only when there are none) are the refusals that came nearest. `422` with a message saying what to fix if the targets are free agents, your own players or on two teams |
 | GET / POST | `/api/leagues/{id}/trades/board` | POST = evaluate + share `{…trade, note}`; the evaluation is frozen at posting time |
 | DELETE | `/api/leagues/{id}/trades/board/{post_id}` | Author or owner |
 

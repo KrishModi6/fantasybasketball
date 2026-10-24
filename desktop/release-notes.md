@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.2.7
+## What's new in 0.2.8
+
+- **Target a player.** A new tab on **Trades**: tick up to 3 players on another team and Courtside tells you what to offer for them. It tries every offer of 1, 2 or 3 of your players, simulates the best ones for both teams, and lists the ones that team should accept, best for you first. If nothing works, it shows the offers that came closest. Open it from any player's card on another team with **What to offer**, or ask the assistant "what should I offer for ...".
+- **3-for-3 trades.** **Find trades** has a new **3-for-3 only** package.
+- **Better 2-for-2 suggestions.** Find trades used to shortlist only swaps of exactly equal value, which barely changed either team: the best 2-for-2s added under half a point a week. It now aims for trades the other team still accepts. In a 10-team test league the best 2-for-2s (and 3-for-3s) now add about 4 points a week, and 1-for-1s a bit more than before.
+
+## In 0.2.7
 
 - **Live during games.** While NBA games are on and Courtside is open, it refreshes from ESPN every 3 minutes, and the status bar shows **Live**. Your matchup score and a new **Today** column on the **Team** page (each player's fantasy points so far today) keep up as the games go. Projections, Season and Last 10 wait for tonight's games to finish and take them in the next morning, so a game at halftime no longer reads as a quiet full game.
 - **"New update released" popup.** Courtside now checks for new versions every 15 minutes instead of every 4 hours, and pops up as soon as one is out: **Download now** on a Mac, **Update now** on Windows once it's downloaded (a few seconds). You'll see it starting with the version after this one.
