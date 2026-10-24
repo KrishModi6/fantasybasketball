@@ -12,7 +12,7 @@ from typing import Any, Callable
 from fbb.connectors.fileimport import normalize_name
 from fbb.improve import add_drop_moves, diagnose, streaming_moves
 from fbb.matchup_sim import MatchupSimulator
-from fbb.trades import EVEN_SIZES, find_trades
+from fbb.trades import EVEN_SIZES, find_offers, find_trades
 
 from .analysis import LeagueAnalysis
 from .present import player_detail, player_rows, team_detail
@@ -53,6 +53,7 @@ class ToolBox:
             "player_details": self.player_details,
             "evaluate_trade": self.evaluate_trade,
             "trade_ideas": self.trade_ideas,
+            "trade_offers": self.trade_offers,
             "simulate_matchup": self.simulate_matchup,
             "league_news": self.league_news,
         }
@@ -95,6 +96,15 @@ class ToolBox:
                "accepts.", {"team": team, "partner": {"type": "string", "description": "Optional partner team."},
                             "uneven": {"type": "boolean", "description": "Also search 2-for-1 and 1-for-2 packages. "
                                        "Only when the user asks for them."}}),
+            fn("trade_offers", "What to offer for specific players on another team: every package of 1 to 3 of the user's "
+               "players, simulated for both teams. Offers the other team's projection accepts, best for the user first; "
+               "if none, the closest refusals.", {
+                   "players": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3,
+                               "description": "The players the user wants, all on one other team."},
+                   "team": team,
+                   "max_give": {"type": "integer", "minimum": 1, "maximum": 3,
+                                "description": "Most players the user would send (default 3)."},
+               }, ["players"]),
             fn("simulate_matchup", "Monte Carlo simulation (10,000 runs) of a head-to-head week: win probabilities, score "
                "ranges, swing players and what happens if players sit.", {
                    "team_a": {"type": "string", "description": "Defaults to the user's team."},
@@ -277,6 +287,21 @@ class ToolBox:
             "get": [self._name(p) for p in r["get"]], "my_pts_per_week_gain": _r(r["my_delta_per_week"]),
             "partner_change_pct": _r(r["partner_delta_pct"] * 100, 1), "fit": r["fairness"]["label"],
         } for r in rows]}
+
+    def trade_offers(self, players: list[str], team: str | None = None, max_give: int = 3) -> dict:
+        tid = self.team_id(team)
+        counts = frozenset(range(1, max(1, min(int(max_give), 3)) + 1))
+        try:
+            r = find_offers(self.ctx, tid, [self.player_id(p) for p in players], self.a.evaluator(), counts, limit=6)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        offer = lambda o: {  # noqa: E731
+            "give": [self._name(p) for p in o["give"]], "my_pts_per_week_gain": _r(o["my_delta_per_week"]),
+            "partner_change_pct": _r(o["partner_delta_pct"] * 100, 1), "fit": o["fairness"]["label"],
+        }
+        return {"team": self.snap.team(tid).name, "partner": r["partner_name"], "get": [self._name(p) for p in r["get"]],
+                "offers": [offer(o) for o in r["offers"]],
+                "closest_refused_offers": [offer(o) for o in r["closest"]]}
 
     def simulate_matchup(self, team_a: str | None = None, team_b: str | None = None, week: int | None = None,
                          sit: list[str] | None = None) -> dict:

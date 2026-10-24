@@ -15,6 +15,7 @@ The agent runs the same code as the rest of the app (`server/app/services/ai_too
 | `player_details` | One player's projection sources and weights, adjustments, ML factors, recent games and news |
 | `evaluate_trade` | The trade analyzer: both rosters re-simulated, playoff odds before and after, fairness |
 | `trade_ideas` | The trade finder for a team, optionally against one partner |
+| `trade_offers` | What to offer for specific players on another team: offers of 1 to 3 of the user's players that the other team accepts |
 | `simulate_matchup` | The Monte Carlo matchup simulator (6,000 runs), with players benched if asked |
 | `league_news` | Recent headlines and injury changes (context only, never a reason to override the numbers) |
 
