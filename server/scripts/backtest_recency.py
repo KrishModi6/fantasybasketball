@@ -107,7 +107,7 @@ def run(season: int) -> None:
                               history=[h for h in ds.lines.get(pid, []) if h.season < season],
                               experts=[espn] if espn else [], adp=ds.adp.get((pid, season)))
     snap = LeagueSnapshot(settings=LeagueSettings(name="backtest", season=season), teams=[], players=players,
-                          schedule=ProSchedule(season=season))
+                          schedule=ProSchedule(season=season), current_period=10_000)  # every game is over
     engine = P.ProjectionEngine(snap)  # loads the learned prior strengths
     pre = preseason(season, set(players))
     logs = {pid: g for pid, g in logs.items() if pid in pre}

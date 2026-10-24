@@ -29,6 +29,7 @@ def player_rows(a: LeagueAnalysis, ids: list[str] | None = None) -> list[dict]:
     next7 = ctx.days[:7]
     ranked = sorted(a.proj, key=lambda pid: -values[pid]["ros_value"])
     rank = {pid: i + 1 for i, pid in enumerate(ranked)}
+    season, today = a.snapshot.settings.season, a.snapshot.current_period
     out = []
     for pid in ids:
         pr = a.proj.get(pid)
@@ -37,6 +38,8 @@ def player_rows(a: LeagueAnalysis, ids: list[str] | None = None) -> list[dict]:
         p = a.snapshot.players[pid]
         v = values[pid]
         pg = pr.per_game
+        # Today's game so far (live during games; ESPN only logs a game once the player is on the floor).
+        game = next((g for g in p.recent_games if g.season == season and g.period == today), None)
         row = {
             "id": pid, "name": pr.name, "pro_team": pr.pro_team, "positions": pr.positions,
             "eligible_slots": [s for s in p.eligible_slots if s not in ("BE", "IR")],
@@ -45,6 +48,8 @@ def player_rows(a: LeagueAnalysis, ids: list[str] | None = None) -> list[dict]:
             "age": _r(p.age, 1), "ownership_pct": _r(p.ownership_pct, 1),
             "fp_pg": _r(pr.fp_pg), "fp_sd": _r(pr.fp_sd), "preseason_fp_pg": _r(pr.preseason_fp_pg),
             "season_fp_pg": _r(pr.season_fp_pg), "recent_fp_pg": _r(pr.recent_fp_pg),
+            "today_fp": _r(a.engine.fp_scoring.fantasy_points(game.stats), 1) if game else None,
+            "today_min": _r(game.minutes, 0) if game else None,
             "games_played": pr.games_played, "mpg": _r(pr.mpg, 1), "availability": _r(pr.availability, 3),
             "games_out": _r(pr.games_out, 1), "ros_games": _r(v["ros_games"], 1),
             "ros_value": _r(v["ros_value"], 0), "vorp": _r(v["vorp"], 0), "value_pg": _r(v["value_pg"]),

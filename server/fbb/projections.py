@@ -43,7 +43,7 @@ from .baseline import (
 )
 from .ml.features import build_features
 from .ml.model import ProjectionModel
-from .models import LeagueSnapshot, Player, ScoringSettings
+from .models import GameLog, LeagueSnapshot, Player, ScoringSettings, SeasonLine
 from .schedule import period_for_date
 
 DEFAULT_ENSEMBLE = {"sps": 0.4, "espn": 0.4, "ml": 0.2}
@@ -127,6 +127,17 @@ class PlayerProjection:
 
 def _decay(n_back: int, half_life: float) -> float:
     return 0.5 ** (n_back / half_life)
+
+
+def _without(line: SeasonLine, games: list[GameLog]) -> SeasonLine:
+    """A season line minus some of its games."""
+    stats = dict(line.stats)
+    for g in games:
+        for k, v in g.stats.items():
+            if k in stats:
+                stats[k] = max(0.0, stats[k] - v)
+    return line.model_copy(update={"gp": max(0.0, line.gp - len(games)), "stats": stats,
+                                   "minutes": max(0.0, line.minutes - sum(g.minutes for g in games))})
 
 
 _DURATION = re.compile(r"(\d+)\s*(?:-|to|-to-)?\s*(\d+)?\s*(day|week|month)s?", re.I)
@@ -275,9 +286,15 @@ class ProjectionEngine:
         prior_rates = {k: blend[k] for k in RATE_STATS}
         prior_mpg = blend["mpg"]
 
-        games = [g for g in p.recent_games if g.season == self.season]
-        carry = [g for g in p.recent_games if g.season == self.season - 1][-CARRYOVER_GAMES:]
+        # Today's games may still be on, and ESPN counts the minutes so far in both the game log and the
+        # season totals, so a game at halftime would read as a quiet full game. They count from tomorrow.
+        today = [g for g in p.recent_games if g.season == self.season and g.period >= self.s.current_period]
+        done = [g for g in p.recent_games if g not in today]
+        games = [g for g in done if g.season == self.season]
+        carry = [g for g in done if g.season == self.season - 1][-CARRYOVER_GAMES:]
         cur = p.current if p.current and p.current.season == self.season else None
+        if cur and today:
+            cur = _without(cur, today)
         obs_tot = {k: 0.0 for k in RATE_STATS}
         obs_min = 0.0
         w_minutes_sum = 0.0
@@ -341,7 +358,7 @@ class ProjectionEngine:
 
         # Game-to-game volatility: shrink observed SD (this + last season logs) to the population CV.
         fp = self._fp(per_game)
-        fps = [self._fp(g.stats) for g in p.recent_games[-30:]]
+        fps = [self._fp(g.stats) for g in done[-30:]]
         prior_var = (self.fp_cv * max(fp, 5.0)) ** 2
         if len(fps) >= 5:
             n = len(fps)

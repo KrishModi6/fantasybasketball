@@ -131,6 +131,7 @@ class ProSchedule(BaseModel):
     season: int
     period_dates: dict[int, date] = Field(default_factory=dict)
     games: dict[int, list[str]] = Field(default_factory=dict)  # period -> teams playing
+    tipoffs: dict[int, tuple[datetime, datetime]] = Field(default_factory=dict)  # period -> first and last tip-off
 
     def teams_playing(self, period: int) -> list[str]:
         return self.games.get(period, [])

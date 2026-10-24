@@ -29,7 +29,7 @@ Courtside reopens where you left off. The back arrow (or your mouse's back butto
 - injuries.
 
 **Team** (any team via the switcher; the league table on the left of wide screens also opens teams)
-- **Roster:** projected FP/G, recent form, games in the next 7 days, expected starts and points per week, value over replacement.
+- **Roster:** projected FP/G, recent form, games in the next 7 days, expected starts and points per week, value over replacement. On game days, **Today** shows each player's fantasy points so far. **Last 10** needs at least 3 games, counting the end of last season while this one is young, so it stays blank for players who sat out last season's final stretch until they've played 3 games this season.
 - **Daily lineup:** the optimal lineup for each of the next 7 days. *Confidence* is the chance a starter outscores the best bench player who could take that slot. "Locked in" means nobody could replace him.
 - **Improve my team:**
   - weak spots, ranked by points at stake;
@@ -73,4 +73,4 @@ If you know something the data doesn't yet (a confirmed starting role, an absenc
 
 **Why does a trade that adds value still say "neutral"?** The verdict is based on your *lineup-adjusted* output. Two good players who play the same days or positions may not both start. The threshold is ±1% of your rest-of-season points.
 
-**How often does data update?** Every hour by default (the league owner can change it), and again whenever you open Courtside and the data is more than 30 minutes old. Anyone can press **Refresh** in the top bar. Trades and waiver moves made on ESPN show up in the league feed and under **Trades > League board** after the next refresh.
+**How often does data update?** Every hour by default (the league owner can change it), and again whenever you open Courtside and the data is more than 30 minutes old. While games are on (the status bar says **Live**), every 3 minutes as long as Courtside is open. Tonight's games count toward projections the next morning, once they're final. Anyone can press **Refresh** in the top bar. Trades and waiver moves made on ESPN show up in the league feed and under **Trades > League board** after the next refresh.

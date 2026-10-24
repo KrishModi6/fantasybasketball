@@ -13,7 +13,7 @@ from fbb.connectors.fileimport import normalize_name, parse_upload
 from fbb.context import AnalysisContext
 from fbb.enrich import enrich_players
 from fbb.lineup import SlotModel, solve_day
-from fbb.models import GameLog, Player, ScoringSettings
+from fbb.models import GameLog, Player, ScoringSettings, SeasonLine
 from fbb.projections import MANUAL_LIMIT, ProjectionEngine, games_from_injury_note
 from fbb.strength import league_strength, round_robin
 from fbb.trades import TradeEvaluator, apply_trade, find_trades
@@ -164,10 +164,50 @@ BIG_GAME = {"PTS": 42, "REB": 12, "AST": 9, "STL": 2, "BLK": 1, "TO": 2, "FGM": 
 
 def _with_games(seasons: list[int]):
     snap = make_snapshot()
+    snap.current_period = 40  # every logged game is over
     p = snap.players["1"]
     p.recent_games = [GameLog(season=s, period=160 + i if s == 2026 else 1 + i, team=p.pro_team, minutes=36,
                               stats=BIG_GAME) for i, s in enumerate(seasons)]
     return ProjectionEngine(snap, model=None).project_all()["1"]
+
+
+def test_todays_game_counts_from_tomorrow():
+    """A game in progress (in the log and in the season totals) must not read as a quiet full game."""
+    snap = make_snapshot()
+    snap.current_period = 5
+    base = ProjectionEngine(snap, model=None).project_all()["1"]
+    p = snap.players["1"]
+    half = {"PTS": 6, "REB": 2, "AST": 1, "FGM": 3, "FGA": 6}
+    p.recent_games = [GameLog(season=2027, period=5, team=p.pro_team, minutes=12, stats=half)]
+    p.current = SeasonLine(season=2027, team=p.pro_team, gp=1, minutes=12, stats=half)
+    pr = ProjectionEngine(snap, model=None).project_all()["1"]
+    assert pr.fp_pg == pytest.approx(base.fp_pg)
+    assert pr.games_played == 0 and pr.season_fp_pg is None and pr.in_season_weight == 0
+    snap.current_period = 6  # the next morning it counts
+    assert ProjectionEngine(snap, model=None).project_all()["1"].games_played == 1
+
+
+def test_only_the_unplayed_part_of_todays_game_is_left():
+    snap = make_snapshot()
+    p = snap.players["1"]
+    today = next(d for d in range(1, 30) if p.pro_team in snap.schedule.games[d])
+    snap.current_period = today
+    before = AnalysisContext(snap).p_play("1")[today]
+    mpg = AnalysisContext(snap).proj["1"].mpg
+    p.recent_games = [GameLog(season=2027, period=today, team=p.pro_team, minutes=mpg / 2, stats={"PTS": 8})]
+    assert AnalysisContext(snap).p_play("1")[today] == pytest.approx(before / 2)
+
+
+def test_live_window_runs_from_first_tip_until_the_last_game_ends():
+    from datetime import datetime, timezone
+
+    from fbb.models import ProSchedule
+    from fbb.schedule import GAME_LENGTH, live_window
+
+    first, last = datetime(2026, 10, 23, 23, tzinfo=timezone.utc), datetime(2026, 10, 24, 2, 30, tzinfo=timezone.utc)
+    sched = ProSchedule(season=2027, tipoffs={4: (first, last)})
+    assert live_window(sched, 4) == (first, last + GAME_LENGTH)
+    assert live_window(sched, 5) is None
 
 
 def test_last_seasons_closing_games_count_before_this_season_starts():

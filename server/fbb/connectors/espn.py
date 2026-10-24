@@ -282,6 +282,7 @@ def parse_player(entry: dict, season: int, period_to_season: dict[int, int] | No
 def parse_pro_schedule(data: dict, season: int) -> ProSchedule:
     games: dict[int, set[str]] = {}
     first_game: dict[int, datetime] = {}
+    last_game: dict[int, datetime] = {}
     for team in data.get("settings", {}).get("proTeams", []):
         abbrev = ESPN_PRO_TEAMS.get(team.get("id"), team.get("abbrev", ""))
         for period, glist in (team.get("proGamesByScoringPeriod") or {}).items():
@@ -291,6 +292,8 @@ def parse_pro_schedule(data: dict, season: int) -> ProSchedule:
                 ts = datetime.fromtimestamp(g["date"] / 1000, tz=timezone.utc).astimezone(EASTERN)
                 if p not in first_game or ts < first_game[p]:
                     first_game[p] = ts
+                if p not in last_game or ts > last_game[p]:
+                    last_game[p] = ts
     period_dates: dict[int, date] = {}
     if first_game:
         # Anchor on any known period, then every scoring period is one calendar day.
@@ -303,6 +306,7 @@ def parse_pro_schedule(data: dict, season: int) -> ProSchedule:
         season=season,
         period_dates=period_dates,
         games={p: sorted(t) for p, t in sorted(games.items())},
+        tipoffs={p: (first_game[p], last_game[p]) for p in sorted(first_game)},
     )
 
 

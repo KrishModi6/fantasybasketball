@@ -110,8 +110,10 @@ export default function TeamPage() {
 }
 
 function Roster({ team, isPoints }: { team: TeamDetail; isPoints: boolean }) {
-  const { openPlayer } = useLeagueCtx();
+  const { openPlayer, live } = useLeagueCtx();
   const weeks = Math.max(1, team.weeks_remaining);
+  // Points so far today: shown while games are on, and afterwards until tomorrow's first refresh.
+  const today = isPoints && (live || team.roster.some((p) => p.today_fp != null));
   return (
     <Panel flush foot="Starts and points per week come from simulating every remaining day with the optimal lineup, so they account for positions, schedule overlap and injuries.">
       <div className="table-wrap">
@@ -119,6 +121,7 @@ function Roster({ team, isPoints }: { team: TeamDetail; isPoints: boolean }) {
           <thead>
             <tr>
               <th>Slot</th><th>Player</th><th className="hide-sm">Team</th><th className="hide-sm">Pos</th>
+              {today && <th className="n" title={live ? "Fantasy points so far today, refreshed every few minutes during games" : "Fantasy points today"}>Today</th>}
               <th className="n">{isPoints ? "FP/G" : "Value/G"}</th><th className="n hide-sm">± game</th><th className="n hide-sm">Season</th><th className="n hide-sm">Last 10</th>
               <th className="n">MPG</th><th className="n">Next 7</th><th className="n">Starts/wk</th><th className="n">Pts/wk</th><th className="n hide-sm">Over repl.</th>
             </tr>
@@ -130,6 +133,11 @@ function Roster({ team, isPoints }: { team: TeamDetail; isPoints: boolean }) {
                 <td><PlayerName name={p.name} injury={p.injury_status} onOpen={() => openPlayer(p.id)} sub={p.games_out > 0 ? `out ~${fmt0(p.games_out)}g` : undefined} /></td>
                 <td className="hide-sm muted">{p.pro_team}</td>
                 <td className="hide-sm muted">{p.positions.join(", ")}</td>
+                {today && (
+                  <td className="n">
+                    {p.today_fp != null ? <span title={`${fmt0(p.today_min)} minutes`}>{fmt1(p.today_fp)}</span> : <span className="faint">–</span>}
+                  </td>
+                )}
                 <td className="n strong">{fmt1(isPoints ? p.fp_pg : p.value_pg)}</td>
                 <td className="n hide-sm muted">{fmt0(p.fp_sd)}</td>
                 <td className="n hide-sm">{fmt1(p.season_fp_pg)}</td>

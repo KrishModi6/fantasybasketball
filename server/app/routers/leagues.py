@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from fbb.connectors.base import ConnectorError
 from fbb.connectors.fileimport import parse_upload
+from fbb.schedule import live_window
 
 from ..config import get_settings
 from ..db import get_db
@@ -58,6 +59,7 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
                   "claimed_by": claimed[t.id].user.display_name if t.id in claimed else None}
                  for t in snap.teams]
         st = snap.settings
+        live = live_window(snap.schedule, snap.current_period)
         settings = {
             "scoring": st.scoring.model_dump(), "roster_slots": st.roster_slots, "team_count": st.team_count,
             "regular_season_matchups": st.regular_season_matchups, "playoff_teams": st.playoff_teams,
@@ -68,6 +70,7 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
             "current_period": snap.current_period,
             "today": (snap.schedule.period_dates.get(snap.current_period).isoformat()
                       if snap.schedule.period_dates.get(snap.current_period) else None),
+            "live_window": [t.isoformat() for t in live] if live else None,
             "matchup_periods": {mp: [snap.schedule.period_dates[d[0]].isoformat() if d[0] in snap.schedule.period_dates else None,
                                      snap.schedule.period_dates[d[-1]].isoformat() if d[-1] in snap.schedule.period_dates else None]
                                 for mp, d in st.matchup_periods.items() if d},

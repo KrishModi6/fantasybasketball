@@ -59,6 +59,7 @@ export interface League {
     current_matchup_period: number;
     current_period: number;
     today: string | null;
+    live_window: [string, string] | null; // today's first tip-off until the last game should be over
     matchup_periods: Record<string, [string | null, string | null]>;
   } | null;
 }
@@ -80,6 +81,8 @@ export interface PlayerRow {
   preseason_fp_pg: number;
   season_fp_pg: number | null;
   recent_fp_pg: number | null;
+  today_fp: number | null; // today's game so far, once he has played in it
+  today_min: number | null;
   games_played: number;
   mpg: number;
   availability: number;
