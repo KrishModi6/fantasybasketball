@@ -51,7 +51,8 @@ export function LeaguesPage() {
             <div className="table-wrap">
               <table className="data">
                 <thead>
-                  <tr><th>League</th><th>Source</th><th>Season</th><th>Role</th><th className="n">Members</th><th>Data</th></tr>
+                  {/* Desktop copies never see league mates join, so count teams there instead of members. */}
+                  <tr><th>League</th><th>Source</th><th>Season</th><th>Role</th><th className="n">{isLocalApp() ? "Teams" : "Members"}</th><th>Data</th></tr>
                 </thead>
                 <tbody>
                   {data.map((l) => (
@@ -60,7 +61,7 @@ export function LeaguesPage() {
                       <td>{sourceLabel[l.source]}</td>
                       <td>{l.season - 1}–{String(l.season).slice(2)}</td>
                       <td>{l.role === "owner" ? "Owner" : "Member"}</td>
-                      <td className="n">{l.member_count}</td>
+                      <td className="n">{isLocalApp() ? (l.team_count ?? "–") : l.member_count}</td>
                       <td className={l.sync_status === "error" ? "down" : "muted"}>
                         {l.sync_status === "error" ? "Refresh failed" : `Synced ${relTime(l.last_synced_at)}`}
                       </td>

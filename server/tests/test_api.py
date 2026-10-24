@@ -40,6 +40,8 @@ def test_full_flow(client):
     lid = lg["id"]
     assert lg["settings"]["scoring"]["points"]["STL"] == 4
     assert len(lg["teams"]) == 10
+    listed = client.get("/api/leagues", headers=owner).json()
+    assert [(x["member_count"], x["team_count"]) for x in listed] == [(1, 10)]
 
     r = client.get(f"/api/leagues/{lid}/rankings", headers=owner)
     assert r.status_code == 200, r.text

@@ -56,7 +56,7 @@ Uncheck a player to see the odds if he sits, e.g. to decide on a questionable st
 - **Find trades:** searches packages with every team and lists the ones that help you without hurting the other side (so they might accept). By default it looks at **1-for-1 and 2-for-2** trades only. Under **Package** you can pick 1-for-1 only, 2-for-2 only, give 2 get 1, give 1 get 2, or any size. If no 2-for-2 qualifies, it says how many it checked.
 - **League board:** share a trade idea (with a note) so the whole league can see the numbers. They're re-scored after every refresh; ideas that went through on ESPN are marked **Happened**, and ones a roster move ruled out are marked **No longer possible**. Above the ideas, **Recent moves** lists the league's real trades, pickups and drops.
 
-**League.** Standings, scoring rules, members and which team each manages. Owners also see invite links, refresh settings, ESPN cookies, and delete.
+**League.** Standings, scoring rules, members and which team each manages. Owners also see invite links, refresh settings, ESPN cookies, and delete. In the desktop app everyone runs their own copy, so league mates who join with your code don't appear as members on your computer; the app shows the number of teams instead.
 
 ## Adjusting a projection
 

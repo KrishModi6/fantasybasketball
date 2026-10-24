@@ -88,6 +88,12 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
     }
 
 
+def _team_count(db: Session, league_id: str) -> int | None:
+    """Teams in the latest snapshot, read straight from the JSON (the full model parse isn't needed here)."""
+    row = latest_snapshot_row(db, league_id)
+    return len(json.loads(zlib.decompress(row.data))["teams"]) if row is not None else None
+
+
 @router.get("/leagues")
 def my_leagues(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(LeagueMember).where(LeagueMember.user_id == user.id)).all()
@@ -95,7 +101,7 @@ def my_leagues(user: User = Depends(current_user), db: Session = Depends(get_db)
     for m in rows:
         lg = m.league
         out.append({"id": lg.id, "name": lg.name, "season": lg.season, "source": lg.source, "role": m.role,
-                    "team_id": m.team_id, "member_count": len(lg.members),
+                    "team_id": m.team_id, "member_count": len(lg.members), "team_count": _team_count(db, lg.id),
                     "sync_status": lg.last_sync_status,
                     "last_synced_at": _aware(lg.last_synced_at).isoformat() if lg.last_synced_at else None})
     return out

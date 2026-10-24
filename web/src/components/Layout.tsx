@@ -4,7 +4,7 @@ import { useIsFetching, useMutation, useQueryClient } from "@tanstack/react-quer
 import { ArrowLeft, LogOut, Moon, RefreshCw, Sun } from "lucide-react";
 import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
+import { count, pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
 import { canGoBack, rememberPath } from "../lib/nav";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
 import { useAutoRefresh, useLeagueSocket, useRefreshOnSync } from "../lib/realtime";
@@ -77,6 +77,13 @@ export const useLeagueCtx = () => {
   if (!v) throw new Error("useLeagueCtx outside league layout");
   return v;
 };
+
+/**
+ * How big the league is, for headers. Each desktop app keeps its own copy of the league, so league mates who
+ * join with a code never become members on this computer: count teams there, members on a shared server.
+ */
+export const leagueSize = (league: League) =>
+  isLocalApp() ? count(league.teams.length, "team") : count(league.member_count, "member");
 
 function SyncStatus({ league }: { league: League }) {
   const qc = useQueryClient();
@@ -243,7 +250,7 @@ export function LeagueLayout() {
       </div>
 
       <footer className="statusbar">
-        <span>{league ? `${league.name} · ${league.member_count} member${league.member_count === 1 ? "" : "s"}` : "Loading"}</span>
+        <span>{league ? `${league.name} · ${leagueSize(league)}` : "Loading"}</span>
         {s && <span>Week {s.current_matchup_period}{s.today ? ` · ${shortDate(s.today, true)}` : ""}</span>}
         {league && <span>{sourceLabel[league.source]} data, synced {relTime(league.sync.last_synced_at)}</span>}
         {model?.trained && <span>Model trained through {model.trained_through ? `${model.trained_through - 1}–${String(model.trained_through).slice(2)}` : "–"}</span>}

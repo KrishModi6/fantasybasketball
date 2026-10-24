@@ -12,6 +12,7 @@ export interface LeagueSummary {
   role: "owner" | "member";
   team_id: number | null;
   member_count: number;
+  team_count: number | null; // null before the first sync
   sync_status: string;
   last_synced_at: string | null;
 }

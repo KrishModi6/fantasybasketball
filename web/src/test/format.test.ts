@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmt1, pct, record, signed, signedPct } from "../lib/format";
+import { count, fmt1, pct, record, signed, signedPct } from "../lib/format";
 
 describe("format", () => {
   it("formats signed numbers with a true minus sign", () => {
@@ -13,5 +13,9 @@ describe("format", () => {
     expect(record(7, 3)).toBe("7–3");
     expect(record(7, 3, 1)).toBe("7–3–1");
     expect(fmt1(null)).toBe("–");
+  });
+  it("counts with a plural", () => {
+    expect(count(1, "team")).toBe("1 team");
+    expect(count(7, "team")).toBe("7 teams");
   });
 });
