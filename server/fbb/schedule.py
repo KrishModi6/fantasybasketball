@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from statistics import median
 
 from .models import LeagueSnapshot, ProSchedule
 
 
 LIGHT_WEEK_SHARE = 0.8  # a week with fewer team-games than this share of a typical week is "light"
+GAME_LENGTH = timedelta(hours=3)  # tip-off to final buzzer, with room for overtime
+
+
+def live_window(sched: ProSchedule, period: int) -> tuple[datetime, datetime] | None:
+    """When a day's games are on: from the first tip-off until the last game should be over."""
+    tips = sched.tipoffs.get(period)
+    return (tips[0], tips[1] + GAME_LENGTH) if tips else None
 
 
 def week_units(sched: ProSchedule, light_share: float = LIGHT_WEEK_SHARE) -> list[list[int]]:

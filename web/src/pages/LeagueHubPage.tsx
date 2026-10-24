@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { InvitePanel } from "../components/Invite";
-import { useLeagueCtx } from "../components/Layout";
+import { leagueSize, useLeagueCtx } from "../components/Layout";
 import { Dialog, ErrorBox, Notice, PageHead, Panel } from "../components/ui";
-import { api } from "../lib/api";
+import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmt0, record, relTime, shortDate, sourceLabel } from "../lib/format";
 import { useMembers } from "../lib/queries";
@@ -16,7 +16,7 @@ export default function LeagueHubPage() {
   return (
     <>
       <PageHead title="League"
-        desc={`${league.member_count} member${league.member_count === 1 ? "" : "s"} · ${sourceLabel[league.source]} · synced ${relTime(league.sync.last_synced_at)}`} />
+        desc={`${leagueSize(league)} · ${sourceLabel[league.source]} · synced ${relTime(league.sync.last_synced_at)}`} />
       <div className="grid cols-main" style={{ alignItems: "start" }}>
         <div className="stack">
           <Standings />
@@ -36,18 +36,20 @@ export default function LeagueHubPage() {
 function Standings() {
   const { league, myTeamId } = useLeagueCtx();
   const rows = [...league.teams].sort((a, b) => b.wins + b.ties / 2 - (a.wins + a.ties / 2) || b.points_for - a.points_for);
+  // On the desktop app every team but yours would read "unclaimed", even for league mates who joined.
+  const members = !isLocalApp();
   return (
     <Panel title="Standings" flush>
       <div className="table-wrap">
         <table className="data">
-          <thead><tr><th className="n">#</th><th>Team</th><th className="hide-sm">Owner (ESPN)</th><th className="hide-sm">Courtside member</th><th className="n">W–L</th><th className="n">PF</th><th className="n hide-sm">PA</th></tr></thead>
+          <thead><tr><th className="n">#</th><th>Team</th><th className="hide-sm">Owner (ESPN)</th>{members && <th className="hide-sm">Courtside member</th>}<th className="n">W–L</th><th className="n">PF</th><th className="n hide-sm">PA</th></tr></thead>
           <tbody>
             {rows.map((t, i) => (
               <tr key={t.id} className={t.id === myTeamId ? "mine" : ""}>
                 <td className="n muted">{i + 1}</td>
                 <td><Link to={`../team/${t.id}`} relative="path" style={{ color: "var(--text)" }}>{t.name}</Link></td>
                 <td className="hide-sm muted">{t.owner_name ?? "–"}</td>
-                <td className="hide-sm">{t.claimed_by ?? <span className="faint">unclaimed</span>}</td>
+                {members && <td className="hide-sm">{t.claimed_by ?? <span className="faint">unclaimed</span>}</td>}
                 <td className="n">{record(t.wins, t.losses, t.ties)}</td>
                 <td className="n">{fmt0(t.points_for)}</td>
                 <td className="n hide-sm">{fmt0(t.points_against)}</td>
@@ -146,7 +148,8 @@ function Members() {
     onError: (e: Error) => toast(e.message, "err"),
   });
   return (
-    <Panel title="Members" flush>
+    <Panel title="Members" flush
+      note={isLocalApp() ? "Each person runs Courtside on their own computer, so league mates who join with your code don't show up here." : undefined}>
       <div className="table-wrap">
         <table className="data">
           <thead><tr><th>Name</th><th>Role</th><th>Team</th></tr></thead>

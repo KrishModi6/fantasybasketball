@@ -85,6 +85,12 @@ class AnalysisContext:
                 out[d] = pr.availability * (1 - frac)
             else:
                 out[d] = pr.availability
+        # Once today's game has started, what he has scored is already in the matchup totals, so only the
+        # part of the game he hasn't played yet is left.
+        today = self.s.current_period
+        played = sum(g.minutes for g in p.recent_games if g.season == self.s.settings.season and g.period == today)
+        if played and out.get(today):
+            out[today] *= max(0.0, 1 - played / max(pr.mpg, 1.0))
         self._pplay[pid] = out
         return out
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { UpdatePopup } from "../components/UpdatePopup";
 import { VersionBadge } from "../components/VersionBadge";
 import type { UpdateState } from "../lib/api";
 
@@ -46,5 +47,31 @@ describe("version label", () => {
     fireEvent.click(screen.getByRole("button", { name: "Courtside version 0.2.3, 0.2.4 available" }));
     expect(updates.download).toHaveBeenCalledOnce();
     expect(updates.check).not.toHaveBeenCalled();
+  });
+});
+
+describe("update popup", () => {
+  afterEach(() => {
+    delete window.courtside;
+  });
+
+  it("pops up when a new version is out and downloads it", async () => {
+    const { updates, push } = desktop({ status: "current", current: "0.2.3" });
+    render(<UpdatePopup />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    push({ status: "available", version: "0.2.4", current: "0.2.3" });
+    expect(screen.getByRole("dialog", { name: "New update released" })).toHaveTextContent("Courtside 0.2.4 is out (you have 0.2.3)");
+    fireEvent.click(screen.getByRole("button", { name: "Download now" }));
+    expect(updates.download).toHaveBeenCalledOnce();
+  });
+
+  it("asks again once a dismissed download is ready, then restarts into it", async () => {
+    const { updates, push } = desktop({ status: "downloading", version: "0.2.4", current: "0.2.3", percent: 40 });
+    render(<UpdatePopup />);
+    fireEvent.click(await screen.findByRole("button", { name: "Later" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    push({ status: "ready", version: "0.2.4", current: "0.2.3" });
+    fireEvent.click(screen.getByRole("button", { name: "Update now" }));
+    expect(updates.install).toHaveBeenCalledOnce();
   });
 });

@@ -2,7 +2,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, HashRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { LeagueLayout } from "./components/Layout";
 import { LoadingBlock } from "./components/ui";
-import { UpdateBanner } from "./components/UpdateBanner";
+import { UpdatePopup } from "./components/UpdatePopup";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { rememberedPath } from "./lib/nav";
 import { useLeagues } from "./lib/queries";
@@ -69,7 +69,7 @@ export function App() {
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-          <UpdateBanner />
+          <UpdatePopup />
         </AuthProvider>
       </ToastProvider>
     </Router>

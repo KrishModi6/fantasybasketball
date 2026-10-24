@@ -23,7 +23,8 @@ const WEB_ROOT = path.join(__dirname, "web-dist");
 const ENGINE_NAME = process.platform === "win32" ? "courtside-engine.exe" : "courtside-engine";
 const ENGINE_START_TIMEOUT_MS = 90_000;
 const RELEASES_URL = "https://github.com/KrishModi6/fantasybasketball/releases/latest";
-const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+// A check is two small requests to GitHub, so new versions show up within minutes of being published.
+const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 // Windows downloads and installs updates by itself. The Mac app is only ad-hoc signed, and macOS
 // won't swap in an update that isn't signed by a registered developer, so there the app says a new
 // version is out and opens the download.
@@ -261,9 +262,9 @@ function promptRestart() {
 }
 
 // Checks the GitHub releases (app-update.yml, written at build time from package.json's "publish")
-// shortly after launch, every few hours, and when the computer wakes up or Courtside comes back to the
-// front after a while, so even a laptop that mostly sleeps checks at least once a day. Windows downloads
-// in the background and installs on restart; the Mac only reports the new version (see CAN_INSTALL_UPDATES).
+// shortly after launch, every 15 minutes, and when the computer wakes up or Courtside comes back to the
+// front after a while (timers stop while a laptop sleeps). Windows downloads in the background and
+// installs on restart; the Mac only reports the new version (see CAN_INSTALL_UPDATES).
 function setupUpdates() {
   if (!app.isPackaged) return; // development runs have no release feed
   let autoUpdater;

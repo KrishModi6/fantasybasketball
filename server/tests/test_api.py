@@ -40,6 +40,8 @@ def test_full_flow(client):
     lid = lg["id"]
     assert lg["settings"]["scoring"]["points"]["STL"] == 4
     assert len(lg["teams"]) == 10
+    listed = client.get("/api/leagues", headers=owner).json()
+    assert [(x["member_count"], x["team_count"]) for x in listed] == [(1, 10)]
 
     r = client.get(f"/api/leagues/{lid}/rankings", headers=owner)
     assert r.status_code == 200, r.text
@@ -57,7 +59,10 @@ def test_full_flow(client):
     assert scheduled and all(0 <= c["win_prob"] <= 1 for c in scheduled)
 
     tid = teams[0]["team_id"]
-    assert client.get(f"/api/leagues/{lid}/teams/{tid}", headers=owner).status_code == 200
+    team = client.get(f"/api/leagues/{lid}/teams/{tid}", headers=owner)
+    assert team.status_code == 200
+    assert all("today_fp" in r and "today_min" in r for r in team.json()["roster"])
+    assert "live_window" in lg["settings"]
     rep = client.get(f"/api/leagues/{lid}/teams/{tid}/report", headers=owner).json()
     assert "weaknesses" in rep and "moves" in rep
     lu = client.get(f"/api/leagues/{lid}/teams/{tid}/lineup?days=3", headers=owner).json()

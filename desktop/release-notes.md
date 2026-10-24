@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.2.6
+## What's new in 0.2.7
+
+- **Live during games.** While NBA games are on and Courtside is open, it refreshes from ESPN every 3 minutes, and the status bar shows **Live**. Your matchup score and a new **Today** column on the **Team** page (each player's fantasy points so far today) keep up as the games go. Projections, Season and Last 10 wait for tonight's games to finish and take them in the next morning, so a game at halftime no longer reads as a quiet full game.
+- **"New update released" popup.** Courtside now checks for new versions every 15 minutes instead of every 4 hours, and pops up as soon as one is out: **Download now** on a Mac, **Update now** on Windows once it's downloaded (a few seconds). You'll see it starting with the version after this one.
+- **Teams instead of "1 member".** Everyone runs Courtside on their own computer, so league mates who join with your invite code never show up on yours, and the app always said "1 member". The status bar, the **League** page and **Your leagues** now show how many teams the league has. The League page also drops the "Courtside member" column, which said "unclaimed" for every team but yours.
+
+## In 0.2.6
 
 - **Find trades shows 1-for-1 and 2-for-2 by default.** No more lists full of 2-for-1s: the default **Package** is now "1-for-1 and 2-for-2", and the assistant's trade ideas are even trades too unless you ask for 2-for-1s. Uneven packages (give 2 get 1, give 1 get 2, any size) are still in the **Package** menu.
 
@@ -74,7 +80,7 @@ To keep Courtside in the Dock, right-click its icon while it's open and choose *
 
 ### Updating on a Mac
 
-Macs can't install updates by themselves (that needs the paid certificate), so Courtside tells you instead. It checks at least once a day; when a new version is out, the version label in the top bar turns blue (for example **0.2.5 available**) and a banner offers **Download**.
+Macs can't install updates by themselves (that needs the paid certificate), so Courtside tells you instead. It checks every 15 minutes while it's open; when a new version is out, a **New update released** popup offers **Download now**, and the version label in the top bar turns blue (for example **0.2.8 available**).
 
 1. Click **Download** (or the version label) and unzip the new zip from Downloads.
 2. Quit Courtside with **Cmd + Q**.

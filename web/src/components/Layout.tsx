@@ -4,10 +4,10 @@ import { useIsFetching, useMutation, useQueryClient } from "@tanstack/react-quer
 import { ArrowLeft, LogOut, Moon, RefreshCw, Sun } from "lucide-react";
 import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
+import { count, pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
 import { canGoBack, rememberPath } from "../lib/nav";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
-import { useAutoRefresh, useLeagueSocket, useRefreshOnSync } from "../lib/realtime";
+import { useAutoRefresh, useLeagueSocket, useLive, useRefreshOnSync } from "../lib/realtime";
 import { useToast } from "../lib/toast";
 import type { League, TeamRef } from "../lib/types";
 import { InviteButton } from "./Invite";
@@ -70,6 +70,7 @@ interface LeagueCtx {
   teamName: (id: number | null | undefined) => string;
   teams: TeamRef[];
   openPlayer: (id: string) => void;
+  live: boolean; // today's games are on, so scores refresh every few minutes
 }
 const Ctx = createContext<LeagueCtx | null>(null);
 export const useLeagueCtx = () => {
@@ -77,6 +78,13 @@ export const useLeagueCtx = () => {
   if (!v) throw new Error("useLeagueCtx outside league layout");
   return v;
 };
+
+/**
+ * How big the league is, for headers. Each desktop app keeps its own copy of the league, so league mates who
+ * join with a code never become members on this computer: count teams there, members on a shared server.
+ */
+export const leagueSize = (league: League) =>
+  isLocalApp() ? count(league.teams.length, "team") : count(league.member_count, "member");
 
 function SyncStatus({ league }: { league: League }) {
   const qc = useQueryClient();
@@ -155,8 +163,9 @@ export function LeagueLayout() {
   const loc = useLocation();
   useEffect(() => rememberPath(loc.pathname, loc.search), [loc.pathname, loc.search]);
   useLeagueSocket(leagueId);
-  useRefreshOnSync(leagueId, league ? league.sync.last_synced_at : undefined);
-  useAutoRefresh(league);
+  const live = useLive(league);
+  useRefreshOnSync(leagueId, league ? league.sync.last_synced_at : undefined, live);
+  useAutoRefresh(league, live);
 
   const ctx = useMemo<LeagueCtx | null>(() => {
     if (!league) return null;
@@ -171,8 +180,9 @@ export function LeagueLayout() {
         next.set("player", id);
         setSearch(next);
       },
+      live,
     };
-  }, [league, search, setSearch]);
+  }, [league, search, setSearch, live]);
 
   const playerId = search.get("player");
   const closePlayer = () => {
@@ -243,8 +253,13 @@ export function LeagueLayout() {
       </div>
 
       <footer className="statusbar">
-        <span>{league ? `${league.name} · ${league.member_count} member${league.member_count === 1 ? "" : "s"}` : "Loading"}</span>
+        <span>{league ? `${league.name} · ${leagueSize(league)}` : "Loading"}</span>
         {s && <span>Week {s.current_matchup_period}{s.today ? ` · ${shortDate(s.today, true)}` : ""}</span>}
+        {live && (
+          <span className="live-label" title="Games are on: scores and today's points refresh from ESPN every few minutes while Courtside is open.">
+            <span className="dot live" aria-hidden="true" />Live
+          </span>
+        )}
         {league && <span>{sourceLabel[league.source]} data, synced {relTime(league.sync.last_synced_at)}</span>}
         {model?.trained && <span>Model trained through {model.trained_through ? `${model.trained_through - 1}–${String(model.trained_through).slice(2)}` : "–"}</span>}
         <span>{league?.me?.role === "owner" ? "League owner" : "Member"}</span>

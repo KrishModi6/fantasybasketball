@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, wsUrl } from "./api";
 import { useToast } from "./toast";
@@ -7,12 +7,26 @@ import type { League } from "./types";
 const POLL_MS = 60_000;
 const STALE_MS = 30 * 60_000; // refresh league data older than this while someone is looking at it
 const AUTO_RETRY_MS = 10 * 60_000;
+export const LIVE_STALE_MS = 3 * 60_000; // ...and during games, older than this
+
+/** Whether today's games are on: from the first tip-off until the last game should be over. */
+export function useLive(league: League | undefined): boolean {
+  const win = league?.settings?.live_window;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!win) return;
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, [win]);
+  return Boolean(win) && Date.parse(win![0]) <= now && now <= Date.parse(win![1]);
+}
 
 /**
- * Refresh the league when it's opened, or looked at again, with data more than 30 minutes old, so stats
- * don't wait for the next scheduled refresh. Skipped after a failed refresh (the Refresh button retries).
+ * Refresh the league when it's opened, or looked at again, with data more than 30 minutes old (3 minutes
+ * while games are on), so stats and scores don't wait for the next scheduled refresh. Skipped after a
+ * failed refresh (the Refresh button retries).
  */
-export function useAutoRefresh(league: League | undefined) {
+export function useAutoRefresh(league: League | undefined, live = false) {
   const qc = useQueryClient();
   const lastTry = useRef(0);
   const id = league?.id;
@@ -20,29 +34,32 @@ export function useAutoRefresh(league: League | undefined) {
   const synced = league?.sync.last_synced_at;
   useEffect(() => {
     if (!id) return;
+    const stale = live ? LIVE_STALE_MS : STALE_MS;
+    const retry = live ? LIVE_STALE_MS : AUTO_RETRY_MS;
     const check = () => {
       if (document.visibilityState !== "visible" || status !== "ok") return;
-      if (Date.now() - (synced ? Date.parse(synced) : 0) < STALE_MS || Date.now() - lastTry.current < AUTO_RETRY_MS) return;
+      if (Date.now() - (synced ? Date.parse(synced) : 0) < stale || Date.now() - lastTry.current < retry) return;
       lastTry.current = Date.now();
       api(`/api/leagues/${id}/sync`, { method: "POST" })
         .then(() => qc.invalidateQueries({ queryKey: ["league", id, "meta"] }))
         .catch(() => undefined); // e.g. someone else refreshed moments ago
     };
     check();
-    const timer = setInterval(check, 5 * 60_000);
+    const timer = setInterval(check, live ? 30_000 : 5 * 60_000);
     document.addEventListener("visibilitychange", check);
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", check);
     };
-  }, [id, status, synced, qc]);
+  }, [id, status, synced, live, qc]);
 }
 
 /**
  * When a league's data is re-synced (by anyone, or by the server's cron), refresh every query for it.
- * Keyed on last_synced_at so it works with or without the WebSocket.
+ * Keyed on last_synced_at so it works with or without the WebSocket. Quiet during games, when that
+ * happens every few minutes.
  */
-export function useRefreshOnSync(leagueId: string | undefined, lastSynced: string | null | undefined) {
+export function useRefreshOnSync(leagueId: string | undefined, lastSynced: string | null | undefined, quiet = false) {
   const qc = useQueryClient();
   const toast = useToast();
   const prev = useRef<string | null | undefined>(undefined);
@@ -50,10 +67,10 @@ export function useRefreshOnSync(leagueId: string | undefined, lastSynced: strin
     if (!leagueId || lastSynced === undefined) return;
     if (prev.current !== undefined && lastSynced && lastSynced !== prev.current) {
       qc.invalidateQueries({ queryKey: ["league", leagueId], predicate: (q) => q.queryKey[2] !== "meta" });
-      toast("League data refreshed.");
+      if (!quiet) toast("League data refreshed.");
     }
     prev.current = lastSynced;
-  }, [leagueId, lastSynced, qc, toast]);
+  }, [leagueId, lastSynced, quiet, qc, toast]);
 }
 
 /**

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from fbb.connectors.base import ConnectorError
 from fbb.connectors.fileimport import parse_upload
+from fbb.schedule import live_window
 
 from ..config import get_settings
 from ..db import get_db
@@ -58,6 +59,7 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
                   "claimed_by": claimed[t.id].user.display_name if t.id in claimed else None}
                  for t in snap.teams]
         st = snap.settings
+        live = live_window(snap.schedule, snap.current_period)
         settings = {
             "scoring": st.scoring.model_dump(), "roster_slots": st.roster_slots, "team_count": st.team_count,
             "regular_season_matchups": st.regular_season_matchups, "playoff_teams": st.playoff_teams,
@@ -68,6 +70,7 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
             "current_period": snap.current_period,
             "today": (snap.schedule.period_dates.get(snap.current_period).isoformat()
                       if snap.schedule.period_dates.get(snap.current_period) else None),
+            "live_window": [t.isoformat() for t in live] if live else None,
             "matchup_periods": {mp: [snap.schedule.period_dates[d[0]].isoformat() if d[0] in snap.schedule.period_dates else None,
                                      snap.schedule.period_dates[d[-1]].isoformat() if d[-1] in snap.schedule.period_dates else None]
                                 for mp, d in st.matchup_periods.items() if d},
@@ -88,6 +91,12 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
     }
 
 
+def _team_count(db: Session, league_id: str) -> int | None:
+    """Teams in the latest snapshot, read straight from the JSON (the full model parse isn't needed here)."""
+    row = latest_snapshot_row(db, league_id)
+    return len(json.loads(zlib.decompress(row.data))["teams"]) if row is not None else None
+
+
 @router.get("/leagues")
 def my_leagues(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(LeagueMember).where(LeagueMember.user_id == user.id)).all()
@@ -95,7 +104,7 @@ def my_leagues(user: User = Depends(current_user), db: Session = Depends(get_db)
     for m in rows:
         lg = m.league
         out.append({"id": lg.id, "name": lg.name, "season": lg.season, "source": lg.source, "role": m.role,
-                    "team_id": m.team_id, "member_count": len(lg.members),
+                    "team_id": m.team_id, "member_count": len(lg.members), "team_count": _team_count(db, lg.id),
                     "sync_status": lg.last_sync_status,
                     "last_synced_at": _aware(lg.last_synced_at).isoformat() if lg.last_synced_at else None})
     return out

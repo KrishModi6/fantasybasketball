@@ -20,7 +20,7 @@ Base URL: your server, e.g. `http://localhost:8000`. Interactive docs (Swagger U
 ## Leagues
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | `/api/leagues` | any | Your leagues |
+| GET | `/api/leagues` | any | Your leagues, with `member_count` and `team_count` (teams in the latest snapshot; `null` before the first sync) |
 | POST | `/api/leagues` | any | `{source: "espn"\|"demo"\|"flaim", name?, season, espn?: {league_id, espn_s2?, swid?}, flaim?: {flaim_token, platform, league_id}, team_count?}`. Runs the first sync inline; `400` with ESPN's error if the league can't be read |
 | POST | `/api/leagues/import` | any | multipart `file` (.csv/.json, ≤2 MB), `name`, `season` |
 | GET | `/api/leagues/{id}` | member | League, teams (with who claimed them), settings, sync status, your role/team |

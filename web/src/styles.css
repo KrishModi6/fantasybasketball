@@ -241,6 +241,15 @@ th.n {
 .dot.new {
   background: var(--accent);
 }
+.dot.live {
+  animation: blink 2s infinite;
+}
+.live-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--up);
+}
 .version-badge {
   font-size: 12px;
   color: var(--muted);
@@ -610,24 +619,44 @@ textarea.input {
   height: auto;
   padding: 5px 7px;
 }
-.update-banner {
+.update-popup {
   position: fixed;
-  left: 10px;
-  bottom: calc(var(--status) + 10px);
+  top: calc(var(--topbar) + var(--tabs) + 10px);
+  right: 12px;
   z-index: 79;
-  max-width: min(560px, calc(100vw - 20px));
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  width: min(340px, calc(100vw - 24px));
+  display: grid;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 12px 14px;
   background: var(--panel);
   border: 1px solid var(--accent);
   border-radius: var(--r);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  animation: pop-in 0.2s ease-out;
 }
-.update-banner > span {
-  flex: 1 1 220px;
+.update-popup p {
+  margin: 0;
+}
+.update-popup-title {
+  font-size: 14px;
+}
+.update-progress {
+  height: 4px;
+  background: var(--raised);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.update-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
 }
 textarea.code-box {
   word-break: break-all;
