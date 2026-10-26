@@ -4,13 +4,20 @@ A trade is judged by what it does to each team's *lineup-adjusted* rest-of-
 season output, not by summing player values: the day-by-day optimal lineup
 simulation captures positional fit, schedule overlap (two players whose games
 collide can't both start), bench depth, and the roster spot a 2-for-1 frees
-(filled by the best free agent) or costs (the weakest player is dropped).
+(filled from free agents) or costs (the weakest player is dropped).
+
+A trade is never credited with what waivers could do anyway. Each team is
+compared with its roster after filling any open spot from free agents, pickups
+come from the third-best free agent down, and a player projected below that
+free agent counts as one when he's traded away or dropped: every roster spot is
+worth at least a free agent, so packing two or three such players into a deal
+for one good player buys nothing.
 """
 
 from __future__ import annotations
 
 import math
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import asdict, dataclass, field
 from itertools import combinations, permutations
 
@@ -32,6 +39,10 @@ EVEN_SIZES = frozenset({(1, 1), (2, 2)})  # the default: the same number of play
 # Three-team rotations fully simulated per search: each runs three lineup windows (about 15 ms), so 120 take
 # about 2 s on a 10-team league, which reaches the best rotation with most partner pairs.
 THREE_TEAM_CANDIDATES = 120
+# Open roster spots are filled from free agents after skipping the best FA_SKIP: the very best go fast on
+# waivers, and in a 10-team league the top one projects about as well as the median rostered player, which
+# made giving away two or three players for one look almost free.
+FA_SKIP = 2
 
 
 @dataclass
@@ -42,6 +53,9 @@ class TradeSide:
     receives: list[str]
     auto_drops: list[str] = field(default_factory=list)
     auto_adds: list[str] = field(default_factory=list)
+    open_spot_adds: list[str] = field(default_factory=list)  # free agents the open spots get, with or without the trade
+    # [player, free agent]: players traded away or dropped who project below a pickup, compared as that pickup
+    counted_as_pickups: list[list[str]] = field(default_factory=list)
     before_ros: float = 0.0
     after_ros: float = 0.0
     delta_ros: float = 0.0
@@ -69,29 +83,52 @@ def _ros_value(ctx: AnalysisContext, pid: str) -> float:
     return ctx.value_pg[pid] * ctx.expected_games(pid)
 
 
+def pickup_pool(ctx: AnalysisContext) -> list[str]:
+    """Free agents an open roster spot can get, best first: healthy ones after the top FA_SKIP."""
+    fas = sorted((p.id for p in ctx.s.free_agents() if p.id in ctx.proj and ctx.proj[p.id].games_out < 3),
+                 key=lambda pid: -_ros_value(ctx, pid))
+    return fas[FA_SKIP:]
+
+
+def _pickups(pool: list[str], roster: list[str], n: int) -> list[str]:
+    """The next n free agents in the pool who aren't on the roster already."""
+    have = set(roster)
+    return [p for p in pool if p not in have][: max(n, 0)]
+
+
+def baseline_roster(ctx: AnalysisContext, team_id: int, pool: list[str] | None = None) -> tuple[list[str], list[str]]:
+    """What a trade is compared with: the roster with any open spot filled from free agents, and those pickups."""
+    pool = pickup_pool(ctx) if pool is None else pool
+    roster = ctx.team_roster(team_id)
+    fills = _pickups(pool, roster, roster_capacity(ctx, roster) - len(roster))
+    return roster + fills, fills
+
+
 def apply_trade(ctx: AnalysisContext, team_id: int, gives: list[str], receives: list[str],
-                taken: set[str]) -> tuple[list[str], list[str], list[str]]:
-    """New roster after the trade, dropping/adding to respect roster size."""
-    before = ctx.team_roster(team_id)
-    roster = [p for p in before if p not in gives] + list(receives)
-    drops, adds = [], []
-    while len(roster) > roster_capacity(ctx, roster):
-        cands = [p for p in roster if p not in receives]
+                pool: list[str] | None = None) -> tuple[list[str], list[str], list[str]]:
+    """New roster after the trade, from the baseline roster, respecting roster size.
+
+    Over the limit, the extra player takes an open spot (that pickup is skipped) before the weakest player
+    is dropped; under it, free agents fill the spots. A trade never raises the limit: getting an injured
+    player could open an IR slot, but counting that spot's pickup made a star for an injured bench player
+    look like a win. Returns the roster, the players dropped and the free agents picked up because of the
+    trade.
+    """
+    pool = pickup_pool(ctx) if pool is None else pool
+    base, fills = baseline_roster(ctx, team_id, pool)
+    limit = roster_capacity(ctx, base)
+    cap = lambda r: min(roster_capacity(ctx, r), limit)  # noqa: E731
+    roster = [p for p in base if p not in gives] + list(receives)
+    drops = []
+    while len(roster) > cap(roster):
+        unused = [p for p in roster if p in fills]
+        cands = unused or [p for p in roster if p not in receives]
         worst = min(cands, key=lambda p: _ros_value(ctx, p))
         roster.remove(worst)
-        drops.append(worst)
-    target = min(len(before), roster_capacity(ctx, roster))
-    if len(roster) < target:
-        fas = sorted((p.id for p in ctx.s.free_agents() if p.id in ctx.proj and p.id not in taken
-                      and ctx.proj[p.id].games_out < 3),
-                     key=lambda pid: -_ros_value(ctx, pid))
-        for pid in fas:
-            if len(roster) >= target:
-                break
-            roster.append(pid)
-            adds.append(pid)
-            taken.add(pid)
-    return roster, drops, adds
+        if not unused:
+            drops.append(worst)
+    adds = _pickups(pool, roster, cap(roster) - len(roster))
+    return roster + adds, drops, adds
 
 
 def _weeks(ctx: AnalysisContext) -> float:
@@ -107,28 +144,65 @@ def _verdict(pct: float) -> str:
 
 
 class TradeEvaluator:
+    WINDOW_CACHE = 512  # before-rosters with pickups swapped in, kept between evaluations
+
     def __init__(self, ctx: AnalysisContext, base_results: dict[int, WindowResult] | None = None):
         self.ctx = ctx
         self.base = base_results or team_windows(ctx)
         self.values = player_values(ctx)
+        self.pool = pickup_pool(ctx)
+        self.replacement = _ros_value(ctx, self.pool[0]) if self.pool else 0.0  # what a pickup is worth
+        self._baselines: dict[int, tuple[list[str], list[str], WindowResult]] = {}
+        self._windows: OrderedDict[frozenset, WindowResult] = OrderedDict()
         self._base_sim: dict | None = None
         cur = ctx.s.current_matchup_period
         self.this_week = ctx.matchup_days(cur)
         reg = ctx.s.settings.regular_season_matchups
         self.playoff_mps = [mp for mp in ctx.remaining_mps() if mp > reg]
 
+    def baseline(self, team_id: int) -> tuple[list[str], list[str], WindowResult]:
+        """A team's comparison roster (open spots filled from free agents), those pickups, and its lineup window."""
+        if team_id not in self._baselines:
+            roster, fills = baseline_roster(self.ctx, team_id, self.pool)
+            self._baselines[team_id] = (roster, fills, self._window(roster) if fills else self.base[team_id])
+        return self._baselines[team_id]
+
+    def _window(self, roster: list[str]) -> WindowResult:
+        key = frozenset(roster)
+        if key in self._windows:
+            self._windows.move_to_end(key)
+        else:
+            self._windows[key] = self.ctx.project_window(roster)
+            if len(self._windows) > self.WINDOW_CACHE:
+                self._windows.popitem(last=False)
+        return self._windows[key]
+
+    def _baseline_windows(self) -> dict[int, WindowResult]:
+        return {t.id: self.baseline(t.id)[2] for t in self.ctx.s.teams}
+
     def base_sim(self) -> dict:
         if self._base_sim is None:
-            self._base_sim = simulate_season(self.ctx, MatchupModel(self.ctx, self.base), n=SIM_RUNS)
+            self._base_sim = simulate_season(self.ctx, MatchupModel(self.ctx, self._baseline_windows()), n=SIM_RUNS)
         return self._base_sim
 
-    def _side(self, team_id: int, gives: list[str], receives: list[str], taken: set[str]) -> tuple[TradeSide, WindowResult]:
+    def _side(self, team_id: int, gives: list[str], receives: list[str]) -> tuple[TradeSide, WindowResult, WindowResult]:
         ctx = self.ctx
-        roster, drops, adds = apply_trade(ctx, team_id, gives, receives, taken)
+        roster, drops, adds = apply_trade(ctx, team_id, gives, receives, self.pool)
         after = ctx.project_window(roster)
-        before = self.base[team_id]
+        base_roster, fills, before = self.baseline(team_id)
+        # A player who projects below a pickup is worth no more than one: the team could swap him on waivers
+        # without trading. So the trade is compared with that swap made, not credited for it.
+        weak = [p for p in gives + drops if _ros_value(ctx, p) < self.replacement]
+        swaps = list(zip(weak, _pickups(self.pool, base_roster, len(weak))))
+        if swaps:
+            out = {p for p, _ in swaps}
+            before_roster = [p for p in base_roster if p not in out] + [fa for _, fa in swaps]
+            before = self._window(before_roster)
+        else:
+            before_roster = base_roster
         side = TradeSide(team_id=team_id, team_name=ctx.s.team(team_id).name, gives=list(gives),
-                         receives=list(receives), auto_drops=drops, auto_adds=adds)
+                         receives=list(receives), auto_drops=drops, auto_adds=adds, open_spot_adds=fills,
+                         counted_as_pickups=[[p, fa] for p, fa in swaps])
         side.before_ros = before.mean
         side.after_ros = after.mean
         side.delta_ros = after.mean - before.mean
@@ -139,10 +213,10 @@ class TradeEvaluator:
         if self.this_week:
             side.delta_this_week = sum(after.by_mp.get(ctx.s.current_matchup_period, [0, 0])[:1]) - \
                 sum(before.by_mp.get(ctx.s.current_matchup_period, [0, 0])[:1])
-        side.raw_value_delta = (sum(self.values[p]["ros_value"] for p in receives + adds)
-                                - sum(self.values[p]["ros_value"] for p in gives + drops))
+        value = lambda ps: sum(self.values[p]["ros_value"] for p in ps)  # noqa: E731
+        side.raw_value_delta = (value(set(roster) - set(before_roster)) - value(set(before_roster) - set(roster)))
         side.verdict = _verdict(side.delta_pct)
-        return side, after
+        return side, before, after
 
     def evaluate(self, team_a: int, team_b: int, a_gives: list[str], b_gives: list[str], with_sim: bool = True) -> dict:
         return self.evaluate_multi({team_a: {p: team_b for p in a_gives}, team_b: {p: team_a for p in b_gives}}, with_sim)
@@ -166,16 +240,19 @@ class TradeEvaluator:
         idle = [ctx.s.team(t).name for t in teams if not sends[t] and not receives[t]]
         if len(teams) > 2 and idle:
             raise ValueError(f"{', '.join(idle)} must send or get at least one player")
-        taken: set[str] = set()
         sides: list[TradeSide] = []
+        before: dict[int, WindowResult] = {}
         after: dict[int, WindowResult] = {}
         for t in teams:
-            side, after[t] = self._side(t, list(sends[t]), receives[t], taken)
+            side, before[t], after[t] = self._side(t, list(sends[t]), receives[t])
             sides.append(side)
 
         if with_sim:
-            base = self.base_sim()
-            new = simulate_season(ctx, MatchupModel(ctx, {**self.base, **after}), n=SIM_RUNS)
+            everyone = self._baseline_windows()
+            swapped = {t: w for t, w in before.items() if w is not everyone[t]}
+            base = (simulate_season(ctx, MatchupModel(ctx, {**everyone, **swapped}), n=SIM_RUNS) if swapped
+                    else self.base_sim())
+            new = simulate_season(ctx, MatchupModel(ctx, {**everyone, **after}), n=SIM_RUNS)
             for side in sides:
                 side.before_playoff_odds = base[side.team_id]["playoff_odds"]
                 side.after_playoff_odds = new[side.team_id]["playoff_odds"]
@@ -224,12 +301,18 @@ class TradeEvaluator:
                 f"Receives {len(s.receives)} player(s) worth {got:,.0f} projected ROS points "
                 f"(FP/G × expected games), gives {len(s.gives)} worth {gave:,.0f}: raw {got - gave:+,.0f}.",
             ]
+            named = lambda ps: ", ".join(f"{ctx.proj[p].name} ({self.values[p]['ros_value']:,.0f})" for p in ps)  # noqa: E731
+            if s.open_spot_adds:
+                lines.append(f"Before the trade, its open roster spot goes to a free agent, {named(s.open_spot_adds)}, so the "
+                             "trade isn't credited with a spot waivers can fill.")
             if s.auto_drops:
-                lines.append("Roster is over the limit, so the lowest-value player is dropped: "
-                             + ", ".join(f"{ctx.proj[p].name} ({self.values[p]['ros_value']:,.0f})" for p in s.auto_drops) + ".")
+                lines.append(f"Roster is over the limit, so the lowest-value player is dropped: {named(s.auto_drops)}.")
+            for p, fa in s.counted_as_pickups:
+                lines.append(f"{named([p])} projects below the free agent who could replace him, {named([fa])}, so he counts "
+                             "as that pickup: losing him costs no more than dropping him would.")
             if s.auto_adds:
-                lines.append("A roster spot opens and is filled by the best free agent: "
-                             + ", ".join(f"{ctx.proj[p].name} ({self.values[p]['ros_value']:,.0f})" for p in s.auto_adds) + ".")
+                lines.append(f"A roster spot opens and is filled from free agents (the best after the top {FA_SKIP}, who go "
+                             f"fast on waivers): {named(s.auto_adds)}.")
             lines.append(
                 f"Optimal daily lineups over the remaining {len(ctx.days)} days: {s.before_ros:,.0f} → "
                 f"{s.after_ros:,.0f} points ({s.delta_ros:+,.0f}, {s.delta_pct:+.1%}). The gap between the raw "
@@ -259,17 +342,23 @@ def _fairness(sides: list[TradeSide]) -> dict:
     return {"label": label, "partner_accept_likelihood": accept}
 
 
-def _replacement(ctx: AnalysisContext, vals: dict[str, float]) -> float:
-    """ROS value of the free agent a freed roster spot picks up (the third best, as the best go fast)."""
-    fa_vals = sorted((vals[p.id] for p in ctx.s.free_agents() if p.id in vals), reverse=True)
-    return fa_vals[2] if len(fa_vals) > 2 else 0.0
+def _screen_values(ctx: AnalysisContext, ev: TradeEvaluator) -> tuple[dict[str, float], dict[str, float], float]:
+    """Raw ROS values, the same with nobody below a pickup (what losing each player costs), and a pickup's value."""
+    vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
+    return vals, {pid: max(v, ev.replacement) for pid, v in vals.items()}, ev.replacement
 
 
-def _spot_adjust(vals: dict[str, float], replacement: float, roster: list[str], outgoing: tuple, n_in: int) -> float:
-    """Raw value of the roster spots a package frees (a free agent fills them) or costs (the worst players go)."""
+def _open_spots(ctx: AnalysisContext, roster: list[str]) -> int:
+    return max(roster_capacity(ctx, roster) - len(roster), 0)
+
+
+def _spot_adjust(cost: dict[str, float], replacement: float, roster: list[str], outgoing: tuple, n_in: int,
+                 open_spots: int) -> float:
+    """Raw value of the roster spots a package frees (a pickup fills each) or costs (an open spot's pickup goes
+    first, then the weakest players, none counted below a pickup)."""
     n_out = len(outgoing)
-    if n_in > n_out:  # must drop worst players
-        pool = sorted(vals[p] for p in roster if p not in outgoing)
+    if n_in > n_out:
+        pool = sorted([replacement] * open_spots + [cost[p] for p in roster if p not in outgoing])
         return -sum(pool[: n_in - n_out])
     if n_out > n_in:
         return replacement * (n_out - n_in)
@@ -291,9 +380,9 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     counts the packages fully simulated per size ("2-for-1": 22, ...).
     """
     ev = evaluator or TradeEvaluator(ctx)
-    vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
-    replacement = _replacement(ctx, vals)
+    vals, cost, replacement = _screen_values(ctx, ev)
     mine = ctx.team_roster(team_id)
+    mine_open = _open_spots(ctx, mine)
     partners = partners or [t.id for t in ctx.s.teams if t.id != team_id]
     if sizes:
         allowed = set(sizes)
@@ -302,32 +391,33 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     else:
         allowed = {(g, r) for g in range(1, max_give + 1) for r in range(1, max_get + 1)}
 
-    def packages(roster: list[str], counts: set[int]) -> list[tuple[tuple[str, ...], float]]:
-        """Every package of `counts` players with its raw value, summed once instead of once per pairing."""
+    def packages(roster: list[str], counts: set[int]) -> list[tuple[tuple[str, ...], float, float]]:
+        """Every package of `counts` players with its raw value and what losing it costs, summed once each."""
         out = []
         for n in sorted(counts):
-            out.extend((p, sum(vals[x] for x in p)) for p in combinations(roster, n))
+            out.extend((p, sum(vals[x] for x in p), sum(cost[x] for x in p)) for p in combinations(roster, n))
         return out
 
     # 3-for-3 pairs 286 packages a side on a 13-man roster, so this loop stays lean: package values are
     # summed once, and the roster spot math only runs for uneven sizes (even trades free no spot).
-    my_pkgs = [(p, v) for p, v in packages(mine, {g for g, _ in allowed}) if all(vals[x] > replacement * 0.5 for x in p)]
+    my_pkgs = [pk for pk in packages(mine, {g for g, _ in allowed}) if all(vals[x] > replacement * 0.5 for x in pk[0])]
     pre: list[tuple[float, int, tuple, tuple]] = []
     for pt in partners:
         theirs = ctx.team_roster(pt)
+        theirs_open = _open_spots(ctx, theirs)
         slack = PARTNER_SLACK * -min_partner_pct * ev.base[pt].mean  # raw value they can lose and still accept
         their_pkgs = packages(theirs, {r for _, r in allowed})
-        for give, v_out in my_pkgs:
-            for get, v_in in their_pkgs:
+        for give, v_out, c_out in my_pkgs:
+            for get, v_in, c_in in their_pkgs:
                 if (len(give), len(get)) not in allowed:
                     continue
                 if v_in < 0.7 * v_out or v_in > 1.6 * v_out:
                     continue
-                my_raw = v_in - v_out
-                their_raw = v_out - v_in
+                my_raw = v_in - c_out
+                their_raw = v_out - c_in
                 if len(give) != len(get):
-                    my_raw += _spot_adjust(vals, replacement, mine, give, len(get))
-                    their_raw += _spot_adjust(vals, replacement, theirs, get, len(give))
+                    my_raw += _spot_adjust(cost, replacement, mine, give, len(get), mine_open)
+                    their_raw += _spot_adjust(cost, replacement, theirs, get, len(give), theirs_open)
                 scale = max(v_out, v_in)
                 if their_raw < -0.12 * scale or my_raw < -0.15 * scale:
                     continue
@@ -508,23 +598,23 @@ def _package_search(ctx: AnalysisContext, ev: TradeEvaluator, team_id: int, part
     fair to team_id: one that costs it more than min_partner_pct isn't worth asking for. Returns those,
     diversified, and, when there are none, the refusals that came closest.
     """
-    vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
-    replacement = _replacement(ctx, vals)
+    vals, cost, replacement = _screen_values(ctx, ev)
     mine = ctx.team_roster(team_id)
-    v_fixed = sum(vals[x] for x in fixed)
+    mine_open = _open_spots(ctx, mine)
     pre: list[tuple[float, int, tuple, tuple]] = []
     for pt in partners:
         theirs = ctx.team_roster(pt)
+        theirs_open = _open_spots(ctx, theirs)
         slack = PARTNER_SLACK * -min_partner_pct * ev.base[pt].mean  # as in find_trades
         for n in sorted(counts):
             for pkg in combinations(theirs if fixed_is_mine else mine, n):
                 if not all(vals[x] > replacement * 0.5 for x in pkg):
                     continue
-                v_pkg = sum(vals[x] for x in pkg)
-                give, get, v_out, v_in = ((tuple(fixed), pkg, v_fixed, v_pkg) if fixed_is_mine
-                                          else (pkg, tuple(fixed), v_pkg, v_fixed))
-                my_raw = v_in - v_out + _spot_adjust(vals, replacement, mine, give, len(get))
-                their_raw = v_out - v_in + _spot_adjust(vals, replacement, theirs, get, len(give))
+                give, get = (tuple(fixed), pkg) if fixed_is_mine else (pkg, tuple(fixed))
+                my_raw = (sum(vals[x] for x in get) - sum(cost[x] for x in give)
+                          + _spot_adjust(cost, replacement, mine, give, len(get), mine_open))
+                their_raw = (sum(vals[x] for x in give) - sum(cost[x] for x in get)
+                             + _spot_adjust(cost, replacement, theirs, get, len(give), theirs_open))
                 # Highest for the trade that keeps the most for team_id while the partner still accepts it.
                 pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw + slack, 0.0), pt, give, get))
     pre.sort(key=lambda x: -x[0])
@@ -577,8 +667,7 @@ def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeE
     ranked by team_id's gain. With ``partner``, only rotations that include that team.
     """
     ev = evaluator or TradeEvaluator(ctx)
-    vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
-    replacement = _replacement(ctx, vals)
+    vals, cost, replacement = _screen_values(ctx, ev)
     others = [t.id for t in ctx.s.teams if t.id != team_id]
     pools = {t: [p for p in ctx.team_roster(t) if vals[p] > replacement * 0.5] for t in [team_id, *others]}
     slack = {t: PARTNER_SLACK * -min_partner_pct * ev.base[t].mean for t in others}  # as in find_trades
@@ -601,8 +690,9 @@ def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeE
                     vc = vals[c]
                     if not (plausible(vb, vc, 0.12) and plausible(vc, va, 0.15)):
                         continue
-                    partners_raw = min(va - vb + slack[p], 0.0) + min(vb - vc + slack[q], 0.0)
-                    pre.append((vc - va + PARTNER_LOSS_WEIGHT * partners_raw, p, q, a, b, c))
+                    # As in find_trades: what each team gets, less what losing its player costs.
+                    partners_raw = min(va - cost[b] + slack[p], 0.0) + min(vb - cost[c] + slack[q], 0.0)
+                    pre.append((vc - cost[a] + PARTNER_LOSS_WEIGHT * partners_raw, p, q, a, b, c))
     pre.sort(key=lambda x: -x[0])
     n_pairs = len({frozenset(x[1:3]) for x in pre})
     caps = {"pair": max(candidates // max(n_pairs, 1), 4), "player": 4}

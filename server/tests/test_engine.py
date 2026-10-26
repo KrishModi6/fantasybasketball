@@ -16,7 +16,7 @@ from fbb.lineup import SlotModel, solve_day
 from fbb.models import GameLog, Player, ScoringSettings, SeasonLine
 from fbb.projections import MANUAL_LIMIT, ProjectionEngine, games_from_injury_note
 from fbb.strength import league_strength, round_robin
-from fbb.trades import TradeEvaluator, apply_trade, find_trades
+from fbb.trades import TradeEvaluator, apply_trade, find_trades, pickup_pool
 
 from factories import make_line, make_snapshot
 
@@ -271,12 +271,54 @@ def test_league_strength_probabilities(snapshot):
 def test_two_for_one_drops_and_backfills(snapshot):
     ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
     a, b = ctx.team_roster(1), ctx.team_roster(2)
-    roster, drops, adds = apply_trade(ctx, 1, [a[0]], [b[0], b[1]], set())
+    roster, drops, adds = apply_trade(ctx, 1, [a[0]], [b[0], b[1]])
     assert len(drops) == 1 and len(roster) == len(a)
     assert drops[0] not in (b[0], b[1])  # never drops a player just received
-    roster_b, drops_b, adds_b = apply_trade(ctx, 2, [b[0], b[1]], [a[0]], set())
+    roster_b, drops_b, adds_b = apply_trade(ctx, 2, [b[0], b[1]], [a[0]])
     assert len(adds_b) == 1 and len(roster_b) == len(b)
     assert ctx.s.players[adds_b[0]].fantasy_team_id is None
+    assert adds_b == pickup_pool(ctx)[:1]  # the best free agent after the top FA_SKIP, who go fast
+
+
+def test_an_open_spot_is_filled_before_the_trade():
+    snap = make_snapshot(injured={"1": "OUT"})  # team 1's IR slot can take him, so it has a spot to fill
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), ctx.team_roster(2)
+    _, fills, _ = ev.baseline(1)
+    assert fills == pickup_pool(ctx)[:1]
+    # Getting two for one, the extra player takes that spot: the pickup it replaces is what he costs.
+    r = ev.evaluate(1, 2, [a[1]], [b[0], b[1]], with_sim=False)
+    me = r["sides"][0]
+    assert me["open_spot_adds"] == fills and not me["auto_drops"] and not me["auto_adds"]
+    ros = lambda p: ev.values[p]["ros_value"]  # noqa: E731
+    assert me["raw_value_delta"] == pytest.approx(ros(b[0]) + ros(b[1]) - ros(a[1]) - ros(fills[0]))
+    assert any("open roster spot" in line for line in r["math"][0]["lines"])
+
+
+def test_a_player_below_a_pickup_counts_as_one(snapshot):
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), ctx.team_roster(2)
+    weak = min(a, key=lambda p: ev.values[p]["ros_value"])
+    ev.replacement = ev.values[weak]["ros_value"] + 1  # he now projects below a pickup
+    r = ev.evaluate(1, 2, [weak], [b[0]], with_sim=False)
+    me = r["sides"][0]
+    fa = pickup_pool(ctx)[0]
+    assert me["counted_as_pickups"] == [[weak, fa]]  # trading him is compared with swapping him for a pickup
+    assert me["raw_value_delta"] == pytest.approx(ev.values[b[0]]["ros_value"] - ev.values[fa]["ros_value"])
+    assert any("counts as that pickup" in line for line in r["math"][0]["lines"])
+
+
+def test_getting_an_injured_player_opens_no_spot():
+    snap = make_snapshot(injured={"9": "OUT"})  # team 2's first player
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a = ctx.team_roster(1)
+    r = ev.evaluate(1, 2, [a[0]], ["9"], with_sim=False)
+    me, them = r["sides"]
+    assert not me["auto_adds"] and not me["auto_drops"]  # his IR slot isn't a free pickup
+    assert them["open_spot_adds"] and not them["auto_adds"]  # team 2's open spot was there either way
 
 
 def test_trade_evaluation_shape_and_validation(snapshot):

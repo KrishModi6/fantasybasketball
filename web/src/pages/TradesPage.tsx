@@ -239,10 +239,10 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
           {evaluate.isFetching ? "Evaluating…" : "Evaluate trade"}
         </button>
         <span className="small muted">
-          {!three && `${draft.aGives.length} for ${draft.bGives.length}. Uneven trades drop the weakest player or pick up the best free agent.`}
+          {!three && `${draft.aGives.length} for ${draft.bGives.length}. Uneven trades drop the weakest player or pick up a free agent.`}
           {three && (idle.length && moving.length
             ? `${teamName(draft[idle[0]!])} has to send or get at least one player.`
-            : `${moving.length} player${moving.length === 1 ? "" : "s"} changing teams. A team that ends up with extra players drops its weakest; an open spot goes to the best free agent.`)}
+            : `${moving.length} player${moving.length === 1 ? "" : "s"} changing teams. A team that ends up with extra players drops its weakest; an open spot goes to a free agent.`)}
         </span>
       </div>
       {evaluate.error && <ErrorBox error={evaluate.error} />}
@@ -597,7 +597,7 @@ function Targeter({ onLoad }: { onLoad: (d: Draft) => void }) {
       <RosterPicker title="Players you want" label="Their team" teamId={from} picked={targets} onToggle={toggle} others={[team]}
         onTeam={(id) => { setFrom(id); setTargets([]); }} />
       <p className="small muted">
-        Tries every package of your players for them, fully simulates the most promising for both teams, and lists the offers the other team gains from or loses at most 0.4% on, best for you first. Offering more players than you get opens roster spots, filled with the best free agents.
+        Tries every package of your players for them, fully simulates the most promising for both teams, and lists the offers the other team gains from or loses at most 0.4% on, best for you first. Offering more players than you get opens roster spots, filled from free agents.
       </p>
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && !q.data && <LoadingBlock rows={6} />}
@@ -754,7 +754,7 @@ function Shopper({ onLoad }: { onLoad: (d: Draft) => void }) {
       <RosterPicker title="Players they want" label="Your team" teamId={team} picked={players} onToggle={toggle} others={[partner]}
         onTeam={(id) => { setTeam(id); setPlayers([]); if (id === partner) setPartner(null); }} />
       <p className="small muted">
-        For when another manager wants your player but won't make an offer. Tries every package of their players for yours, fully simulates the most promising for both teams, and lists the packages their team gains from or loses at most 0.4% on, the most you can ask for first. Asking for more players than you give means dropping your weakest, while the other team fills the open spot with the best free agent.
+        For when another manager wants your player but won't make an offer. Tries every package of their players for yours, fully simulates the most promising for both teams, and lists the packages their team gains from or loses at most 0.4% on, the most you can ask for first. Asking for more players than you give means dropping your weakest, while the other team fills the open spot from free agents.
       </p>
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && !q.data && <LoadingBlock rows={6} />}

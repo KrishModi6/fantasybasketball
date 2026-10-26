@@ -225,6 +225,8 @@ export interface TradeSide {
   receives: string[];
   auto_drops: string[];
   auto_adds: string[];
+  open_spot_adds: string[]; // free agents the team's open spots get, with or without the trade
+  counted_as_pickups: [string, string][]; // [player, free agent]: traded away or dropped, valued as that pickup
   before_ros: number;
   after_ros: number;
   delta_ros: number;
