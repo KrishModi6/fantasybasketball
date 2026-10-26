@@ -14,8 +14,11 @@ The agent runs the same code as the rest of the app (`server/app/services/ai_too
 | `waiver_recommendations` | Add/drop moves simulated against the team's real daily lineups, plus this week's streams |
 | `player_details` | One player's projection sources and weights, adjustments, ML factors, recent games and news |
 | `evaluate_trade` | The trade analyzer: both rosters re-simulated, playoff odds before and after, fairness |
+| `evaluate_three_team_trade` | The same analysis for a trade between three teams, given every player who moves and where |
 | `trade_ideas` | The trade finder for a team, optionally against one partner |
+| `three_team_trade_ideas` | The three-team finder: rotations where the user sends one player to a team, it sends one to a third, and that team sends one back |
 | `trade_offers` | What to offer for specific players on another team: offers of 1 to 3 of the user's players that the other team accepts |
+| `what_to_ask_for` | What to ask for 1 to 3 of the user's own players, from one team that wants them or from every team: packages fair to both sides (as many players back as the user gives, unless asked) |
 | `simulate_matchup` | The Monte Carlo matchup simulator (6,000 runs), with players benched if asked |
 | `league_news` | Recent headlines and injury changes (context only, never a reason to override the numbers) |
 

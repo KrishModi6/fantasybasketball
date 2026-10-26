@@ -106,6 +106,28 @@ def test_full_flow(client):
     assert mine.status_code == 422 and "Pick a player from another team" in mine.json()["detail"]
     assert client.get(f"/api/leagues/{lid}/trades/offers?team_id={tid}", headers=owner).status_code == 422
     assert client.get(f"/api/leagues/{lid}/trades/offers?team_id={tid}&target={want}&give=4", headers=owner).status_code == 422
+    assert all(o["get_names"] == off["get_names"] for o in off["offers"])
+
+    shop = team["roster"][0]["id"]
+    ask = client.get(f"/api/leagues/{lid}/trades/asks?team_id={tid}&player={shop}&partner_id={other}&get=1,2", headers=owner)
+    assert ask.status_code == 200, ask.text
+    ask = ask.json()
+    assert ask["partner_id"] == other and ask["give"] == [shop] and ask["give_names"] == [team["roster"][0]["name"]]
+    assert set(ask["checked"]) <= {"1-for-1", "1-for-2"}
+    assert all(o["partner_id"] == other and len(o["get_names"]) == len(o["get"]) <= 2 for o in ask["offers"] + ask["closest"])
+    anyone = client.get(f"/api/leagues/{lid}/trades/asks?team_id={tid}&player={shop}&get=1", headers=owner).json()
+    assert anyone["partner_id"] is None and all(o["partner_id"] != tid for o in anyone["offers"])
+    theirs = client.get(f"/api/leagues/{lid}/trades/asks?team_id={tid}&player={want}", headers=owner)
+    assert theirs.status_code == 422 and "Pick one of your own players" in theirs.json()["detail"]
+    assert client.get(f"/api/leagues/{lid}/trades/asks?team_id={tid}", headers=owner).status_code == 422
+
+    rot = client.get(f"/api/leagues/{lid}/trades/three-team?team_id={tid}&partner_id={other}", headers=owner)
+    assert rot.status_code == 200, rot.text
+    rot = rot.json()
+    assert rot["checked"]["3-team"] > 0
+    assert all(r["teams"][0] == tid and other in r["teams"] and len(r["moves"]) == 3 and r["give_names"] and r["get_names"]
+               for r in rot["suggestions"])
+    assert client.get(f"/api/leagues/{lid}/trades/three-team?team_id={tid}&partner_id={tid}", headers=owner).status_code == 422
 
     # Matchups + simulator
     wk = client.get(f"/api/leagues/{lid}/matchups", headers=owner).json()

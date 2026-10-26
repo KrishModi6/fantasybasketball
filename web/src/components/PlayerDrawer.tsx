@@ -68,6 +68,9 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
           {p.fantasy_team_id != null && p.fantasy_team_id !== myTeamId && (
             <Link className="btn" to={`/l/${league.id}/trades?tab=target&target=${p.id}&from=${p.fantasy_team_id}`}>What to offer</Link>
           )}
+          {p.fantasy_team_id != null && p.fantasy_team_id === myTeamId && (
+            <Link className="btn" to={`/l/${league.id}/trades?tab=shop&shop=${p.id}&team=${p.fantasy_team_id}`}>What to ask for</Link>
+          )}
           {ai.data?.enabled && <Link className="btn" to={askPath(league.id, { prompt: question })}>Ask AI</Link>}
           <button className="btn ghost icon" onClick={onClose} aria-label="Close"><X /></button>
         </div>

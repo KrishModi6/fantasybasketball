@@ -12,7 +12,7 @@ from typing import Any, Callable
 from fbb.connectors.fileimport import normalize_name
 from fbb.improve import add_drop_moves, diagnose, streaming_moves
 from fbb.matchup_sim import MatchupSimulator
-from fbb.trades import EVEN_SIZES, find_offers, find_trades
+from fbb.trades import EVEN_SIZES, find_asks, find_offers, find_three_team_trades, find_trades
 
 from .analysis import LeagueAnalysis
 from .present import player_detail, player_rows, team_detail
@@ -55,6 +55,8 @@ class ToolBox:
             "evaluate_three_team_trade": self.evaluate_three_team_trade,
             "trade_ideas": self.trade_ideas,
             "trade_offers": self.trade_offers,
+            "what_to_ask_for": self.what_to_ask_for,
+            "three_team_trade_ideas": self.three_team_trade_ideas,
             "simulate_matchup": self.simulate_matchup,
             "league_news": self.league_news,
         }
@@ -114,6 +116,21 @@ class ToolBox:
                    "max_give": {"type": "integer", "minimum": 1, "maximum": 3,
                                 "description": "Most players the user would send (default 3)."},
                }, ["players"]),
+            fn("what_to_ask_for", "What to ask for 1 to 3 of the user's own players from a team that wants them (or from "
+               "every team): every package of 1 to 3 of that team's players, simulated for both teams. Packages the other "
+               "team's projection accepts, the most the user can ask for first; if none, the closest refusals.", {
+                   "players": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3,
+                               "description": "The user's players being shopped."},
+                   "partner": {"type": "string", "description": "The team that wants them. Omit to search every team."},
+                   "team": team,
+                   "max_get": {"type": "integer", "minimum": 1, "maximum": 3,
+                               "description": "Most players to ask for back. Omit for as many as the user gives; "
+                                              "more than that only when the user asks for an uneven trade."},
+               }, ["players"]),
+            fn("three_team_trade_ideas", "Search three-team rotations: the user's team sends a player to team P, P sends one "
+               "to team Q, and Q sends one back. Rotations that help the user and that both other teams' projections "
+               "accept.", {"team": team, "partner": {"type": "string", "description": "Optional: only rotations that "
+                                                                                      "include this team."}}),
             fn("simulate_matchup", "Monte Carlo simulation (10,000 runs) of a head-to-head week: win probabilities, score "
                "ranges, swing players and what happens if players sit.", {
                    "team_a": {"type": "string", "description": "Defaults to the user's team."},
@@ -337,6 +354,39 @@ class ToolBox:
         return {"team": self.snap.team(tid).name, "partner": r["partner_name"], "get": [self._name(p) for p in r["get"]],
                 "offers": [offer(o) for o in r["offers"]],
                 "closest_refused_offers": [offer(o) for o in r["closest"]]}
+
+    def what_to_ask_for(self, players: list[str], partner: str | None = None, team: str | None = None,
+                        max_get: int | None = None) -> dict:
+        tid = self.team_id(team)
+        pt = self.team_id(partner, default_mine=False) if partner else None
+        # Even by default, as trade_ideas: an uneven ask counts the free agent the partner picks up.
+        counts = (frozenset({min(len(players), 3)}) if max_get is None
+                  else frozenset(range(1, max(1, min(int(max_get), 3)) + 1)))
+        try:
+            r = find_asks(self.ctx, tid, [self.player_id(p) for p in players], pt, self.a.evaluator(), counts, limit=6)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        ask = lambda o: {  # noqa: E731
+            "from_team": o["partner_name"], "get": [self._name(p) for p in o["get"]],
+            "my_pts_per_week_gain": _r(o["my_delta_per_week"]), "partner_change_pct": _r(o["partner_delta_pct"] * 100, 1),
+            "fit": o["fairness"]["label"],
+        }
+        return {"team": self.snap.team(tid).name, "give": [self._name(p) for p in r["give"]],
+                "asks": [ask(o) for o in r["offers"]], "closest_refused_asks": [ask(o) for o in r["closest"]]}
+
+    def three_team_trade_ideas(self, team: str | None = None, partner: str | None = None) -> dict:
+        tid = self.team_id(team)
+        pt = self.team_id(partner, default_mine=False) if partner else None
+        if pt == tid:
+            raise ToolError("Pick another team as the partner.")
+        rows = find_three_team_trades(self.ctx, tid, self.a.evaluator(), pt, limit=6)
+        return {"team": self.snap.team(tid).name, "ideas": [{
+            "moves": [{"player": self._name(m["player_id"]), "from": self.snap.team(m["from_team"]).name,
+                       "to": self.snap.team(m["to_team"]).name} for m in r["moves"]],
+            "my_pts_per_week_gain": _r(r["my_delta_per_week"]),
+            "partners": [{"team": s["team_name"], "change_pct": _r(s["delta_pct"] * 100, 1)} for s in r["partners"]],
+            "fit": r["fairness"]["label"],
+        } for r in rows]}
 
     def simulate_matchup(self, team_a: str | None = None, team_b: str | None = None, week: int | None = None,
                          sit: list[str] | None = None) -> dict:

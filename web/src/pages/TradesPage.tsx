@@ -9,9 +9,9 @@ import { useAuth } from "../lib/auth";
 import { count, fmt0, fmt1, pct, relTime, signed, signedPct } from "../lib/format";
 import { useActivity, useAiStatus, useTeam } from "../lib/queries";
 import { useToast } from "../lib/toast";
-import type { TradeEval, TradeMove, TradeOffer, TradeOffers, TradeSide, TradeSuggestion } from "../lib/types";
+import type { ThreeTeamSuggestion, TradeAsks, TradeEval, TradeMove, TradeOffer, TradeOffers, TradeSide, TradeSuggestion } from "../lib/types";
 
-type Tab = "analyze" | "find" | "target" | "board";
+type Tab = "analyze" | "find" | "target" | "shop" | "board";
 type Side = "a" | "b" | "c";
 interface Draft {
   a: number | null;
@@ -81,12 +81,14 @@ export default function TradesPage() {
           { value: "analyze", label: "Analyze" },
           { value: "find", label: "Find trades" },
           { value: "target", label: "Target a player" },
+          { value: "shop", label: "Shop a player" },
           { value: "board", label: "League board" },
         ]} />
         <div style={{ paddingTop: 10 }}>
           {tab === "analyze" && <Analyzer draft={draft} setDraft={setDraft} autoRun={autoRun} />}
           {tab === "find" && <Finder onLoad={load} />}
           {tab === "target" && <Targeter key={search.get("target") ?? ""} onLoad={load} />}
+          {tab === "shop" && <Shopper key={search.get("shop") ?? ""} onLoad={load} />}
           {tab === "board" && <Board onLoad={load} />}
         </div>
       </div>
@@ -357,6 +359,20 @@ const PACKAGES: Record<string, { label: string; sizes: string }> = {
 };
 
 function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
+  const { teams } = useLeagueCtx();
+  const [mode, setMode] = useState<"2" | "3">("2");
+  return (
+    <div className="stack">
+      {teams.length >= 3 && (
+        <Segmented label="Teams in the trade" value={mode} onChange={setMode}
+          options={[{ value: "2", label: "2 teams" }, { value: "3", label: "3 teams" }]} />
+      )}
+      {mode === "2" ? <TwoTeamFinder onLoad={onLoad} /> : <ThreeTeamFinder onLoad={onLoad} />}
+    </div>
+  );
+}
+
+function TwoTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
   const { league, myTeamId, teams } = useLeagueCtx();
   const [team, setTeam] = useState<number | null>(myTeamId ?? teams[0]?.id ?? null);
   const [shape, setShape] = useState("even");
@@ -427,6 +443,81 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
                     <td className="n"><button className="btn" onClick={() => onLoad(twoTeam(team, s.partner_id, s.give, s.get))}>Analyze</button></td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+/** Three-team rotations: you send one player to a team, it sends one on to a third, and that team sends one back. */
+function ThreeTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
+  const { league, myTeamId, teams, teamName } = useLeagueCtx();
+  const [team, setTeam] = useState<number | null>(myTeamId ?? teams[0]?.id ?? null);
+  const [partner, setPartner] = useState("");
+  const [run, setRun] = useState(0);
+  const q = useQuery({
+    queryKey: ["league", league.id, "three-team", team, partner, run],
+    queryFn: () => api<{ suggestions: ThreeTeamSuggestion[]; checked?: Record<string, number> }>(
+      `/api/leagues/${league.id}/trades/three-team?team_id=${team}${partner ? `&partner_id=${partner}` : ""}`),
+    enabled: run > 0 && team != null,
+    staleTime: 5 * 60_000,
+  });
+  return (
+    <div className="stack">
+      <div className="toolbar">
+        <label className="field-inline"><span className="label">For</span>
+          <select className="select" value={team ?? ""} onChange={(e) => { setTeam(Number(e.target.value)); if (e.target.value === partner) setPartner(""); }}>
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}{t.id === myTeamId ? " (you)" : ""}</option>)}
+          </select>
+        </label>
+        <label className="field-inline"><span className="label">Including</span>
+          <select className="select" value={partner} onChange={(e) => setPartner(e.target.value)}>
+            <option value="">Any two teams</option>
+            {teams.filter((t) => t.id !== team).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </label>
+        <button className="btn primary" onClick={() => setRun((n) => n + 1)} disabled={q.isFetching}>{q.isFetching ? "Searching…" : "Search"}</button>
+      </div>
+      <p className="small muted">
+        You send a player to one team, that team sends one on to a third, and the third sends one back to you, so each team gives one player and gets one. This finds deals a two-team trade can't, like when the team with the player you want doesn't want anyone of yours. Screens every rotation by rest-of-season value, fully simulates the most promising for all three teams, and lists those where neither other team's projection falls more than 0.4%, ranked by your gain.
+      </p>
+      {q.error && <ErrorBox error={q.error} />}
+      {q.isFetching && <LoadingBlock rows={6} />}
+      {q.data && !q.isFetching && q.data.suggestions.length === 0 && (
+        <Panel><Empty title="No three-team trade works for all three teams">
+          {q.data.checked?.["3-team"]
+            ? `Fully simulated ${count(q.data.checked["3-team"], "rotation")}. None helped you without costing another team more than 0.4%.`
+            : "Try including another team, or search two-team trades."}
+        </Empty></Panel>
+      )}
+      {q.data && !q.isFetching && q.data.suggestions.length > 0 && (
+        <Panel flush>
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr><th>You send</th><th>They pass on</th><th>You get</th><th className="n">You/wk</th><th className="n hide-sm">You ROS</th><th className="n">Partners</th><th /></tr>
+              </thead>
+              <tbody>
+                {q.data.suggestions.map((r) => {
+                  const [, p, q3] = r.teams as [number, number, number];
+                  const middle = r.moves.find((m) => m.from_team === p);
+                  return (
+                    <tr key={r.moves.map((m) => m.player_id).join()}>
+                      <td className="wrap">{r.give_names[0]} <span className="muted">to {teamName(p)}</span></td>
+                      <td className="wrap">{middle?.name} <span className="muted">{teamName(p)} to {teamName(q3)}</span></td>
+                      <td className="wrap">{r.get_names[0]} <span className="muted">from {teamName(q3)}</span></td>
+                      <td className="n"><Delta value={r.my_delta_per_week} /></td>
+                      <td className="n hide-sm">{signedPct(r.my_delta_pct)}</td>
+                      <td className="n" title={r.partners.map((s) => `${s.team_name}: ${signedPct(s.delta_pct)}`).join("\n")}>
+                        {r.partners.map((s) => signedPct(s.delta_pct)).join(" / ")}
+                      </td>
+                      <td className="n"><button className="btn" onClick={() => onLoad(draftFromMoves(r.teams, r.moves))}>Analyze</button></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -535,7 +626,7 @@ function OfferResults({ data, team, onLoad }: { data: TradeOffers; team: number;
             {data.closest.length ? "These came closest, but the other team loses more than 0.4% on each. Try offering more players, or target someone else." : "Try offering more players, or target someone else."}
           </Empty>
         </Panel>
-        {data.closest.length > 0 && <OfferTable title="Closest offers" offers={data.closest} onAnalyze={analyze} />}
+        {data.closest.length > 0 && <OfferTable title="Closest offers" offers={data.closest} show="give" onAnalyze={analyze} />}
         {askAi}
       </div>
     );
@@ -547,25 +638,36 @@ function OfferResults({ data, team, onLoad }: { data: TradeOffers; team: number;
       </Notice>
       {[1, 2, 3].map((n) => {
         const group = data.offers.filter((o) => o.give.length === n);
-        return group.length > 0 && <OfferTable key={n} title={`Offer ${count(n, "player")}`} offers={group} onAnalyze={analyze} />;
+        return group.length > 0 && <OfferTable key={n} title={`Offer ${count(n, "player")}`} offers={group} show="give" onAnalyze={analyze} />;
       })}
       {askAi}
     </div>
   );
 }
 
-function OfferTable({ title, offers, onAnalyze }: { title: string; offers: TradeOffer[]; onAnalyze: (o: TradeOffer) => void }) {
+/** Two-team trades with one side fixed: the other side (what you give, or what you get), and the team if they vary. */
+function OfferTable({ title, offers, show, withTeam = false, onAnalyze }: {
+  title: string;
+  offers: TradeOffer[];
+  show: "give" | "get";
+  withTeam?: boolean;
+  onAnalyze: (o: TradeOffer) => void;
+}) {
   return (
     <Panel title={title} flush>
       <div className="table-wrap">
         <table className="data">
           <thead>
-            <tr><th style={{ width: "45%" }}>You give</th><th className="n">You/wk</th><th className="n hide-sm">You ROS</th><th className="n">Partner</th><th className="hide-sm">Fit</th><th /></tr>
+            <tr>
+              {withTeam && <th>From</th>}<th style={{ width: withTeam ? "35%" : "45%" }}>{show === "give" ? "You give" : "You get"}</th>
+              <th className="n">You/wk</th><th className="n hide-sm">You ROS</th><th className="n">Partner</th><th className="hide-sm">Fit</th><th />
+            </tr>
           </thead>
           <tbody>
             {offers.map((o) => (
-              <tr key={o.give.join()}>
-                <td className="wrap">{o.give_names.join(", ")}</td>
+              <tr key={`${o.partner_id}:${o.give.join()}:${o.get.join()}`}>
+                {withTeam && <td className="wrap">{o.partner_name}</td>}
+                <td className="wrap">{(show === "give" ? o.give_names : o.get_names).join(", ")}</td>
                 <td className="n"><Delta value={o.my_delta_per_week} /></td>
                 <td className="n hide-sm">{signedPct(o.my_delta_pct)}</td>
                 <td className="n">{signedPct(o.partner_delta_pct)}</td>
@@ -577,6 +679,132 @@ function OfferTable({ title, offers, onAnalyze }: { title: string; offers: Trade
         </table>
       </div>
     </Panel>
+  );
+}
+
+// How many of the other team's players to ask for (the asks endpoint's get=), given how many you shop. Even
+// trades are the default: an uneven ask counts the free agent the other team picks up for the open spot,
+// which can make it look fairer on paper than a manager would think, as in Find trades.
+const ASK_SIZES: Record<string, { label: string; get: (n: number) => string }> = {
+  same: { label: "As many as you give", get: (n) => String(n) },
+  one: { label: "1 player", get: () => "1" },
+  upTo2: { label: "Up to 2 players", get: () => "1,2" },
+  upTo3: { label: "Up to 3 players", get: () => "1,2,3" },
+};
+
+interface ShopSearch {
+  team: number | null;
+  partner: number | null; // null: every other team
+  players: string[];
+  size: string;
+}
+
+/** Pick your own players that someone wants; lists what you can fairly ask for them. */
+function Shopper({ onLoad }: { onLoad: (d: Draft) => void }) {
+  const { league, myTeamId, teams } = useLeagueCtx();
+  const toast = useToast();
+  // A player's card links here with ?shop=<player>&team=<their team> and searches every team straight away.
+  const [search] = useSearchParams();
+  const linked = search.get("shop");
+  const linkedTeam = Number(search.get("team")) || null;
+  const [team, setTeam] = useState<number | null>(linkedTeam ?? myTeamId ?? teams[0]?.id ?? null);
+  const [partner, setPartner] = useState<number | null>(null);
+  const [players, setPlayers] = useState<string[]>(linked && linkedTeam ? [linked] : []);
+  const [size, setSize] = useState("same");
+  const current: ShopSearch = { team, partner, players, size };
+  const ready = team != null && team !== partner && players.length > 0;
+  // The list shows whatever was last searched; changing the picks marks it as out of date.
+  const [submitted, setSubmitted] = useState<ShopSearch | null>(ready ? current : null);
+  const q = useQuery({
+    queryKey: ["league", league.id, "asks", submitted],
+    queryFn: () => {
+      const params = new URLSearchParams({ team_id: String(submitted!.team), get: ASK_SIZES[submitted!.size]!.get(submitted!.players.length) });
+      if (submitted!.partner != null) params.set("partner_id", String(submitted!.partner));
+      submitted!.players.forEach((id) => params.append("player", id));
+      return api<TradeAsks>(`/api/leagues/${league.id}/trades/asks?${params}`);
+    },
+    enabled: submitted != null,
+    staleTime: 5 * 60_000,
+  });
+  const stale = submitted != null && JSON.stringify(submitted) !== JSON.stringify(current);
+  const toggle = (id: string) => {
+    if (players.includes(id)) setPlayers(players.filter((x) => x !== id));
+    else if (players.length >= MAX_TARGETS) toast(`You can shop up to ${MAX_TARGETS} players at once. Untick one to pick someone else.`, "err");
+    else setPlayers([...players, id]);
+  };
+  return (
+    <div className="stack">
+      <div className="toolbar">
+        <label className="field-inline"><span className="label">Team that wants them</span>
+          <select className="select" value={partner ?? ""} onChange={(e) => setPartner(e.target.value ? Number(e.target.value) : null)}>
+            <option value="">Any team</option>
+            {teams.filter((t) => t.id !== team).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </label>
+        <label className="field-inline"><span className="label">Ask for</span>
+          <select className="select" value={size} onChange={(e) => setSize(e.target.value)}>
+            {Object.entries(ASK_SIZES).map(([value, o]) => <option key={value} value={value}>{o.label}</option>)}
+          </select>
+        </label>
+        <button className="btn primary" disabled={!ready || q.isFetching} onClick={() => setSubmitted(current)}>
+          {q.isFetching ? "Searching…" : "Find what to ask for"}
+        </button>
+        <span className="small muted">{players.length ? `${players.length} of ${MAX_TARGETS} picked` : "Tick the players they want below."}</span>
+      </div>
+      <RosterPicker title="Players they want" label="Your team" teamId={team} picked={players} onToggle={toggle} others={[partner]}
+        onTeam={(id) => { setTeam(id); setPlayers([]); if (id === partner) setPartner(null); }} />
+      <p className="small muted">
+        For when another manager wants your player but won't make an offer. Tries every package of their players for yours, fully simulates the most promising for both teams, and lists the packages their team gains from or loses at most 0.4% on, the most you can ask for first. Asking for more players than you give means dropping your weakest, while the other team fills the open spot with the best free agent.
+      </p>
+      {q.error && <ErrorBox error={q.error} />}
+      {q.isFetching && !q.data && <LoadingBlock rows={6} />}
+      {stale && q.data && <Notice level="warn">Your picks changed since this search. Search again to update the list.</Notice>}
+      {q.data && <AskResults data={q.data} team={submitted!.team!} onLoad={onLoad} />}
+    </div>
+  );
+}
+
+function AskResults({ data, team, onLoad }: { data: TradeAsks; team: number; onLoad: (d: Draft) => void }) {
+  const { league } = useLeagueCtx();
+  const ai = useAiStatus();
+  const shopping = andList(data.give_names);
+  const everyTeam = data.partner_id == null;
+  const analyze = (o: TradeOffer) => onLoad(twoTeam(team, o.partner_id, data.give, o.get));
+  const best = data.offers[0];
+  const prompt = data.partner_name
+    ? `${data.partner_name} wants ${shopping} but won't make an offer. What should I ask them for? Compare the best packages, say which to propose first, and write a short message I could send them.`
+    : `Which teams should I shop ${shopping} to, and what should I ask each for? Compare the best packages and write a short message I could send.`;
+  const askAi = ai.data?.enabled && (
+    <div className="toolbar">
+      <Link className="btn" to={askPath(league.id, { prompt })}>Ask AI about these</Link>
+    </div>
+  );
+  if (!best) {
+    return (
+      <div className="stack">
+        <Panel>
+          <Empty title={`No fair return for ${shopping}${data.partner_name ? ` from ${data.partner_name}` : ""}`}>
+            {data.closest.length
+              ? "These came closest, but the other team loses more than 0.4% on each. Try asking for fewer players, or another team."
+              : "Everything they'd accept costs you more than 0.4%. Try asking for more players, or another team."}
+          </Empty>
+        </Panel>
+        {data.closest.length > 0 && <OfferTable title="Closest asks" offers={data.closest} show="get" withTeam={everyTeam} onAnalyze={analyze} />}
+        {askAi}
+      </div>
+    );
+  }
+  return (
+    <div className="stack">
+      <Notice>
+        <strong>Most you can ask for {shopping}:</strong> {andList(best.get_names)}{everyTeam ? ` from ${best.partner_name}` : ""}. Your team: {signed(best.my_delta_per_week)} per week ({signedPct(best.my_delta_pct)} rest of season). {best.partner_name}: {signedPct(best.partner_delta_pct)}.
+      </Notice>
+      {[1, 2, 3].map((n) => {
+        const group = data.offers.filter((o) => o.get.length === n);
+        return group.length > 0 && <OfferTable key={n} title={`Ask for ${count(n, "player")}`} offers={group} show="get" withTeam={everyTeam} onAnalyze={analyze} />;
+      })}
+      {askAi}
+    </div>
   );
 }
 

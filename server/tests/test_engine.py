@@ -506,6 +506,78 @@ def test_offer_finder_prices_the_players_you_pick(snapshot):
     assert all(len(o["give"]) == 2 for o in two["offers"] + two["closest"])
 
 
+def test_ask_finder_prices_what_you_shop(snapshot):
+    from collections import Counter
+
+    from fbb.trades import find_asks
+
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    shop = ctx.team_roster(1)[0]
+    checked: Counter = Counter()
+    r = find_asks(ctx, 1, [shop], 3, ev, checked=checked)
+    assert r["partner_id"] == 3 and r["give"] == [shop]
+    assert set(checked) <= {"1-for-1", "1-for-2", "1-for-3"}
+    assert r["offers"] or r["closest"]
+    gains = [o["my_delta_ros"] for o in r["offers"]]
+    assert gains == sorted(gains, reverse=True)  # the most you can ask for first
+    theirs = set(ctx.team_roster(3))
+    assert all(o["give"] == [shop] and set(o["get"]) <= theirs and o["partner_delta_pct"] >= -0.004
+               and o["my_delta_pct"] >= -0.004 for o in r["offers"])  # fair to both teams
+    assert all(o["partner_delta_pct"] < -0.004 for o in r["closest"])
+
+    one = find_asks(ctx, 1, [shop], 3, ev, frozenset({1}))
+    assert all(len(o["get"]) == 1 for o in one["offers"] + one["closest"])
+    every = find_asks(ctx, 1, [shop], None, ev)
+    assert every["partner_id"] is None
+    assert all(o["partner_id"] != 1 for o in every["offers"])
+    assert max(Counter(o["partner_id"] for o in every["offers"]).values(), default=0) <= 3  # spread across teams
+
+
+def test_ask_finder_rejects_bad_picks(snapshot):
+    from fbb.trades import find_asks
+
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    cases = {
+        "at least one": ([], 2),
+        "up to 3": (ctx.team_roster(1)[:4], 2),
+        "isn't on": ([ctx.team_roster(2)[0]], 2),
+        "isn't in this league": (["no-such-player"], 2),
+        "another team": ([ctx.team_roster(1)[0]], 1),
+    }
+    for msg, (players, partner) in cases.items():
+        with pytest.raises(ValueError, match=msg):
+            find_asks(ctx, 1, players, partner, ev)
+
+
+def test_three_team_finder_rotates_one_player_each(snapshot):
+    from collections import Counter
+
+    from fbb.trades import find_three_team_trades
+
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    checked: Counter = Counter()
+    rows = find_three_team_trades(ctx, 1, ev, candidates=40, checked=checked)
+    assert 0 < checked["3-team"] <= 40
+    gains = [r["my_delta_ros"] for r in rows]
+    assert gains == sorted(gains, reverse=True) and all(g > 0 for g in gains)
+    for r in rows:
+        me, p, q = r["teams"]
+        assert me == 1 and len({me, p, q}) == 3
+        moves = {(m["from_team"], m["to_team"]) for m in r["moves"]}
+        assert moves == {(1, p), (p, q), (q, 1)}  # you -> P -> Q -> you
+        assert r["give"] == [next(m["player_id"] for m in r["moves"] if m["from_team"] == 1)]
+        assert r["get"] == [next(m["player_id"] for m in r["moves"] if m["to_team"] == 1)]
+        assert [s["team_id"] for s in r["partners"]] == [p, q]
+        assert all(s["delta_pct"] >= -0.004 for s in r["partners"])
+    assert max(Counter(frozenset(r["teams"][1:]) for r in rows).values(), default=0) <= 2
+
+    with_3 = find_three_team_trades(ctx, 1, ev, partner=3, candidates=20)
+    assert all(3 in r["teams"] for r in with_3)
+
+
 def test_offer_finder_rejects_bad_picks(snapshot):
     from fbb.trades import find_offers
 

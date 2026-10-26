@@ -244,6 +244,7 @@ export interface TradeMove {
   player_id: string;
   from_team: number;
   to_team: number;
+  name?: string; // set by the three-team finder
 }
 
 export interface TradeEval {
@@ -288,7 +289,8 @@ export interface TradeSuggestion {
   summary: string;
 }
 
-export type TradeOffer = Omit<TradeSuggestion, "partner_id" | "partner_name" | "get" | "get_names">;
+/** A row of the offer and ask finders: a whole two-team trade, one side of which was picked. */
+export type TradeOffer = TradeSuggestion;
 
 /** What to offer for players on another team: offers the partner accepts, else the closest refusals. */
 export interface TradeOffers {
@@ -299,6 +301,33 @@ export interface TradeOffers {
   offers: TradeOffer[];
   closest: TradeOffer[];
   checked: Record<string, number>;
+}
+
+/** What to ask for your players from a team that wants them (partner_id null: from every team). */
+export interface TradeAsks {
+  partner_id: number | null;
+  partner_name: string | null;
+  give: string[];
+  give_names: string[];
+  offers: TradeOffer[];
+  closest: TradeOffer[];
+  checked: Record<string, number>;
+}
+
+/** A three-team rotation: you send a player to one team, it sends one to the third, and that one sends one back. */
+export interface ThreeTeamSuggestion {
+  teams: number[]; // you first, then the team you send to, then the team you get from
+  moves: TradeMove[];
+  give: string[];
+  get: string[];
+  give_names: string[];
+  get_names: string[];
+  my_delta_ros: number;
+  my_delta_per_week: number;
+  my_delta_pct: number;
+  partners: { team_id: number; team_name: string; delta_ros: number; delta_pct: number }[];
+  fairness: { label: string; partner_accept_likelihood: number };
+  summary: string;
 }
 
 export interface Member {

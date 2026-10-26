@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from itertools import combinations
+from itertools import combinations, permutations
 
 from .context import AnalysisContext, WindowResult
 from .strength import MatchupModel, simulate_season, team_windows
@@ -29,6 +29,9 @@ PARTNER_LOSS_WEIGHT = 1.5  # how much the quick score counts the partner's raw-v
 PARTNER_SLACK = 0.8
 TOP_SHARE = 0.25  # share of the shortlist taken straight from the top quick scores
 EVEN_SIZES = frozenset({(1, 1), (2, 2)})  # the default: the same number of players each way
+# Three-team rotations fully simulated per search: each runs three lineup windows (about 15 ms), so 120 take
+# about 2 s on a 10-team league, which reaches the best rotation with most partner pairs.
+THREE_TEAM_CANDIDATES = 120
 
 
 @dataclass
@@ -446,66 +449,219 @@ def find_offers(ctx: AnalysisContext, team_id: int, targets: list[str], evaluato
         raise ValueError("Offer 1, 2 or 3 of your players.")
 
     ev = evaluator or TradeEvaluator(ctx)
+    offers, closest = _package_search(ctx, ev, team_id, [partner], targets, False, give_counts, candidates, limit,
+                                      min_partner_pct, checked)
+    return {"partner_id": partner, "partner_name": ctx.s.team(partner).name, "get": targets,
+            "offers": offers, "closest": closest}
+
+
+def find_asks(ctx: AnalysisContext, team_id: int, players: list[str], partner: int | None = None,
+              evaluator: TradeEvaluator | None = None, get_counts: frozenset[int] = frozenset({1, 2, 3}),
+              candidates: int = 48, limit: int = 10, min_partner_pct: float = -0.004,
+              checked: Counter | None = None) -> dict:
+    """What to ask for one to three of your players from a team that wants them (partner=None: every team).
+
+    The mirror of find_offers: what you give is fixed, and every package of the partner's players in the
+    ``get_counts`` sizes is screened, simulated and ranked the same way, so the first is the most you can
+    ask for that the partner's projection still accepts. ValueError (with a message for the user) if the
+    players aren't 1 to 3 of your own.
+    """
+    players = list(dict.fromkeys(players))
+    if not players:
+        raise ValueError("Pick at least one of your players to shop.")
+    if len(players) > 3:
+        raise ValueError("Pick up to 3 of your players. Untick one and search again.")
+    mine = set(ctx.team_roster(team_id))
+    for pid in players:
+        name = ctx.s.players[pid].name if pid in ctx.s.players else None
+        if name is None:
+            raise ValueError("That player isn't in this league anymore. Refresh the page and pick again.")
+        if pid not in mine:
+            raise ValueError(f"{name} isn't on {ctx.s.team(team_id).name}. Pick one of your own players.")
+        if pid not in ctx.proj:
+            raise ValueError(f"Courtside has no projection for {name} yet, so it can't value a trade for them.")
+    others = [t.id for t in ctx.s.teams if t.id != team_id]
+    if partner is not None and partner not in others:
+        raise ValueError("Pick another team in this league.")
+    if not get_counts or not get_counts <= {1, 2, 3}:
+        raise ValueError("Ask for 1, 2 or 3 players.")
+
+    ev = evaluator or TradeEvaluator(ctx)
+    partners = [partner] if partner is not None else others
+    # Every team at once screens nine times the packages, so it simulates twice as many.
+    offers, closest = _package_search(ctx, ev, team_id, partners, players, True, get_counts,
+                                      candidates if partner is not None else candidates * 2, limit, min_partner_pct, checked)
+    return {"partner_id": partner, "partner_name": ctx.s.team(partner).name if partner is not None else None,
+            "give": players, "offers": offers, "closest": closest}
+
+
+def _package_search(ctx: AnalysisContext, ev: TradeEvaluator, team_id: int, partners: list[int], fixed: list[str],
+                    fixed_is_mine: bool, counts: frozenset[int], candidates: int, limit: int, min_partner_pct: float,
+                    checked: Counter | None) -> tuple[list[dict], list[dict]]:
+    """Two-team trades with one side fixed, for find_offers and find_asks.
+
+    With fixed_is_mine, ``fixed`` is what team_id sends and the packages come from each partner's roster;
+    otherwise ``fixed`` is what team_id gets and the packages are team_id's own. Every package of ``counts``
+    players is screened by raw ROS value (with roster-spot replacement), the most promising are fully
+    simulated for both teams, and the trades the partner's projection accepts (falls no more than
+    min_partner_pct, as in find_trades) are ranked by team_id's gain. An ask (fixed_is_mine) also has to be
+    fair to team_id: one that costs it more than min_partner_pct isn't worth asking for. Returns those,
+    diversified, and, when there are none, the refusals that came closest.
+    """
     vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
     replacement = _replacement(ctx, vals)
-    mine, theirs = ctx.team_roster(team_id), ctx.team_roster(partner)
-    v_in = sum(vals[x] for x in targets)
-    slack = PARTNER_SLACK * -min_partner_pct * ev.base[partner].mean  # as in find_trades
-    pre: list[tuple[float, tuple]] = []
-    for n in sorted(give_counts):
-        for give in combinations(mine, n):
-            if not all(vals[x] > replacement * 0.5 for x in give):
-                continue
-            v_out = sum(vals[x] for x in give)
-            my_raw = v_in - v_out + _spot_adjust(vals, replacement, mine, give, len(targets))
-            their_raw = v_out - v_in + _spot_adjust(vals, replacement, theirs, tuple(targets), n)
-            # Highest for the offer that keeps the most for you while the partner still accepts it.
-            pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw + slack, 0.0), give))
+    mine = ctx.team_roster(team_id)
+    v_fixed = sum(vals[x] for x in fixed)
+    pre: list[tuple[float, int, tuple, tuple]] = []
+    for pt in partners:
+        theirs = ctx.team_roster(pt)
+        slack = PARTNER_SLACK * -min_partner_pct * ev.base[pt].mean  # as in find_trades
+        for n in sorted(counts):
+            for pkg in combinations(theirs if fixed_is_mine else mine, n):
+                if not all(vals[x] > replacement * 0.5 for x in pkg):
+                    continue
+                v_pkg = sum(vals[x] for x in pkg)
+                give, get, v_out, v_in = ((tuple(fixed), pkg, v_fixed, v_pkg) if fixed_is_mine
+                                          else (pkg, tuple(fixed), v_pkg, v_fixed))
+                my_raw = v_in - v_out + _spot_adjust(vals, replacement, mine, give, len(get))
+                their_raw = v_out - v_in + _spot_adjust(vals, replacement, theirs, get, len(give))
+                # Highest for the trade that keeps the most for team_id while the partner still accepts it.
+                pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw + slack, 0.0), pt, give, get))
     pre.sort(key=lambda x: -x[0])
 
-    # The best quick scores, then a mix, so the shortlist isn't one of your players plus every throw-in.
-    chosen = [give for _, give in pre[: int(candidates * TOP_SHARE)]]
-    picked = set(chosen)
-    caps = {"size": max(candidates // len(give_counts), 8), "player": max(candidates // 4, 4)}
-    counts: Counter = Counter(k for give in chosen for k in [("size", len(give)), *(("player", p) for p in give)])
-    for relaxed in (False, True):
-        for _, give in pre:
-            if len(chosen) >= candidates:
-                break
-            keys = [("size", len(give)), *(("player", p) for p in give)]
-            if give in picked or (not relaxed and any(counts[k] >= caps[k[0]] for k in keys)):
-                continue
-            counts.update(keys)
-            picked.add(give)
-            chosen.append(give)
+    def varied(pt: int, give: tuple, get: tuple) -> list[tuple]:
+        pkg = get if fixed_is_mine else give
+        return [("size", len(pkg)), *(("player", p) for p in pkg), ("partner", pt)]
+
+    # The best quick scores, then a mix, so the shortlist isn't one player plus every throw-in (or one team).
+    caps = {"size": max(candidates // len(counts), 8), "player": max(candidates // 4, 4),
+            "partner": max(candidates // len(partners), 6)}
+    chosen = _pick([x[1:] for x in pre], lambda x: varied(*x), caps, candidates)
 
     accepted, refused = [], []
-    for give in chosen:
+    for pt, give, get in chosen:
         if checked is not None:
-            checked[f"{len(give)}-for-{len(targets)}"] += 1
+            checked[f"{len(give)}-for-{len(get)}"] += 1
         try:
-            r = ev.evaluate(team_id, partner, list(give), targets, with_sim=False)
+            r = ev.evaluate(team_id, pt, list(give), list(get), with_sim=False)
         except ValueError:
             continue
         a, b = r["sides"]
-        row = {"give": list(give), "my_delta_ros": a["delta_ros"], "my_delta_per_week": a["delta_per_week"],
-               "my_delta_pct": a["delta_pct"], "partner_delta_ros": b["delta_ros"], "partner_delta_pct": b["delta_pct"],
+        row = {"partner_id": pt, "partner_name": ctx.s.team(pt).name, "give": list(give), "get": list(get),
+               "my_delta_ros": a["delta_ros"], "my_delta_per_week": a["delta_per_week"], "my_delta_pct": a["delta_pct"],
+               "partner_delta_ros": b["delta_ros"], "partner_delta_pct": b["delta_pct"],
                "fairness": r["fairness"], "summary": r["summary"]}
-        (accepted if b["delta_pct"] >= min_partner_pct else refused).append(row)
+        if b["delta_pct"] < min_partner_pct:
+            refused.append(row)
+        elif not fixed_is_mine or a["delta_pct"] >= min_partner_pct:
+            accepted.append(row)
     accepted.sort(key=lambda x: -x["my_delta_ros"])
-    # Diversify as find_trades does: at most 3 offers built on any one of your players, and room for
-    # every offer size asked for.
-    size_cap = limit if len(give_counts) == 1 else max(limit // 2, 1)
-    used: Counter = Counter()
-    offers = []
-    for r in accepted:
-        keys = [("size", len(r["give"])), *(("player", p) for p in r["give"])]
-        if any(used[k] >= (size_cap if k[0] == "size" else 3) for k in keys):
-            continue
-        used.update(keys)
-        offers.append(r)
-        if len(offers) >= limit:
-            break
+    # Diversify as find_trades does: at most 3 built on any one varied player (and, across teams, any one
+    # team), and room for every package size asked for.
+    offers = _spread(accepted, lambda r: varied(r["partner_id"], tuple(r["give"]), tuple(r["get"])),
+                     {"size": limit if len(counts) == 1 else max(limit // 2, 1), "player": 3,
+                      "partner": 3 if len(partners) > 1 else limit}, limit)
     refused.sort(key=lambda x: -x["partner_delta_pct"])
-    return {"partner_id": partner, "partner_name": ctx.s.team(partner).name, "get": targets,
-            "offers": offers, "closest": [] if offers else refused[:3]}
+    return offers, [] if offers else refused[:3]
+
+
+def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | None = None,
+                           partner: int | None = None, candidates: int = THREE_TEAM_CANDIDATES, limit: int = 12,
+                           min_partner_pct: float = -0.004, checked: Counter | None = None) -> list[dict]:
+    """Three-team rotations: team_id sends a player to P, P sends one to Q, and Q sends one back to team_id.
+
+    Everyone gives one player and gets one from a different team, which finds deals no two-team trade can
+    (you want Q's player, Q wants P's, P wants yours). Every ordered pair of partners (so both directions)
+    is screened by raw ROS value as in find_trades, the most promising are fully simulated for all three
+    teams, and the rotations neither partner's projection refuses (falls more than min_partner_pct) are
+    ranked by team_id's gain. With ``partner``, only rotations that include that team.
+    """
+    ev = evaluator or TradeEvaluator(ctx)
+    vals = {pid: _ros_value(ctx, pid) for pid in ctx.proj}
+    replacement = _replacement(ctx, vals)
+    others = [t.id for t in ctx.s.teams if t.id != team_id]
+    pools = {t: [p for p in ctx.team_roster(t) if vals[p] > replacement * 0.5] for t in [team_id, *others]}
+    slack = {t: PARTNER_SLACK * -min_partner_pct * ev.base[t].mean for t in others}  # as in find_trades
+
+    def plausible(v_in: float, v_out: float, loss: float) -> bool:
+        """Gets 70-160% of what it gives and loses no more than `loss` of the bigger side, as find_trades screens."""
+        return 0.7 * v_out <= v_in <= 1.6 * v_out and v_in - v_out >= -loss * max(v_in, v_out)
+
+    pre: list[tuple[float, int, int, str, str, str]] = []
+    for p, q in permutations(others, 2):
+        if partner is not None and partner not in (p, q):
+            continue
+        for a in pools[team_id]:  # you send a to P
+            va = vals[a]
+            for b in pools[p]:  # P gets a and sends b to Q
+                vb = vals[b]
+                if not plausible(va, vb, 0.12):
+                    continue
+                for c in pools[q]:  # Q gets b and sends c to you
+                    vc = vals[c]
+                    if not (plausible(vb, vc, 0.12) and plausible(vc, va, 0.15)):
+                        continue
+                    partners_raw = min(va - vb + slack[p], 0.0) + min(vb - vc + slack[q], 0.0)
+                    pre.append((vc - va + PARTNER_LOSS_WEIGHT * partners_raw, p, q, a, b, c))
+    pre.sort(key=lambda x: -x[0])
+    n_pairs = len({frozenset(x[1:3]) for x in pre})
+    caps = {"pair": max(candidates // max(n_pairs, 1), 4), "player": 4}
+    chosen = _pick([x[1:] for x in pre], lambda x: [("pair", frozenset(x[:2])), *(("player", pid) for pid in x[2:])],
+                   caps, candidates)
+
+    results = []
+    for p, q, a, b, c in chosen:
+        if checked is not None:
+            checked["3-team"] += 1
+        try:
+            r = ev.evaluate_multi({team_id: {a: p}, p: {b: q}, q: {c: team_id}}, with_sim=False)
+        except ValueError:
+            continue
+        me, *them = r["sides"]
+        if me["delta_ros"] <= 0 or min(s["delta_pct"] for s in them) < min_partner_pct:
+            continue
+        results.append({
+            "teams": r["teams"], "moves": r["moves"], "give": [a], "get": [c],
+            "my_delta_ros": me["delta_ros"], "my_delta_per_week": me["delta_per_week"], "my_delta_pct": me["delta_pct"],
+            "partners": [{"team_id": s["team_id"], "team_name": s["team_name"], "delta_ros": s["delta_ros"],
+                          "delta_pct": s["delta_pct"]} for s in them],
+            "fairness": r["fairness"], "summary": r["summary"],
+        })
+    results.sort(key=lambda x: -x["my_delta_ros"])
+    # At most 2 rotations with any one pair of partners, and 3 built on any one player you send or get.
+    return _spread(results, lambda r: [("pair", frozenset(r["teams"][1:])), ("give", r["give"][0]), ("get", r["get"][0])],
+                   {"pair": 2, "give": 3, "get": 3}, limit)
+
+
+def _pick(ranked: list, keys, caps: dict[str, int], n: int) -> list:
+    """The first n of ranked, kept varied: the top TOP_SHARE as ranked, then items while every key (kind, ...)
+    from keys(item) is under caps[kind], then, if that leaves room, the rest in rank order."""
+    chosen = list(ranked[: int(n * TOP_SHARE)])
+    picked = set(chosen)
+    counts: Counter = Counter(k for x in chosen for k in keys(x))
+    for relaxed in (False, True):
+        for x in ranked:
+            if len(chosen) >= n:
+                return chosen
+            ks = keys(x)
+            if x in picked or (not relaxed and any(counts[k] >= caps[k[0]] for k in ks)):
+                continue
+            counts.update(ks)
+            picked.add(x)
+            chosen.append(x)
+    return chosen
+
+
+def _spread(rows: list[dict], keys, caps: dict[str, int], limit: int) -> list[dict]:
+    """Up to `limit` rows in order, skipping any whose keys (kind, ...) already reached caps[kind]."""
+    used: Counter = Counter()
+    out = []
+    for r in rows:
+        ks = keys(r)
+        if any(used[k] >= caps[k[0]] for k in ks):
+            continue
+        used.update(ks)
+        out.append(r)
+        if len(out) >= limit:
+            break
+    return out

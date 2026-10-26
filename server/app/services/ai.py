@@ -143,6 +143,7 @@ Rules:
 - Courtside's projections are statistics-first. News headlines are context only; mention them, but don't let them override the numbers.
 - When recommending moves, say what to do, why (cite the specific numbers: points per week gained, games this week, win probability change), and the main risk.
 - Prefer the engine's simulated values (waiver_recommendations, evaluate_trade, evaluate_three_team_trade, simulate_matchup) over your own reasoning about player value.
+- When another manager wants one of the user's players but won't make an offer, use what_to_ask_for to say what a fair return from that team would be.
 - Be concise and practical. Use short markdown: a one-line bottom line first, then bullets or a small table. No preamble.
 - If the user hasn't claimed a team and a tool needs one, ask which team is theirs.
 """

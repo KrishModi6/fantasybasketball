@@ -49,6 +49,8 @@ def test_every_tool_returns_json(analysis):
                                                 {"player": "Player 17", "to_team": "Team 1"}]},
         "trade_ideas": {},
         "trade_offers": {"players": ["Player 9"]},
+        "what_to_ask_for": {"players": ["Player 1"], "partner": "Team 2"},
+        "three_team_trade_ideas": {},
         "simulate_matchup": {"week": 2},
         "league_news": {},
     }
@@ -69,6 +71,19 @@ def test_three_team_trade_tool(analysis):
     assert out["moves"][0] == {"player": "Player 17", "from": "Team 3", "to": "Team 1"}
     with pytest.raises(ToolError):  # only two teams involved
         tb.call("evaluate_three_team_trade", {"moves": [{"player": "Player 1", "to_team": "Team 2"}]})
+
+
+def test_ask_and_three_team_tools(analysis):
+    tb = ToolBox(analysis, my_team_id=1)
+    out = tb.call("what_to_ask_for", {"players": ["Player 1"], "max_get": 2})
+    assert out["give"] == ["Player 1"]
+    assert all(len(o["get"]) <= 2 and o["from_team"] != "Team 1" for o in out["asks"] + out["closest_refused_asks"])
+    with pytest.raises(ToolError, match="Pick one of your own players"):
+        tb.call("what_to_ask_for", {"players": ["Player 9"]})
+    ideas = tb.call("three_team_trade_ideas", {"partner": "Team 2"})["ideas"]
+    assert all(len(i["moves"]) == 3 and "Team 2" in {s["team"] for s in i["partners"]} for i in ideas)
+    with pytest.raises(ToolError):
+        tb.call("three_team_trade_ideas", {"partner": "Team 1"})
 
 
 def test_name_resolution(analysis):

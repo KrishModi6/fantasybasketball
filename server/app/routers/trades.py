@@ -7,7 +7,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from fbb.trades import find_offers, find_trades
+from fbb.trades import find_asks, find_offers, find_three_team_trades, find_trades
 
 from ..db import get_db
 from ..deps import Membership, membership
@@ -81,10 +81,52 @@ async def offers(team_id: int, a: LeagueAnalysis = Depends(analysis),
         res = await run_in_threadpool(find_offers, a.ctx, team_id, target, a.evaluator(), counts, checked=checked)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    for r in res["offers"] + res["closest"]:
-        r["give_names"] = [a.proj[p].name for p in r["give"]]
+    _name_rows(a, res["offers"] + res["closest"])
     res["get_names"] = [a.proj[p].name for p in res["get"]]
     return {**res, "checked": dict(checked)}
+
+
+@router.get("/asks")
+async def asks(team_id: int, a: LeagueAnalysis = Depends(analysis),
+               player: list[str] = Query([], description="Your players to shop: 1 to 3 (repeat it)"),
+               partner_id: int | None = Query(None, description="The team that wants them; leave out for every team"),
+               get: str = Query("1,2,3", pattern=r"^[1-3](,[1-3])*$",
+                                description="How many of their players to ask for, e.g. 1,2")):
+    if team_id not in {t.id for t in a.snapshot.teams}:
+        raise HTTPException(404, "Team not found")
+    counts = frozenset(int(n) for n in get.split(","))
+    checked: Counter = Counter()
+    try:
+        res = await run_in_threadpool(find_asks, a.ctx, team_id, player, partner_id, a.evaluator(), counts,
+                                      checked=checked)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    _name_rows(a, res["offers"] + res["closest"])
+    res["give_names"] = [a.proj[p].name for p in res["give"]]
+    return {**res, "checked": dict(checked)}
+
+
+@router.get("/three-team")
+async def three_team(team_id: int, a: LeagueAnalysis = Depends(analysis),
+                     partner_id: int | None = Query(None, description="Only rotations that include this team")):
+    teams = {t.id for t in a.snapshot.teams}
+    if team_id not in teams:
+        raise HTTPException(404, "Team not found")
+    if partner_id is not None and (partner_id not in teams or partner_id == team_id):
+        raise HTTPException(422, "Pick another team in this league")
+    checked: Counter = Counter()
+    rows = await run_in_threadpool(find_three_team_trades, a.ctx, team_id, a.evaluator(), partner_id, checked=checked)
+    _name_rows(a, rows)
+    for r in rows:
+        for m in r["moves"]:
+            m["name"] = a.proj[m["player_id"]].name
+    return {"suggestions": rows, "checked": dict(checked)}
+
+
+def _name_rows(a: LeagueAnalysis, rows: list[dict]) -> None:
+    for r in rows:
+        r["give_names"] = [a.proj[p].name for p in r["give"]]
+        r["get_names"] = [a.proj[p].name for p in r["get"]]
 
 
 @router.get("/board")

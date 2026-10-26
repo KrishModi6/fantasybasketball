@@ -1,6 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.2.9
+## What's new in 0.2.10
+
+- **Shop a player.** A new tab on **Trades** for when someone wants your player but won't make an offer. Tick up to 3 of your players, pick the team that wants them (or any team), and Courtside lists what you can fairly ask for: packages of their players that are fair to both teams, the most you can get first. Say a league mate keeps asking about your Jamal Murray: pick their team and you'll see which of their players (a Stephen Curry, say) is a fair return. Open it from your own player's card with **What to ask for**, or ask the assistant "what should I ask for ...".
+- **Find three-team trades.** **Find trades** has a **3 teams** option. It searches rotations where you send a player to one team, that team sends one to a third, and the third sends one back to you, and lists the ones that help you without either other team losing more than 0.4%. **Analyze** opens any of them in the three-team analyzer. The assistant can search these too.
+
+## In 0.2.9
 
 - **Three-team trades.** On **Trades > Analyze**, switch to **3 teams** to work out a multi-team deal. Tick the players each team gives, then pick which team gets each one in the **To** column. Every team gets its own result (points per week, rest of season, playoff and title odds) and its own math, and the players table shows where everyone ends up, including free agents picked up to fill an open spot. You can post three-team trades to the **League board** and ask the AI assistant about them too. (ESPN only takes two-team trades, so you'd make the deal there as two trades.)
 
