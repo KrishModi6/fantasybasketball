@@ -323,6 +323,8 @@ class ToolBox:
                 "playoff_odds": [_r(s["before_playoff_odds"], 2), _r(s["after_playoff_odds"], 2)],
                 "title_odds": [_r(s["before_title_odds"], 2), _r(s["after_title_odds"], 2)],
                 "auto_drops": [self._name(p) for p in s["auto_drops"]], "auto_adds": [self._name(p) for p in s["auto_adds"]],
+                "open_spot_pickups_either_way": [self._name(p) for p in s["open_spot_adds"]],
+                "valued_as_free_agent_pickup": [f"{self._name(p)} (as {self._name(fa)})" for p, fa in s["counted_as_pickups"]],
             })
         return {"sides": sides, "fairness": ev["fairness"], "summary": ev["summary"],
                 "players": [{k: (_r(v) if isinstance(v, float) else v) for k, v in p.items()
