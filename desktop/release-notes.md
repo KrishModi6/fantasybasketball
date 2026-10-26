@@ -1,6 +1,10 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.2.8
+## What's new in 0.2.9
+
+- **Three-team trades.** On **Trades > Analyze**, switch to **3 teams** to work out a multi-team deal. Tick the players each team gives, then pick which team gets each one in the **To** column. Every team gets its own result (points per week, rest of season, playoff and title odds) and its own math, and the players table shows where everyone ends up, including free agents picked up to fill an open spot. You can post three-team trades to the **League board** and ask the AI assistant about them too. (ESPN only takes two-team trades, so you'd make the deal there as two trades.)
+
+## In 0.2.8
 
 - **Target a player.** A new tab on **Trades**: tick up to 3 players on another team and Courtside tells you what to offer for them. It tries every offer of 1, 2 or 3 of your players, simulates the best ones for both teams, and lists the ones that team should accept, best for you first. If nothing works, it shows the offers that came closest. Open it from any player's card on another team with **What to offer**, or ask the assistant "what should I offer for ...".
 - **3-for-3 trades.** **Find trades** has a new **3-for-3 only** package.

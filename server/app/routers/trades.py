@@ -15,17 +15,31 @@ from ..orm import Activity, TradePost
 from ..realtime import hub
 from ..schemas import TradeIn, TradePostIn
 from ..services.analysis import LeagueAnalysis
+from ..services.board import post_sends
 from .analysis import analysis
 
 router = APIRouter(prefix="/api/leagues/{league_id}/trades", tags=["trades"])
 
 
+def _sends(a: LeagueAnalysis, body: TradeIn) -> dict[int, dict[str, int]]:
+    """Who sends whom where. In a two-team trade that's implied; with three, send_to names each player's new team."""
+    teams = [body.team_a, body.team_b] + ([body.team_c] if body.team_c is not None else [])
+    if not set(teams) <= {t.id for t in a.snapshot.teams} or len(set(teams)) != len(teams):
+        raise HTTPException(422, f"Pick {'three' if len(teams) > 2 else 'two'} different teams in this league")
+    if body.team_c is None:
+        return {body.team_a: {p: body.team_b for p in body.a_gives}, body.team_b: {p: body.team_a for p in body.b_gives}}
+    sends = {}
+    for team, gives in zip(teams, (body.a_gives, body.b_gives, body.c_gives)):
+        missing = [p for p in gives if p not in body.send_to]
+        if missing:
+            raise HTTPException(422, f"Pick which team gets {a.proj[missing[0]].name if missing[0] in a.proj else missing[0]}")
+        sends[team] = {p: body.send_to[p] for p in gives}
+    return sends
+
+
 def _evaluate(a: LeagueAnalysis, body: TradeIn) -> dict:
-    teams = {t.id for t in a.snapshot.teams}
-    if body.team_a not in teams or body.team_b not in teams or body.team_a == body.team_b:
-        raise HTTPException(422, "Pick two different teams in this league")
     try:
-        return a.evaluator().evaluate(body.team_a, body.team_b, body.a_gives, body.b_gives)
+        return a.evaluator().evaluate_multi(_sends(a, body))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -77,9 +91,14 @@ async def offers(team_id: int, a: LeagueAnalysis = Depends(analysis),
 def board(m: Membership = Depends(membership), db: Session = Depends(get_db)):
     rows = db.scalars(select(TradePost).where(TradePost.league_id == m.league.id)
                       .order_by(TradePost.created_at.desc()).limit(50)).all()
-    return [{"id": r.id, "author": r.author.display_name, "author_id": r.created_by, "team_a": r.team_a,
-             "team_b": r.team_b, "a_gives": r.a_gives, "b_gives": r.b_gives, "note": r.note,
-             "evaluation": r.evaluation, "created_at": r.created_at.isoformat()} for r in rows]
+    out = []
+    for r in rows:
+        sends = post_sends(r)
+        out.append({"id": r.id, "author": r.author.display_name, "author_id": r.created_by, "team_a": r.team_a,
+                    "team_b": r.team_b, "a_gives": r.a_gives, "b_gives": r.b_gives, "teams": list(sends),
+                    "moves": [{"player_id": p, "from_team": t, "to_team": to} for t, o in sends.items() for p, to in o.items()],
+                    "note": r.note, "evaluation": r.evaluation, "created_at": r.created_at.isoformat()})
+    return out
 
 
 @router.post("/board", status_code=201)
@@ -90,9 +109,13 @@ async def post_trade(body: TradePostIn, m: Membership = Depends(membership), a: 
                      a_gives=body.a_gives, b_gives=body.b_gives, note=body.note, evaluation=ev)
     db.add(post)
     names = lambda ids: ", ".join(a.proj[p].name for p in ids) or "nothing"  # noqa: E731
-    db.add(Activity(league_id=m.league.id, kind="trade",
-                    message=f"{m.user.display_name} shared a trade idea: {names(body.a_gives)} for {names(body.b_gives)}",
-                    payload={"team_a": body.team_a, "team_b": body.team_b}))
+    if body.team_c is None:
+        message = f"{m.user.display_name} shared a trade idea: {names(body.a_gives)} for {names(body.b_gives)}"
+    else:
+        teams = [a.snapshot.team(t).name for t in ev["teams"]]
+        message = f"{m.user.display_name} shared a three-team trade idea: {teams[0]}, {teams[1]} and {teams[2]}"
+    db.add(Activity(league_id=m.league.id, kind="trade", message=message,
+                    payload={"team_a": body.team_a, "team_b": body.team_b, "team_c": body.team_c}))
     db.commit()
     hub.publish(m.league.id, {"type": "trade_shared", "id": post.id, "author": m.user.display_name})
     return {"id": post.id}

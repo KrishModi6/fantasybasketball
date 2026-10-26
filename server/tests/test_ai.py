@@ -44,6 +44,9 @@ def test_every_tool_returns_json(analysis):
         "waiver_recommendations": {},
         "player_details": {"player": "Player 3"},
         "evaluate_trade": {"other_team": "Team 2", "give": ["Player 1"], "get": ["Player 9"]},
+        "evaluate_three_team_trade": {"moves": [{"player": "Player 1", "to_team": "Team 2"},
+                                                {"player": "Player 9", "to_team": "Team 3"},
+                                                {"player": "Player 17", "to_team": "Team 1"}]},
         "trade_ideas": {},
         "trade_offers": {"players": ["Player 9"]},
         "simulate_matchup": {"week": 2},
@@ -55,6 +58,17 @@ def test_every_tool_returns_json(analysis):
         json.dumps(out)  # must serialise for the model
     assert len(tb.call("free_agents", {"limit": 5})["players"]) == 5
     assert tb.call("league_overview", {})["teams"][0]["rank"] == 1
+
+
+def test_three_team_trade_tool(analysis):
+    tb = ToolBox(analysis, my_team_id=3)
+    out = tb.call("evaluate_three_team_trade", {"moves": [{"player": "Player 1", "to_team": "Team 2"},
+                                                          {"player": "Player 9", "to_team": "Team 3"},
+                                                          {"player": "Player 17", "to_team": "Team 1"}]})
+    assert [s["team"] for s in out["sides"]] == ["Team 3", "Team 1", "Team 2"]  # the user's team first
+    assert out["moves"][0] == {"player": "Player 17", "from": "Team 3", "to": "Team 1"}
+    with pytest.raises(ToolError):  # only two teams involved
+        tb.call("evaluate_three_team_trade", {"moves": [{"player": "Player 1", "to_team": "Team 2"}]})
 
 
 def test_name_resolution(analysis):

@@ -138,7 +138,11 @@ class PlayerOverrideRow(Base):
 
 
 class TradePost(Base):
-    """A trade shared to the league board, with the evaluation frozen at posting time."""
+    """A trade shared to the league board, re-scored after every refresh.
+
+    The team/gives columns describe a two-team trade; a three-team trade keeps its full list of moves in
+    evaluation["teams"] and evaluation["moves"] (see services.board.post_sends).
+    """
     __tablename__ = "trade_posts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id", ondelete="CASCADE"), index=True)
