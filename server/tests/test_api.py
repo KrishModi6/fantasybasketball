@@ -271,6 +271,45 @@ def test_board_follows_the_league(client):
     assert post["evaluation"]["status"] == "stale"
     assert post["evaluation"]["status_note"] == f"{ra[0]['name']} is now a free agent."
 
+def test_three_team_trade(client):
+    from app.db import SessionLocal
+    from app.orm import League
+    from app.services.board import refresh_board
+
+    owner = _auth(client, "three-team@example.com", "Three Team")
+    lg = client.post("/api/leagues", json={"source": "demo", "name": "Three Team League", "team_count": 8}, headers=owner).json()
+    lid = lg["id"]
+    a, b, c = (t["id"] for t in lg["teams"][:3])
+    ra, rb, rc = (client.get(f"/api/leagues/{lid}/teams/{t}", headers=owner).json()["roster"] for t in (a, b, c))
+    trade = {"team_a": a, "team_b": b, "team_c": c, "a_gives": [ra[0]["id"]], "b_gives": [rb[0]["id"]],
+             "c_gives": [rc[0]["id"]], "send_to": {ra[0]["id"]: b, rb[0]["id"]: c, rc[0]["id"]: a}}
+    ev = client.post(f"/api/leagues/{lid}/trades/evaluate", json=trade, headers=owner)
+    assert ev.status_code == 200, ev.text
+    assert [s["team_id"] for s in ev.json()["sides"]] == [a, b, c]
+    assert ev.json()["sides"][0]["receives"] == [rc[0]["id"]]
+    assert ev.json()["sides"][0]["before_playoff_odds"] is not None
+
+    no_dest = {**trade, "send_to": {ra[0]["id"]: b, rb[0]["id"]: c}}
+    r = client.post(f"/api/leagues/{lid}/trades/evaluate", json=no_dest, headers=owner)
+    assert r.status_code == 422 and r.json()["detail"] == f"Pick which team gets {rc[0]['name']}"
+    r = client.post(f"/api/leagues/{lid}/trades/evaluate", json={**trade, "team_c": a}, headers=owner)
+    assert r.status_code == 422 and r.json()["detail"] == "Pick three different teams in this league"
+
+    assert client.post(f"/api/leagues/{lid}/trades/board", json={**trade, "note": "3-way"}, headers=owner).status_code == 201
+    post = client.get(f"/api/leagues/{lid}/trades/board", headers=owner).json()[0]
+    assert post["teams"] == [a, b, c] and len(post["evaluation"]["sides"]) == 3
+    assert {"player_id": rc[0]["id"], "from_team": c, "to_team": a} in post["moves"]
+    db = SessionLocal()
+    try:
+        assert refresh_board(db, db.get(League, lid)) == 1
+    finally:
+        db.close()
+    post = client.get(f"/api/leagues/{lid}/trades/board", headers=owner).json()[0]
+    assert post["evaluation"]["status"] == "open" and len(post["evaluation"]["sides"]) == 3
+    feed = client.get(f"/api/leagues/{lid}/activity", headers=owner).json()
+    assert any("three-team trade idea" in f["message"] for f in feed)
+
+
 def test_auth_errors(client):
     assert client.get("/api/leagues").status_code == 401
     r = client.post("/api/auth/login", json={"email": "nobody@example.com", "password": "whatever123"})

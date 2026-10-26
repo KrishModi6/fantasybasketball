@@ -52,6 +52,7 @@ class ToolBox:
             "waiver_recommendations": self.waiver_recommendations,
             "player_details": self.player_details,
             "evaluate_trade": self.evaluate_trade,
+            "evaluate_three_team_trade": self.evaluate_three_team_trade,
             "trade_ideas": self.trade_ideas,
             "trade_offers": self.trade_offers,
             "simulate_matchup": self.simulate_matchup,
@@ -92,6 +93,14 @@ class ToolBox:
                    "get": {"type": "array", "items": {"type": "string"}, "description": "Players the user's team receives."},
                    "my_team": {"type": "string", "description": "Optional; defaults to the user's team."},
                }, ["other_team", "give", "get"]),
+            fn("evaluate_three_team_trade", "Evaluate a trade between three teams, with the same simulation and odds as "
+               "evaluate_trade for every team. List every player who changes teams and the team that gets him.", {
+                   "moves": {"type": "array", "items": {
+                       "type": "object", "additionalProperties": False, "required": ["player", "to_team"],
+                       "properties": {"player": {"type": "string", "description": "Player name."},
+                                      "to_team": {"type": "string", "description": "The team that gets him (name or id)."}},
+                   }},
+               }, ["moves"]),
             fn("trade_ideas", "Search 1-for-1 and 2-for-2 trades that help a team and that the partner's projection also "
                "accepts.", {"team": team, "partner": {"type": "string", "description": "Optional partner team."},
                             "uneven": {"type": "boolean", "description": "Also search 2-for-1 and 1-for-2 packages. "
@@ -262,6 +271,32 @@ class ToolBox:
             ev = self.a.evaluator().evaluate(a, b, give_ids, get_ids)
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
+        return self._trade_result(ev)
+
+    def evaluate_three_team_trade(self, moves: list[dict]) -> dict:
+        sends: dict[int, dict[str, int]] = {}
+        for m in moves:
+            pid = self.player_id(m["player"])
+            home = self.snap.players[pid].fantasy_team_id
+            if home is None:
+                raise ToolError(f"{self._name(pid)} is a free agent, not on a team.")
+            to = self.team_id(m["to_team"], default_mine=False)
+            sends.setdefault(home, {})[pid] = to
+            sends.setdefault(to, {})
+        if self.my_team_id in sends:  # the user's team first, so the other two count as the partners
+            sends = {self.my_team_id: sends[self.my_team_id], **sends}
+        if len(sends) != 3:
+            raise ToolError(f"Players move between {len(sends)} teams; a three-team trade needs exactly three.")
+        try:
+            ev = self.a.evaluator().evaluate_multi(sends)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        out = self._trade_result(ev)
+        out["moves"] = [{"player": self._name(m["player_id"]), "from": self.snap.team(m["from_team"]).name,
+                         "to": self.snap.team(m["to_team"]).name} for m in ev["moves"]]
+        return out
+
+    def _trade_result(self, ev: dict) -> dict:
         sides = []
         for s in ev["sides"]:
             sides.append({

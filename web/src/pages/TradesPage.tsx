@@ -2,21 +2,50 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, SubTabs, Tag } from "../components/ui";
+import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, Segmented, SubTabs, Tag } from "../components/ui";
 import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { count, fmt0, fmt1, pct, relTime, signed, signedPct } from "../lib/format";
 import { useActivity, useAiStatus, useTeam } from "../lib/queries";
 import { useToast } from "../lib/toast";
-import type { TradeEval, TradeOffer, TradeOffers, TradeSide, TradeSuggestion } from "../lib/types";
+import type { TradeEval, TradeMove, TradeOffer, TradeOffers, TradeSide, TradeSuggestion } from "../lib/types";
 
 type Tab = "analyze" | "find" | "target" | "board";
+type Side = "a" | "b" | "c";
 interface Draft {
   a: number | null;
   b: number | null;
+  c: number | null; // set only for a three-team trade
   aGives: string[];
   bGives: string[];
+  cGives: string[];
+  to: Partial<Record<string, Side>>; // three-team trades: the side that gets each player (default: the next one)
+}
+
+const GIVES = { a: "aGives", b: "bGives", c: "cGives" } as const;
+const NEXT: Record<Side, Side> = { a: "b", b: "c", c: "a" };
+const sidesOf = (d: Draft): Side[] => (d.c == null ? ["a", "b"] : ["a", "b", "c"]);
+const destOf = (d: Draft, s: Side, id: string): Side => d.to[id] ?? NEXT[s];
+
+const twoTeam = (a: number | null, b: number | null, aGives: string[], bGives: string[]): Draft =>
+  ({ a, b, c: null, aGives, bGives, cGives: [], to: {} });
+
+/** A draft from a saved trade: its teams in order and every player who changes teams. */
+function draftFromMoves(teams: number[], moves: TradeMove[]): Draft {
+  const side = (team: number) => (["a", "b", "c"] as const)[teams.indexOf(team)]!;
+  const gives = (s: Side) => moves.filter((m) => side(m.from_team) === s).map((m) => m.player_id);
+  return {
+    a: teams[0] ?? null, b: teams[1] ?? null, c: teams[2] ?? null, aGives: gives("a"), bGives: gives("b"), cGives: gives("c"),
+    to: teams.length > 2 ? Object.fromEntries(moves.map((m) => [m.player_id, side(m.to_team)])) : {},
+  };
+}
+
+function tradeBody(d: Draft) {
+  const body = { team_a: d.a, team_b: d.b, a_gives: d.aGives, b_gives: d.bGives };
+  if (d.c == null) return body;
+  const sendTo = Object.fromEntries(sidesOf(d).flatMap((s) => d[GIVES[s]].map((id) => [id, d[destOf(d, s, id)]])));
+  return { ...body, team_c: d.c, c_gives: d.cGives, send_to: sendTo };
 }
 
 const verdictTone = (v: TradeSide["verdict"]) => (v === "advantageous" ? "up" : v === "disadvantageous" ? "down" : undefined);
@@ -32,12 +61,12 @@ export default function TradesPage() {
     setSearch(next, { replace: true });
   };
   const [autoRun, setAutoRun] = useState(false);
-  const [draft, setDraft] = useState<Draft>(() => ({
-    a: myTeamId ?? teams[0]?.id ?? null,
-    b: teams.find((t) => t.id !== (myTeamId ?? teams[0]?.id))?.id ?? null,
-    aGives: [],
-    bGives: [],
-  }));
+  const [draft, setDraft] = useState<Draft>(() => twoTeam(
+    myTeamId ?? teams[0]?.id ?? null,
+    teams.find((t) => t.id !== (myTeamId ?? teams[0]?.id))?.id ?? null,
+    [],
+    [],
+  ));
   const load = (d: Draft) => {
     setDraft(d);
     setAutoRun(true);
@@ -65,28 +94,35 @@ export default function TradesPage() {
   );
 }
 
-function RosterPicker({ title, label, teamId, picked, onToggle, onTeam, otherTeam }: {
+function RosterPicker({ title, label, teamId, picked, onToggle, onTeam, others, dest }: {
   title: string;
   label: string;
   teamId: number | null;
   picked: string[];
   onToggle: (id: string) => void;
   onTeam: (id: number) => void;
-  otherTeam: number | null;
+  others: (number | null)[]; // the other teams in the trade
+  // Three-team trades: where each picked player goes (replaces the Pos and ROS columns to save room).
+  dest?: { options: { side: Side; name: string }[]; of: (id: string) => Side; set: (id: string, to: Side) => void };
 }) {
   const { league, teams, myTeamId } = useLeagueCtx();
   const { data, isLoading } = useTeam(league.id, teamId);
   return (
     <Panel title={title} flush actions={
       <select className="select" value={teamId ?? ""} onChange={(e) => onTeam(Number(e.target.value))} aria-label={label}>
-        {teams.map((t) => <option key={t.id} value={t.id} disabled={t.id === otherTeam}>{t.name}{t.id === myTeamId ? " (you)" : ""}</option>)}
+        {teams.map((t) => <option key={t.id} value={t.id} disabled={others.includes(t.id)}>{t.name}{t.id === myTeamId ? " (you)" : ""}</option>)}
       </select>
     }>
       {isLoading && <div style={{ padding: 10 }}><LoadingBlock rows={6} /></div>}
       {data && (
         <div className="table-wrap pick-list" style={{ border: 0, borderTop: "1px solid var(--border)" }}>
           <table className="data">
-            <thead><tr><th style={{ width: 28 }}><span className="sr-only">Include</span></th><th>Player</th><th className="hide-sm">Pos</th><th className="n">FP/G</th><th className="n">ROS</th></tr></thead>
+            <thead>
+              <tr>
+                <th style={{ width: 28 }}><span className="sr-only">Include</span></th><th>Player</th>
+                {!dest && <th className="hide-sm">Pos</th>}<th className="n">FP/G</th>{dest ? <th>To</th> : <th className="n">ROS</th>}
+              </tr>
+            </thead>
             <tbody>
               {data.roster.map((p) => {
                 const on = picked.includes(p.id);
@@ -94,9 +130,18 @@ function RosterPicker({ title, label, teamId, picked, onToggle, onTeam, otherTea
                   <tr key={p.id} className={`clickable ${on ? "selected" : ""}`} onClick={() => onToggle(p.id)}>
                     <td><input type="checkbox" checked={on} onChange={() => onToggle(p.id)} onClick={(e) => e.stopPropagation()} aria-label={`Include ${p.name}`} /></td>
                     <td>{p.name}<Injury status={p.injury_status} /></td>
-                    <td className="hide-sm muted">{p.positions.join(", ")}</td>
+                    {!dest && <td className="hide-sm muted">{p.positions.join(", ")}</td>}
                     <td className="n">{fmt1(p.fp_pg)}</td>
-                    <td className="n muted">{fmt0(p.ros_value)}</td>
+                    {dest ? (
+                      <td onClick={(e) => e.stopPropagation()}>
+                        {on && (
+                          <select className="select" style={{ maxWidth: 130 }} value={dest.of(p.id)} aria-label={`Team that gets ${p.name}`}
+                            onChange={(e) => dest.set(p.id, e.target.value as Side)}>
+                            {dest.options.map((o) => <option key={o.side} value={o.side}>{o.name}</option>)}
+                          </select>
+                        )}
+                      </td>
+                    ) : <td className="n muted">{fmt0(p.ros_value)}</td>}
                   </tr>
                 );
               })}
@@ -110,14 +155,20 @@ function RosterPicker({ title, label, teamId, picked, onToggle, onTeam, otherTea
 
 function tradeQuestion(ev: TradeEval): string {
   const name = (id: string) => ev.players.find((p) => p.player_id === id)?.name ?? id;
+  const ask = " Who wins it and why, what are the risks, and is there a better version of this deal?";
+  if (ev.sides.length > 2) {
+    const team = (id: number) => ev.sides.find((s) => s.team_id === id)?.team_name ?? `Team ${id}`;
+    const sends = ev.sides.map((s) => `${s.team_name} sends ${(ev.moves ?? []).filter((m) => m.from_team === s.team_id)
+      .map((m) => `${name(m.player_id)} to ${team(m.to_team)}`).join(" and ") || "nobody"}`);
+    return `Explain this three-team trade: ${sends.join("; ")}.${ask}`;
+  }
   const [a, b] = ev.sides;
   return `Explain this trade: ${a.team_name} gives ${a.gives.map(name).join(", ") || "nothing"} to ${b.team_name} for `
-    + `${a.receives.map(name).join(", ") || "nothing"}. Who wins it and why, what are the risks, `
-    + "and is there a better version of this deal?";
+    + `${a.receives.map(name).join(", ") || "nothing"}.${ask}`;
 }
 
 function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Draft) => void; autoRun: boolean }) {
-  const { league } = useLeagueCtx();
+  const { league, teams, teamName } = useLeagueCtx();
   const ai = useAiStatus();
   const toast = useToast();
   const qc = useQueryClient();
@@ -126,17 +177,13 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
   const [submitted, setSubmitted] = useState<Draft | null>(autoRun ? draft : null);
   const evaluate = useQuery({
     queryKey: ["league", league.id, "evaluate", submitted],
-    queryFn: () => api<TradeEval>(`/api/leagues/${league.id}/trades/evaluate`, {
-      body: { team_a: submitted!.a, team_b: submitted!.b, a_gives: submitted!.aGives, b_gives: submitted!.bGives },
-    }),
+    queryFn: () => api<TradeEval>(`/api/leagues/${league.id}/trades/evaluate`, { body: tradeBody(submitted!) }),
     enabled: submitted != null,
     staleTime: 5 * 60_000,
   });
   const stale = submitted != null && JSON.stringify(submitted) !== JSON.stringify(draft);
   const share = useMutation({
-    mutationFn: () => api(`/api/leagues/${league.id}/trades/board`, {
-      body: { team_a: submitted!.a, team_b: submitted!.b, a_gives: submitted!.aGives, b_gives: submitted!.bGives, note },
-    }),
+    mutationFn: () => api(`/api/leagues/${league.id}/trades/board`, { body: { ...tradeBody(submitted!), note } }),
     onSuccess: () => {
       toast("Trade posted to the league board.");
       setNote("");
@@ -144,25 +191,57 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
     },
     onError: (e: Error) => toast(e.message, "err"),
   });
-  const toggle = (side: "aGives" | "bGives", id: string) => {
-    const list = draft[side];
-    setDraft({ ...draft, [side]: list.includes(id) ? list.filter((x) => x !== id) : [...list, id] });
+  const three = draft.c != null;
+  const sides = sidesOf(draft);
+  const toggle = (s: Side, id: string) => {
+    const list = draft[GIVES[s]];
+    const to = { ...draft.to };
+    delete to[id];
+    setDraft({ ...draft, [GIVES[s]]: list.includes(id) ? list.filter((x) => x !== id) : [...list, id], to });
   };
-  const ready = draft.a != null && draft.b != null && draft.a !== draft.b && (draft.aGives.length > 0 || draft.bGives.length > 0);
+  // Switching to three teams adds the first team not already in the trade; going back to two drops it.
+  const setMode = (n: "2" | "3") => setDraft({
+    ...draft, c: n === "3" ? teams.find((t) => t.id !== draft.a && t.id !== draft.b)?.id ?? null : null, cGives: [], to: {},
+  });
+  const moving = sides.flatMap((s) => draft[GIVES[s]]);
+  const gets = (s: Side) => sides.some((o) => draft[GIVES[o]].some((id) => destOf(draft, o, id) === s));
+  const idle = three ? sides.filter((s) => !draft[GIVES[s]].length && !gets(s)) : [];
+  const ids = sides.map((s) => draft[s]);
+  const ready = ids.every((t) => t != null) && new Set(ids).size === ids.length && moving.length > 0 && !idle.length;
 
   return (
     <div className="stack">
-      <div className="grid cols-2" style={{ alignItems: "start" }}>
-        <RosterPicker title="Team A gives" label="Team A" teamId={draft.a} picked={draft.aGives} onToggle={(id) => toggle("aGives", id)} otherTeam={draft.b}
-          onTeam={(id) => setDraft({ ...draft, a: id, aGives: [] })} />
-        <RosterPicker title="Team B gives" label="Team B" teamId={draft.b} picked={draft.bGives} onToggle={(id) => toggle("bGives", id)} otherTeam={draft.a}
-          onTeam={(id) => setDraft({ ...draft, b: id, bGives: [] })} />
+      {teams.length >= 3 && (
+        <div className="toolbar">
+          <Segmented label="Teams in the trade" value={three ? "3" : "2"} onChange={setMode}
+            options={[{ value: "2", label: "2 teams" }, { value: "3", label: "3 teams" }]} />
+          {three && <span className="small muted">Tick the players each team gives, then pick which team gets each one.</span>}
+        </div>
+      )}
+      <div className={`grid ${three ? "cols-3" : "cols-2"}`} style={{ alignItems: "start" }}>
+        {sides.map((s) => {
+          const others = sides.filter((o) => o !== s);
+          return (
+            <RosterPicker key={s} title={`Team ${s.toUpperCase()} gives`} label={`Team ${s.toUpperCase()}`} teamId={draft[s]} picked={draft[GIVES[s]]} onToggle={(id) => toggle(s, id)}
+              others={others.map((o) => draft[o])} onTeam={(id) => setDraft({ ...draft, [s]: id, [GIVES[s]]: [] })}
+              dest={three ? {
+                options: others.map((o) => ({ side: o, name: teamName(draft[o]) })),
+                of: (id) => destOf(draft, s, id),
+                set: (id, to) => setDraft({ ...draft, to: { ...draft.to, [id]: to } }),
+              } : undefined} />
+          );
+        })}
       </div>
       <div className="toolbar">
         <button className="btn primary" disabled={!ready || evaluate.isFetching} onClick={() => setSubmitted({ ...draft })}>
           {evaluate.isFetching ? "Evaluating…" : "Evaluate trade"}
         </button>
-        <span className="small muted">{draft.aGives.length} for {draft.bGives.length}. Uneven trades drop the weakest player or pick up the best free agent.</span>
+        <span className="small muted">
+          {!three && `${draft.aGives.length} for ${draft.bGives.length}. Uneven trades drop the weakest player or pick up the best free agent.`}
+          {three && (idle.length && moving.length
+            ? `${teamName(draft[idle[0]!])} has to send or get at least one player.`
+            : `${moving.length} player${moving.length === 1 ? "" : "s"} changing teams. A team that ends up with extra players drops its weakest; an open spot goes to the best free agent.`)}
+        </span>
       </div>
       {evaluate.error && <ErrorBox error={evaluate.error} />}
       {evaluate.isFetching && !evaluate.data && <LoadingBlock rows={6} />}
@@ -212,17 +291,25 @@ function SidePanel({ s }: { s: TradeSide }) {
 
 export function TradeResult({ ev }: { ev: TradeEval }) {
   const { openPlayer, teamName } = useLeagueCtx();
-  const [a, b] = ev.sides;
+  const [, ...partners] = ev.sides;
+  const three = ev.sides.length > 2;
+  const cols = three ? "cols-3" : "cols-2";
+  // Three-team trades: where each player ends up (traded, picked up to fill a spot, or dropped).
+  const destination = (id: string) => {
+    const move = ev.moves?.find((m) => m.player_id === id);
+    const adder = ev.sides.find((s) => s.auto_adds.includes(id));
+    return move ? teamName(move.to_team) : adder ? teamName(adder.team_id) : "Dropped";
+  };
   return (
     <div className="stack">
-      <div className="grid cols-2" style={{ alignItems: "start" }}>
-        <SidePanel s={a} />
-        <SidePanel s={b} />
+      <div className={`grid ${cols}`} style={{ alignItems: "start" }}>
+        {ev.sides.map((s) => <SidePanel key={s.team_id} s={s} />)}
       </div>
       <Notice>
-        <strong>{ev.fairness.label}.</strong> {ev.summary} Chance {b.team_name} sees it as a gain: {pct(ev.fairness.partner_accept_likelihood)}.
+        <strong>{ev.fairness.label}.</strong> {ev.summary} Chance {partners.map((p) => p.team_name).join(" and ")} {three ? "both see" : "sees"} it
+        as a gain: {pct(ev.fairness.partner_accept_likelihood)}.
       </Notice>
-      <div className="grid cols-2" style={{ alignItems: "start" }}>
+      <div className={`grid ${cols}`} style={{ alignItems: "start" }}>
         {ev.math.map((m) => (
           <Panel key={m.team_id} title={`Calculation: ${m.team_name}`}>
             <ol className="steps">{m.lines.map((l, i) => <li key={i}>{l}</li>)}</ol>
@@ -233,13 +320,14 @@ export function TradeResult({ ev }: { ev: TradeEval }) {
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>Player</th><th className="hide-sm">From</th><th className="hide-sm">Pos</th><th className="n">FP/G</th><th className="n">± game</th><th className="n">ROS games</th><th className="n">ROS pts</th><th className="n">Over repl.</th><th className="n hide-sm">Last 10</th></tr>
+              <tr><th>Player</th><th className="hide-sm">From</th>{three && <th className="hide-sm">To</th>}<th className="hide-sm">Pos</th><th className="n">FP/G</th><th className="n">± game</th><th className="n">ROS games</th><th className="n">ROS pts</th><th className="n">Over repl.</th><th className="n hide-sm">Last 10</th></tr>
             </thead>
             <tbody>
               {ev.players.map((p) => (
                 <tr key={p.player_id}>
                   <td><PlayerName name={p.name} injury={p.injury_status} onOpen={() => openPlayer(p.player_id)} sub={p.games_out > 0 ? `out ~${fmt0(p.games_out)}g` : undefined} /></td>
                   <td className="hide-sm muted">{teamName(p.fantasy_team_id)}</td>
+                  {three && <td className="hide-sm muted">{destination(p.player_id)}</td>}
                   <td className="hide-sm muted">{p.pro_team} · {p.positions.join(", ")}</td>
                   <td className="n strong">{fmt1(p.fp_pg)}</td>
                   <td className="n muted">{fmt0(p.fp_sd)}</td>
@@ -336,7 +424,7 @@ function Finder({ onLoad }: { onLoad: (d: Draft) => void }) {
                     <td className="n hide-sm">{signedPct(s.my_delta_pct)}</td>
                     <td className="n">{signedPct(s.partner_delta_pct)}</td>
                     <td className="hide-sm"><Tag tone={s.fairness.label === "win-win" ? "up" : undefined}>{s.fairness.label}</Tag></td>
-                    <td className="n"><button className="btn" onClick={() => onLoad({ a: team, b: s.partner_id, aGives: s.give, bGives: s.get })}>Analyze</button></td>
+                    <td className="n"><button className="btn" onClick={() => onLoad(twoTeam(team, s.partner_id, s.give, s.get))}>Analyze</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -415,7 +503,7 @@ function Targeter({ onLoad }: { onLoad: (d: Draft) => void }) {
         </button>
         <span className="small muted">{targets.length ? `${targets.length} of ${MAX_TARGETS} picked` : "Tick the players you want below."}</span>
       </div>
-      <RosterPicker title="Players you want" label="Their team" teamId={from} picked={targets} onToggle={toggle} otherTeam={team}
+      <RosterPicker title="Players you want" label="Their team" teamId={from} picked={targets} onToggle={toggle} others={[team]}
         onTeam={(id) => { setFrom(id); setTargets([]); }} />
       <p className="small muted">
         Tries every package of your players for them, fully simulates the most promising for both teams, and lists the offers the other team gains from or loses at most 0.4% on, best for you first. Offering more players than you get opens roster spots, filled with the best free agents.
@@ -432,7 +520,7 @@ function OfferResults({ data, team, onLoad }: { data: TradeOffers; team: number;
   const { league } = useLeagueCtx();
   const ai = useAiStatus();
   const want = andList(data.get_names);
-  const analyze = (o: TradeOffer) => onLoad({ a: team, b: data.partner_id, aGives: o.give, bGives: data.get });
+  const analyze = (o: TradeOffer) => onLoad(twoTeam(team, data.partner_id, o.give, data.get));
   const best = data.offers[0];
   const askAi = ai.data?.enabled && (
     <div className="toolbar">
@@ -500,6 +588,8 @@ interface Post {
   team_b: number;
   a_gives: string[];
   b_gives: string[];
+  teams: number[]; // three for a three-team trade
+  moves: TradeMove[];
   note: string;
   // Re-scored after every refresh; status says whether the trade is still possible.
   evaluation: TradeEval & { status?: "open" | "done" | "stale"; status_note?: string | null; as_of?: string };
@@ -548,24 +638,32 @@ function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
       </div>
     );
   }
+  const anyThree = data.some((p) => p.teams.length > 2);
   return (
     <div className="stack">
       <RecentMoves />
       <Panel flush note="Numbers update automatically after every refresh, so they always reflect the latest stats and rosters.">
         <div className="table-wrap">
           <table className="data">
-            <thead><tr><th>Posted</th><th>Trade</th><th className="n">Team A/wk</th><th className="n">Team B/wk</th><th className="hide-sm">Note</th><th /></tr></thead>
+            <thead>
+              <tr>
+                <th>Posted</th><th>Trade</th><th className="n">Team A/wk</th><th className="n">Team B/wk</th>
+                {anyThree && <th className="n">Team C/wk</th>}<th className="hide-sm">Note</th><th />
+              </tr>
+            </thead>
             <tbody>
               {data.map((p) => {
-                const names = (ids: string[]) => ids.map((id) => p.evaluation.players.find((x) => x.player_id === id)?.name ?? id).join(", ") || "nothing";
-                const [a, b] = p.evaluation.sides;
+                const name = (id: string) => p.evaluation.players.find((x) => x.player_id === id)?.name ?? id;
+                const three = p.teams.length > 2;
+                const gives = (team: number) => p.moves.filter((m) => m.from_team === team)
+                  .map((m) => (three ? `${name(m.player_id)} → ${teamName(m.to_team)}` : name(m.player_id))).join(", ") || "nothing";
+                const [a, b, c] = p.evaluation.sides;
                 const status = p.evaluation.status ?? "open";
                 return (
                   <tr key={p.id} className={status === "open" ? "" : "muted"}>
                     <td className="muted">{relTime(p.created_at)}<div className="tiny">{p.author}</div></td>
                     <td className="wrap">
-                      <div><span className="muted">{teamName(p.team_a)}:</span> {names(p.a_gives)}</div>
-                      <div><span className="muted">{teamName(p.team_b)}:</span> {names(p.b_gives)}</div>
+                      {p.teams.map((t) => <div key={t}><span className="muted">{teamName(t)}:</span> {gives(t)}</div>)}
                       <div className="tiny">
                         {status === "done" && <Tag tone="up">Happened</Tag>}
                         {status === "stale" && <Tag tone="warn">No longer possible</Tag>}{" "}
@@ -576,10 +674,11 @@ function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
                     </td>
                     <td className="n"><Delta value={a.delta_per_week} /></td>
                     <td className="n"><Delta value={b.delta_per_week} /></td>
+                    {anyThree && <td className="n">{c ? <Delta value={c.delta_per_week} /> : <span className="faint">–</span>}</td>}
                     <td className="wrap hide-sm muted">{p.note || "–"}</td>
                     <td className="n">
                       <div className="row" style={{ justifyContent: "flex-end" }}>
-                        <button className="btn" onClick={() => onLoad({ a: p.team_a, b: p.team_b, aGives: p.a_gives, bGives: p.b_gives })}>Re-run</button>
+                        <button className="btn" onClick={() => onLoad(draftFromMoves(p.teams, p.moves))}>Re-run</button>
                         {(p.author_id === user?.id || league.me?.role === "owner") && (
                           <button className="btn danger" onClick={() => del.mutate(p.id)}>Delete</button>
                         )}

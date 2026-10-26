@@ -93,6 +93,9 @@ class TradeIn(BaseModel):
     team_b: int
     a_gives: list[str] = Field(default_factory=list, max_length=6)
     b_gives: list[str] = Field(default_factory=list, max_length=6)
+    team_c: int | None = None  # set for a three-team trade
+    c_gives: list[str] = Field(default_factory=list, max_length=6)
+    send_to: dict[str, int] = Field(default_factory=dict, max_length=18)  # three-team: the team that gets each player
 
 
 class TradePostIn(TradeIn):

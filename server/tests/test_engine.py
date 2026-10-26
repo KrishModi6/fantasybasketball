@@ -290,6 +290,27 @@ def test_trade_evaluation_shape_and_validation(snapshot):
         ev.evaluate(1, 2, [b[0]], [], with_sim=False)  # not on team 1's roster
 
 
+def test_three_team_trade(snapshot):
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b, c = ctx.team_roster(1), ctx.team_roster(2), ctx.team_roster(3)
+    r = ev.evaluate_multi({1: {a[0]: 2}, 2: {b[0]: 3}, 3: {c[0]: 1, c[1]: 2}}, with_sim=False)
+    assert r["teams"] == [1, 2, 3] and len(r["sides"]) == 3 and len(r["math"]) == 3
+    side = {s["team_id"]: s for s in r["sides"]}
+    assert side[1]["receives"] == [c[0]] and side[2]["receives"] == [a[0], c[1]] and side[3]["receives"] == [b[0]]
+    assert len(side[3]["auto_adds"]) == 1  # sends two, gets one: picks up a free agent
+    assert {"player_id": c[1], "from_team": 3, "to_team": 2} in r["moves"]
+    assert r["math"][0]["lines"][0].startswith(f"Sends {ctx.proj[a[0]].name} to {ctx.s.team(2).name}; gets")
+    assert r["fairness"]["label"] in ("win-win-win", "balanced", "lopsided")
+    assert 0 <= r["fairness"]["partner_accept_likelihood"] <= 1
+    with pytest.raises(ValueError, match="another team"):
+        ev.evaluate_multi({1: {a[0]: 1}, 2: {b[0]: 3}, 3: {c[0]: 1}}, with_sim=False)
+    with pytest.raises(ValueError, match="must send or get"):
+        ev.evaluate_multi({1: {a[0]: 2}, 2: {b[0]: 1}, 3: {}}, with_sim=False)
+    with pytest.raises(ValueError, match="not on the giving roster"):
+        ev.evaluate_multi({1: {b[1]: 2}, 2: {b[0]: 3}, 3: {c[0]: 1}}, with_sim=False)
+
+
 def test_trade_finder_returns_gains(snapshot):
     ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
     for s in find_trades(ctx, 2, candidates=40):

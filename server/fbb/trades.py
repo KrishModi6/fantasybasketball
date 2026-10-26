@@ -142,39 +142,54 @@ class TradeEvaluator:
         return side, after
 
     def evaluate(self, team_a: int, team_b: int, a_gives: list[str], b_gives: list[str], with_sim: bool = True) -> dict:
+        return self.evaluate_multi({team_a: {p: team_b for p in a_gives}, team_b: {p: team_a for p in b_gives}}, with_sim)
+
+    def evaluate_multi(self, sends: dict[int, dict[str, int]], with_sim: bool = True) -> dict:
+        """A trade between two or three teams: sends[team] maps each player it gives to the team that gets him."""
         ctx = self.ctx
-        ra = set(ctx.team_roster(team_a))
-        rb = set(ctx.team_roster(team_b))
-        bad = [p for p in a_gives if p not in ra] + [p for p in b_gives if p not in rb]
+        teams = list(sends)
+        if not 2 <= len(teams) <= 3:
+            raise ValueError("a trade is between two or three teams")
+        bad = [p for t, out in sends.items() for p in out if p not in set(ctx.team_roster(t))]
         if bad:
             raise ValueError(f"players not on the giving roster: {', '.join(bad)}")
-        if not a_gives and not b_gives:
+        if not any(sends.values()):
             raise ValueError("a trade needs at least one player")
+        for t, out in sends.items():
+            for p, to in out.items():
+                if to == t or to not in sends:
+                    raise ValueError(f"{ctx.s.players[p].name} has to go to another team in the trade")
+        receives = {t: [p for out in sends.values() for p, to in out.items() if to == t] for t in teams}
+        idle = [ctx.s.team(t).name for t in teams if not sends[t] and not receives[t]]
+        if len(teams) > 2 and idle:
+            raise ValueError(f"{', '.join(idle)} must send or get at least one player")
         taken: set[str] = set()
-        side_a, after_a = self._side(team_a, a_gives, b_gives, taken)
-        side_b, after_b = self._side(team_b, b_gives, a_gives, taken)
+        sides: list[TradeSide] = []
+        after: dict[int, WindowResult] = {}
+        for t in teams:
+            side, after[t] = self._side(t, list(sends[t]), receives[t], taken)
+            sides.append(side)
 
         if with_sim:
             base = self.base_sim()
-            results = dict(self.base)
-            results[team_a] = after_a
-            results[team_b] = after_b
-            new = simulate_season(ctx, MatchupModel(ctx, results), n=SIM_RUNS)
-            for side in (side_a, side_b):
+            new = simulate_season(ctx, MatchupModel(ctx, {**self.base, **after}), n=SIM_RUNS)
+            for side in sides:
                 side.before_playoff_odds = base[side.team_id]["playoff_odds"]
                 side.after_playoff_odds = new[side.team_id]["playoff_odds"]
                 side.before_title_odds = base[side.team_id]["title_odds"]
                 side.after_title_odds = new[side.team_id]["title_odds"]
 
-        involved = list(dict.fromkeys(a_gives + b_gives + side_a.auto_drops + side_a.auto_adds
-                                      + side_b.auto_drops + side_b.auto_adds))
+        involved = list(dict.fromkeys([p for out in sends.values() for p in out]
+                                      + [p for s in sides for p in s.auto_drops + s.auto_adds]))
         players = [self._player_row(pid) for pid in involved]
         return {
-            "sides": [asdict(side_a), asdict(side_b)],
+            "teams": teams,
+            "moves": [{"player_id": p, "from_team": t, "to_team": to} for t, out in sends.items() for p, to in out.items()],
+            "sides": [asdict(s) for s in sides],
             "players": players,
-            "math": self._math(side_a, side_b),
-            "summary": self._summary(side_a, side_b),
-            "fairness": _fairness(side_a, side_b),
+            "math": self._math(sides, sends),
+            "summary": " ".join(f"{s.team_name}: {s.delta_per_week:+,.1f} pts/week ({s.verdict})." for s in sides),
+            "fairness": _fairness(sides),
         }
 
     def _player_row(self, pid: str) -> dict:
@@ -189,14 +204,20 @@ class TradeEvaluator:
             "season_fp_pg": pr.season_fp_pg, "recent_fp_pg": pr.recent_fp_pg,
         }
 
-    def _math(self, a: TradeSide, b: TradeSide) -> list[dict]:
+    def _math(self, sides: list[TradeSide], sends: dict[int, dict[str, int]]) -> list[dict]:
         ctx = self.ctx
         steps = []
-        for s in (a, b):
+        for s in sides:
             name = s.team_name
             gave = sum(self.values[p]["ros_value"] for p in s.gives)
             got = sum(self.values[p]["ros_value"] for p in s.receives)
-            lines = [
+            lines = []
+            if len(sides) > 2:  # with three teams, say who each player goes to and comes from
+                out = [f"{ctx.proj[p].name} to {ctx.s.team(to).name}" for p, to in sends[s.team_id].items()]
+                inc = [f"{ctx.proj[p].name} from {ctx.s.team(t).name}" for t, o in sends.items() for p, to in o.items()
+                       if to == s.team_id]
+                lines.append(f"Sends {', '.join(out) or 'nobody'}; gets {', '.join(inc) or 'nobody'}.")
+            lines += [
                 f"Receives {len(s.receives)} player(s) worth {got:,.0f} projected ROS points "
                 f"(FP/G × expected games), gives {len(s.gives)} worth {gave:,.0f}: raw {got - gave:+,.0f}.",
             ]
@@ -220,20 +241,18 @@ class TradeEvaluator:
             steps.append({"team_id": s.team_id, "team_name": name, "lines": lines})
         return steps
 
-    def _summary(self, a: TradeSide, b: TradeSide) -> str:
-        return (f"{a.team_name}: {a.delta_per_week:+,.1f} pts/week ({a.verdict}). "
-                f"{b.team_name}: {b.delta_per_week:+,.1f} pts/week ({b.verdict}).")
 
-
-def _fairness(a: TradeSide, b: TradeSide) -> dict:
-    if a.delta_ros > 0 and b.delta_ros > 0:
-        label = "win-win"
-    elif a.delta_ros * b.delta_ros < 0:
-        label = "lopsided" if abs(a.delta_pct - b.delta_pct) > 0.03 else "balanced"
+def _fairness(sides: list[TradeSide]) -> dict:
+    pcts = [s.delta_pct for s in sides]
+    if all(s.delta_ros > 0 for s in sides):
+        label = "win-win" if len(sides) == 2 else "win-win-win"
+    elif any(s.delta_ros > 0 for s in sides) and any(s.delta_ros < 0 for s in sides):
+        label = "lopsided" if max(pcts) - min(pcts) > 0.03 else "balanced"
     else:
         label = "balanced"
-    # A rough acceptance likelihood for the other side: logistic in their % change.
-    accept = 1 / (1 + math.exp(-b.delta_pct / 0.01))
+    # A rough acceptance likelihood for the other side(s): logistic in each partner's % change, and in a
+    # three-team trade both partners have to say yes.
+    accept = math.prod(1 / (1 + math.exp(-s.delta_pct / 0.01)) for s in sides[1:])
     return {"label": label, "partner_accept_likelihood": accept}
 
 

@@ -58,14 +58,15 @@ def test_no_moves_on_first_refresh_or_after_a_redraft(snapshot, monkeypatch):
 def test_trade_status(snapshot):
     t1, t2 = snapshot.teams[0].id, snapshot.teams[1].id
     a, b = snapshot.team(t1).roster[0].player_id, snapshot.team(t2).roster[0].player_id
-    assert trade_status(snapshot, t1, t2, [a], [b]) == ("open", None)
+    sends = {t1: {a: t2}, t2: {b: t1}}
+    assert trade_status(snapshot, sends) == ("open", None)
 
     done = snapshot.model_copy(deep=True)
     _move(done, a, t2)
     _move(done, b, t1)
-    assert trade_status(done, t1, t2, [a], [b])[0] == "done"
+    assert trade_status(done, sends)[0] == "done"
 
     gone = snapshot.model_copy(deep=True)
     _move(gone, a, None)
-    status, note = trade_status(gone, t1, t2, [a], [b])
+    status, note = trade_status(gone, sends)
     assert status == "stale" and note == f"{snapshot.players[a].name} is now a free agent."

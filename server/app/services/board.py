@@ -88,14 +88,27 @@ def describe_move(move: dict, prev: LeagueSnapshot, new: LeagueSnapshot) -> str:
     return f"{team(move['team'])} {'added' if added else 'dropped'} {names(added or dropped)}"
 
 
-def trade_status(snap: LeagueSnapshot, team_a: int, team_b: int, a_gives: list[str],
-                 b_gives: list[str]) -> tuple[str, str | None]:
+def post_sends(post: TradePost) -> dict[int, dict[str, int]]:
+    """Who sends whom where in a board post (see TradeEvaluator.evaluate_multi).
+
+    The table has columns for a two-team trade; a three-team post keeps its moves with the evaluation.
+    """
+    ev = post.evaluation or {}
+    if len(ev.get("teams", [])) > 2:
+        sends: dict[int, dict[str, int]] = {t: {} for t in ev["teams"]}
+        for m in ev["moves"]:
+            sends[m["from_team"]][m["player_id"]] = m["to_team"]
+        return sends
+    return {post.team_a: {p: post.team_b for p in post.a_gives}, post.team_b: {p: post.team_a for p in post.b_gives}}
+
+
+def trade_status(snap: LeagueSnapshot, sends: dict[int, dict[str, int]]) -> tuple[str, str | None]:
     """open: still possible. done: the rosters show it happened. stale: a player has moved elsewhere."""
     owner = _owners(snap)
-    if (a_gives or b_gives) and all(owner.get(p) == team_b for p in a_gives) \
-            and all(owner.get(p) == team_a for p in b_gives):
+    moves = [(pid, home, to) for home, out in sends.items() for pid, to in out.items()]
+    if moves and all(owner.get(pid) == to for pid, _, to in moves):
         return "done", "This trade has gone through."
-    for pid, home in [*((p, team_a) for p in a_gives), *((p, team_b) for p in b_gives)]:
+    for pid, home, _ in moves:
         now = owner.get(pid)
         if now != home:
             who = snap.players[pid].name if pid in snap.players else pid
@@ -115,11 +128,12 @@ def refresh_board(db: Session, league: League) -> int:
     evaluator = analysis.evaluator()
     now = datetime.now(timezone.utc).isoformat()
     for post in posts:
-        status, note = trade_status(analysis.snapshot, post.team_a, post.team_b, post.a_gives, post.b_gives)
+        sends = post_sends(post)
+        status, note = trade_status(analysis.snapshot, sends)
         evaluation = dict(post.evaluation)
         if status == "open":
             try:
-                evaluation = evaluator.evaluate(post.team_a, post.team_b, post.a_gives, post.b_gives)
+                evaluation = evaluator.evaluate_multi(sends)
                 evaluation["as_of"] = now
             except ValueError as exc:  # e.g. a roster can no longer fit the incoming players
                 status, note = "stale", str(exc)

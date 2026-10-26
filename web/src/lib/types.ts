@@ -240,8 +240,17 @@ export interface TradeSide {
   verdict: "advantageous" | "neutral" | "disadvantageous";
 }
 
+export interface TradeMove {
+  player_id: string;
+  from_team: number;
+  to_team: number;
+}
+
 export interface TradeEval {
-  sides: [TradeSide, TradeSide];
+  /** Two teams, or three for a three-team trade; sides are in the same order. */
+  teams?: number[];
+  moves?: TradeMove[];
+  sides: TradeSide[];
   players: {
     player_id: string;
     name: string;
