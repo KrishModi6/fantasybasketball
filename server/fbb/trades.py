@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter, OrderedDict
+from collections.abc import Collection
 from dataclasses import asdict, dataclass, field
 from itertools import combinations, permutations
 
@@ -656,7 +657,7 @@ def _package_search(ctx: AnalysisContext, ev: TradeEvaluator, team_id: int, part
 
 
 def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | None = None,
-                           partner: int | None = None, candidates: int = THREE_TEAM_CANDIDATES, limit: int = 12,
+                           partners: Collection[int] = (), candidates: int = THREE_TEAM_CANDIDATES, limit: int = 12,
                            min_partner_pct: float = -0.004, checked: Counter | None = None) -> list[dict]:
     """Three-team rotations: team_id sends a player to P, P sends one to Q, and Q sends one back to team_id.
 
@@ -664,8 +665,11 @@ def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeE
     (you want Q's player, Q wants P's, P wants yours). Every ordered pair of partners (so both directions)
     is screened by raw ROS value as in find_trades, the most promising are fully simulated for all three
     teams, and the rotations neither partner's projection refuses (falls more than min_partner_pct) are
-    ranked by team_id's gain. With ``partner``, only rotations that include that team.
+    ranked by team_id's gain. With ``partners`` (one or two teams), only rotations that include all of them.
     """
+    want = set(partners)
+    if len(want) > 2 or team_id in want:
+        raise ValueError("Pick up to two other teams")
     ev = evaluator or TradeEvaluator(ctx)
     vals, cost, replacement = _screen_values(ctx, ev)
     others = [t.id for t in ctx.s.teams if t.id != team_id]
@@ -678,7 +682,7 @@ def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeE
 
     pre: list[tuple[float, int, int, str, str, str]] = []
     for p, q in permutations(others, 2):
-        if partner is not None and partner not in (p, q):
+        if not want <= {p, q}:
             continue
         for a in pools[team_id]:  # you send a to P
             va = vals[a]
@@ -718,9 +722,10 @@ def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeE
             "fairness": r["fairness"], "summary": r["summary"],
         })
     results.sort(key=lambda x: -x["my_delta_ros"])
-    # At most 2 rotations with any one pair of partners, and 3 built on any one player you send or get.
+    # At most 2 rotations with any one pair of partners (unless both were picked), and 3 built on any one
+    # player you send or get.
     return _spread(results, lambda r: [("pair", frozenset(r["teams"][1:])), ("give", r["give"][0]), ("get", r["get"][0])],
-                   {"pair": 2, "give": 3, "get": 3}, limit)
+                   {"pair": limit if len(want) == 2 else 2, "give": 3, "get": 3}, limit)
 
 
 def _pick(ranked: list, keys, caps: dict[str, int], n: int) -> list:

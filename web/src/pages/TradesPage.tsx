@@ -456,12 +456,14 @@ function TwoTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
 function ThreeTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
   const { league, myTeamId, teams, teamName } = useLeagueCtx();
   const [team, setTeam] = useState<number | null>(myTeamId ?? teams[0]?.id ?? null);
+  // Leave both open, pick one (the finder tries every team as the third), or pick both.
   const [partner, setPartner] = useState("");
+  const [partner2, setPartner2] = useState("");
   const [run, setRun] = useState(0);
   const q = useQuery({
-    queryKey: ["league", league.id, "three-team", team, partner, run],
+    queryKey: ["league", league.id, "three-team", team, partner, partner2, run],
     queryFn: () => api<{ suggestions: ThreeTeamSuggestion[]; checked?: Record<string, number> }>(
-      `/api/leagues/${league.id}/trades/three-team?team_id=${team}${partner ? `&partner_id=${partner}` : ""}`),
+      `/api/leagues/${league.id}/trades/three-team?team_id=${team}${[partner, partner2].filter(Boolean).map((p) => `&partner_id=${p}`).join("")}`),
     enabled: run > 0 && team != null,
     staleTime: 5 * 60_000,
   });
@@ -469,16 +471,27 @@ function ThreeTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
     <div className="stack">
       <div className="toolbar">
         <label className="field-inline"><span className="label">For</span>
-          <select className="select" value={team ?? ""} onChange={(e) => { setTeam(Number(e.target.value)); if (e.target.value === partner) setPartner(""); }}>
+          <select className="select" value={team ?? ""} onChange={(e) => {
+            setTeam(Number(e.target.value));
+            if (e.target.value === partner) { setPartner(partner2); setPartner2(""); } else if (e.target.value === partner2) setPartner2("");
+          }}>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}{t.id === myTeamId ? " (you)" : ""}</option>)}
           </select>
         </label>
         <label className="field-inline"><span className="label">Including</span>
-          <select className="select" value={partner} onChange={(e) => setPartner(e.target.value)}>
+          <select className="select" value={partner} onChange={(e) => { setPartner(e.target.value); if (!e.target.value || e.target.value === partner2) setPartner2(""); }}>
             <option value="">Any two teams</option>
             {teams.filter((t) => t.id !== team).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </label>
+        {partner && (
+          <label className="field-inline"><span className="label">and</span>
+            <select className="select" value={partner2} onChange={(e) => setPartner2(e.target.value)}>
+              <option value="">Any team</option>
+              {teams.filter((t) => t.id !== team && String(t.id) !== partner).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </label>
+        )}
         <button className="btn primary" onClick={() => setRun((n) => n + 1)} disabled={q.isFetching}>{q.isFetching ? "Searching…" : "Search"}</button>
       </div>
       <p className="small muted">

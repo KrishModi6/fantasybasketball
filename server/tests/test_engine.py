@@ -616,8 +616,10 @@ def test_three_team_finder_rotates_one_player_each(snapshot):
         assert all(s["delta_pct"] >= -0.004 for s in r["partners"])
     assert max(Counter(frozenset(r["teams"][1:]) for r in rows).values(), default=0) <= 2
 
-    with_3 = find_three_team_trades(ctx, 1, ev, partner=3, candidates=20)
+    with_3 = find_three_team_trades(ctx, 1, ev, partners=[3], candidates=20)
     assert all(3 in r["teams"] for r in with_3)
+    with_3_4 = find_three_team_trades(ctx, 1, ev, partners=[3, 4], candidates=20)
+    assert all(set(r["teams"]) == {1, 3, 4} for r in with_3_4)
 
 
 def test_offer_finder_rejects_bad_picks(snapshot):

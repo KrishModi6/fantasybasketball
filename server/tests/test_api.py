@@ -128,6 +128,10 @@ def test_full_flow(client):
     assert all(r["teams"][0] == tid and other in r["teams"] and len(r["moves"]) == 3 and r["give_names"] and r["get_names"]
                for r in rot["suggestions"])
     assert client.get(f"/api/leagues/{lid}/trades/three-team?team_id={tid}&partner_id={tid}", headers=owner).status_code == 422
+    third = next(t["team_id"] for t in teams if t["team_id"] not in (tid, other))
+    both = client.get(f"/api/leagues/{lid}/trades/three-team?team_id={tid}&partner_id={other}&partner_id={third}",
+                      headers=owner).json()
+    assert all(set(r["teams"]) == {tid, other, third} for r in both["suggestions"])
 
     # Matchups + simulator
     wk = client.get(f"/api/leagues/{lid}/matchups", headers=owner).json()

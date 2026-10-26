@@ -108,12 +108,14 @@ async def asks(team_id: int, a: LeagueAnalysis = Depends(analysis),
 
 @router.get("/three-team")
 async def three_team(team_id: int, a: LeagueAnalysis = Depends(analysis),
-                     partner_id: int | None = Query(None, description="Only rotations that include this team")):
+                     partner_id: list[int] = Query([], description="Only rotations that include these teams (up to two)")):
     teams = {t.id for t in a.snapshot.teams}
     if team_id not in teams:
         raise HTTPException(404, "Team not found")
-    if partner_id is not None and (partner_id not in teams or partner_id == team_id):
+    if any(p not in teams or p == team_id for p in partner_id):
         raise HTTPException(422, "Pick another team in this league")
+    if len(set(partner_id)) > 2:
+        raise HTTPException(422, "Pick up to two other teams")
     checked: Counter = Counter()
     rows = await run_in_threadpool(find_three_team_trades, a.ctx, team_id, a.evaluator(), partner_id, checked=checked)
     _name_rows(a, rows)

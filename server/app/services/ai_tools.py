@@ -381,7 +381,7 @@ class ToolBox:
         pt = self.team_id(partner, default_mine=False) if partner else None
         if pt == tid:
             raise ToolError("Pick another team as the partner.")
-        rows = find_three_team_trades(self.ctx, tid, self.a.evaluator(), pt, limit=6)
+        rows = find_three_team_trades(self.ctx, tid, self.a.evaluator(), [pt] if pt else (), limit=6)
         return {"team": self.snap.team(tid).name, "ideas": [{
             "moves": [{"player": self._name(m["player_id"]), "from": self.snap.team(m["from_team"]).name,
                        "to": self.snap.team(m["to_team"]).name} for m in r["moves"]],
