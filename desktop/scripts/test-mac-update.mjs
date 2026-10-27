@@ -82,7 +82,6 @@ try {
   assert.equal(plistVersion(installed), feed.version);
   assert.ok(!fs.existsSync(app), "the downloaded copy should have moved into place");
   assert.ok(!fs.existsSync(path.join(dir, "old", "Courtside.app")), "the old copy should be gone");
-  execFileSync("/usr/bin/codesign", ["--verify", "--deep", installed]);
   execFileSync(path.join(installed, "Contents", "Resources", "engine", "courtside-engine"), ["--self-test"], { stdio: "inherit" });
   console.log(`Swapped ${feed.version} in for 0.0.1, and the installed engine passes its self-test.`);
 

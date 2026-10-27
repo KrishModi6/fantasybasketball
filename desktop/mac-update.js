@@ -7,9 +7,10 @@
 // So Courtside does it itself. electron-updater still finds the release; then this module downloads
 // the zip (only browsers and other quarantine-aware apps flag their downloads, so this copy isn't
 // flagged), checks it against the SHA-512 in latest-mac.yml, unzips it with ditto and checks the app's
-// version and code signature. When Courtside quits, a small shell script waits for it to exit, swaps
-// the new Courtside.app into place and reopens it. If macOS won't let it move the app, the old copy is
-// put back, and on its next start Courtside shows the downloaded copy in Finder to drag over by hand.
+// version and that its programs are there. When Courtside quits, a small shell script waits for it to
+// exit, swaps the new Courtside.app into place and reopens it. If macOS won't let it move the app, the
+// old copy is put back, and on its next start Courtside shows the downloaded copy in Finder to drag
+// over by hand.
 //
 // No Electron imports, so desktop/scripts/test-mac-update.mjs can run all of it on a Mac in CI.
 
@@ -163,9 +164,18 @@ async function stage({ info, dir, fetch = globalThis.fetch, base = DOWNLOAD_BASE
   const name = (await fsp.readdir(stagedDir)).find((n) => n.endsWith(".app"));
   if (!name) throw new Error("The download has no app in it.");
   const app = path.join(stagedDir, name);
-  const version = await run("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", path.join(app, "Contents", "Info.plist")]);
+  const plist = (key) => run("/usr/libexec/PlistBuddy", ["-c", `Print :${key}`, path.join(app, "Contents", "Info.plist")]);
+  const version = await plist("CFBundleShortVersionString");
   if (version !== info.version) throw new Error(`The download is version ${version}, not ${info.version}.`);
-  await run("/usr/bin/codesign", ["--verify", "--deep", app]);
+  // The release has no valid code signature to check (electron-builder can't sign without an Apple
+  // Developer ID), so check that the app and the engine it starts unzipped whole.
+  for (const program of [path.join("MacOS", await plist("CFBundleExecutable")), path.join("Resources", "engine", "courtside-engine")]) {
+    try {
+      fs.accessSync(path.join(app, "Contents", program), fs.constants.X_OK);
+    } catch {
+      throw new Error(`The download is missing ${program}.`);
+    }
+  }
   // Nothing should be flagged, since Courtside downloaded it, but clear any flag so it opens cleanly.
   await run("/usr/bin/xattr", ["-cr", app]).catch((err) => log.warn(err.message));
 
