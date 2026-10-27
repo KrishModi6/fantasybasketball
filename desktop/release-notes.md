@@ -1,6 +1,10 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.3.0
+## What's new in 0.3.1
+
+- **Pick both teams in a three-team trade.** On **Find trades > 3 teams**, picking a team under **Including** now shows a second **and** menu. Leave it on **Any team** and Courtside tries every other team as the third, or pick one to only see rotations between you and those two teams, in both directions. Leave **Including** on **Any two teams** to search the whole league as before.
+
+## In 0.3.0
 
 A big trades update: two new ways to find deals, and trade math that matches how real managers trade.
 
