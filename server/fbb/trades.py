@@ -330,13 +330,17 @@ class TradeEvaluator:
 
 
 def _fairness(sides: list[TradeSide]) -> dict:
-    pcts = [s.delta_pct for s in sides]
+    # "balanced" only when no side moves past the same ±ADVANTAGE_PCT line its verdict uses; otherwise name
+    # who comes out ahead.
     if all(s.delta_ros > 0 for s in sides):
-        label = "win-win" if len(sides) == 2 else "win-win-win"
-    elif any(s.delta_ros > 0 for s in sides) and any(s.delta_ros < 0 for s in sides):
-        label = "lopsided" if max(pcts) - min(pcts) > 0.03 else "balanced"
-    else:
+        label = "-".join(["win"] * len(sides))
+    elif all(s.delta_ros < 0 for s in sides):
+        label = "-".join(["lose"] * len(sides))
+    elif all(s.verdict == "neutral" for s in sides):
         label = "balanced"
+    else:
+        ahead = [s for s in sides if s.delta_ros > 0] or [max(sides, key=lambda s: s.delta_pct)]
+        label = "favors " + " and ".join(s.team_name for s in ahead)
     # A rough acceptance likelihood for the other side(s): logistic in each partner's % change, and in a
     # three-team trade both partners have to say yes.
     accept = math.prod(1 / (1 + math.exp(-s.delta_pct / 0.01)) for s in sides[1:])

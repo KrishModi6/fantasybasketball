@@ -16,7 +16,7 @@ from fbb.lineup import SlotModel, solve_day
 from fbb.models import GameLog, Player, ScoringSettings, SeasonLine
 from fbb.projections import MANUAL_LIMIT, ProjectionEngine, games_from_injury_note
 from fbb.strength import league_strength, round_robin
-from fbb.trades import TradeEvaluator, apply_trade, find_trades, pickup_pool
+from fbb.trades import TradeEvaluator, TradeSide, _fairness, _verdict, apply_trade, find_trades, pickup_pool
 
 from factories import make_line, make_snapshot
 
@@ -332,6 +332,19 @@ def test_trade_evaluation_shape_and_validation(snapshot):
         ev.evaluate(1, 2, [b[0]], [], with_sim=False)  # not on team 1's roster
 
 
+def test_fairness_label_follows_verdicts():
+    def label(*pcts):
+        sides = [TradeSide(i, f"T{i}", [], [], delta_ros=p * 1000, delta_pct=p, verdict=_verdict(p)) for i, p in enumerate(pcts)]
+        return _fairness(sides)["label"]
+
+    assert label(-0.025, 0.008) == "favors T1"  # one side clearly loses: not "balanced"
+    assert label(0.004, -0.003) == "balanced"
+    assert label(0.02, 0.001) == "win-win"
+    assert label(-0.002, -0.015) == "lose-lose"
+    assert label(0.0, -0.02) == "favors T0"
+    assert label(0.006, 0.003, -0.02) == "favors T0 and T1"
+
+
 def test_three_team_trade(snapshot):
     ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
     ev = TradeEvaluator(ctx)
@@ -343,7 +356,8 @@ def test_three_team_trade(snapshot):
     assert len(side[3]["auto_adds"]) == 1  # sends two, gets one: picks up a free agent
     assert {"player_id": c[1], "from_team": 3, "to_team": 2} in r["moves"]
     assert r["math"][0]["lines"][0].startswith(f"Sends {ctx.proj[a[0]].name} to {ctx.s.team(2).name}; gets")
-    assert r["fairness"]["label"] in ("win-win-win", "balanced", "lopsided")
+    label = r["fairness"]["label"]
+    assert label in ("win-win-win", "lose-lose-lose", "balanced") or label.startswith("favors ")
     assert 0 <= r["fairness"]["partner_accept_likelihood"] <= 1
     with pytest.raises(ValueError, match="another team"):
         ev.evaluate_multi({1: {a[0]: 1}, 2: {b[0]: 3}, 3: {c[0]: 1}}, with_sim=False)
