@@ -7,7 +7,8 @@
 // it on 127.0.0.1 with the league database in the user's app-data folder: nothing to install or
 // host. Without a bundled engine (development), the app talks to COURTSIDE_SERVER or localhost.
 //
-// Installed builds keep themselves up to date from the GitHub releases (see setupUpdates).
+// Installed builds keep themselves up to date from the GitHub releases (see setupUpdates, and
+// mac-update.js for how a Mac installs them).
 
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, powerMonitor, protocol, shell } = require("electron");
 const { spawn } = require("node:child_process");
@@ -16,6 +17,7 @@ const fs = require("node:fs");
 const netSocket = require("node:net");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const macUpdate = require("./mac-update");
 
 const SCHEME = "app";
 const HOST = "fbb";
@@ -25,10 +27,11 @@ const ENGINE_START_TIMEOUT_MS = 90_000;
 const RELEASES_URL = "https://github.com/KrishModi6/fantasybasketball/releases/latest";
 // A check is two small requests to GitHub, so new versions show up within minutes of being published.
 const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
-// Windows downloads and installs updates by itself. The Mac app is only ad-hoc signed, and macOS
-// won't swap in an update that isn't signed by a registered developer, so there the app says a new
-// version is out and opens the download.
-const CAN_INSTALL_UPDATES = process.platform === "win32";
+// Windows: electron-updater downloads and installs updates. Mac: electron-updater only finds them,
+// because it can only install updates signed by a registered Apple developer; mac-update.js downloads
+// and installs them instead, so nobody has to clear a browser download's flag in Terminal.
+const UPDATER_INSTALLS = process.platform === "win32";
+const MAC_SELF_UPDATE = process.platform === "darwin";
 
 protocol.registerSchemesAsPrivileged([
   { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -37,8 +40,15 @@ protocol.registerSchemesAsPrivileged([
 let engine = null; // { child, url }
 let quitting = false;
 let updater = null; // { check, install } once auto-update is running
+// False on a Mac that can't replace its own app (see macUpdate.installProblem): it offers the download page.
+let canInstallUpdates = UPDATER_INSTALLS || MAC_SELF_UPDATE;
+let macStaged = null; // the downloaded Courtside.app, once a Mac update is ready
+let relaunchAfterUpdate = false; // reopen Courtside once the Mac update is swapped in
 // What the app shows: idle | checking | current | downloading | ready (to install) | available (to download) | error
 let update = { status: "idle" };
+
+// Where a Mac update is downloaded to and waits until Courtside quits.
+const macUpdateDir = () => path.join(app.getPath("cache"), "courtside-mac-update");
 
 const engineRunning = () => Boolean(engine) && engine.child.exitCode === null && engine.child.signalCode === null;
 
@@ -152,7 +162,11 @@ function engineCrashed(code) {
     buttons: ["Restart Courtside", "Quit"],
     defaultId: 0,
   });
-  if (choice === 0) app.relaunch();
+  if (choice === 0) {
+    // A downloaded Mac update swaps the app as Courtside quits, so the swap script reopens it instead.
+    if (macStaged) relaunchAfterUpdate = true;
+    else app.relaunch();
+  }
   app.quit();
 }
 
@@ -238,7 +252,7 @@ function loadApp(win) {
 }
 
 function publishUpdate(next) {
-  update = { checkedAt: update.checkedAt, ...next, current: app.getVersion(), canInstall: CAN_INSTALL_UPDATES };
+  update = { checkedAt: update.checkedAt, canInstall: canInstallUpdates, ...next, current: app.getVersion() };
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("courtside:update", update);
   }
@@ -261,10 +275,71 @@ function promptRestart() {
   }).then(({ response }) => response === 0 && updater?.install());
 }
 
+// Downloads a Mac update in the background (mac-update.js). A release that fails 3 times gets the
+// download page instead, so a broken download isn't fetched again every 15 minutes.
+let macFailures = { version: null, count: 0 };
+const macGaveUp = (version) => macFailures.version === version && macFailures.count >= 3;
+
+async function downloadMacUpdate(info, fromMenu, log) {
+  try {
+    macStaged = await macUpdate.stage({ info, dir: macUpdateDir(), fetch: net.fetch, log,
+      onProgress: (percent) => publishUpdate({ status: "downloading", version: info.version, percent }) });
+    publishUpdate({ status: "ready", version: info.version });
+  } catch (err) {
+    log.error(`Couldn't download ${info.version}: ${err?.stack ?? err}`);
+    const message = err?.message ?? String(err);
+    macFailures = { version: info.version, count: macFailures.version === info.version ? macFailures.count + 1 : 1 };
+    publishUpdate(macGaveUp(info.version)
+      ? { status: "available", version: info.version, canInstall: false, error: message }
+      : { status: "error", version: info.version, error: message, checkedAt: new Date().toISOString() });
+    if (fromMenu) {
+      const next = macGaveUp(info.version) ? "Download it from" : "Courtside tries again in a few minutes. The latest version is always at";
+      dialog.showMessageBox({ type: "warning", title: "Courtside", message: `Couldn't download Courtside ${info.version}.`,
+        detail: `${message}\n\n${next} ${RELEASES_URL}` });
+    }
+  }
+}
+
+// On a Mac, after an update: deletes the download, or if macOS wouldn't let Courtside replace its own
+// app, shows the downloaded copy to drag into Applications (it isn't flagged, so no Terminal needed).
+async function reportMacInstall(log) {
+  const dir = macUpdateDir();
+  const last = macUpdate.lastInstall(dir);
+  if (last) log.info(last.installed ? `Installed ${last.version}` : `Couldn't install ${last.version}: ${last.error}`);
+  if (!last || last.installed || last.version === app.getVersion() || !last.app || !fs.existsSync(last.app)) {
+    await macUpdate.clear(dir).catch((err) => log.warn(`Couldn't delete ${dir}: ${err.message}`));
+    return;
+  }
+  const folder = path.dirname(macUpdate.bundlePath(process.execPath) ?? "/Applications/Courtside.app");
+  const { response } = await dialog.showMessageBox({
+    type: "warning",
+    title: "Courtside",
+    message: `Courtside couldn't finish updating to ${last.version}.`,
+    detail: `macOS didn't let it replace the copy in ${folder}${last.error ? ` (${last.error})` : ""}. `
+      + "The new version is already downloaded, so you can finish by hand, without Terminal:\n\n"
+      + "1. Click Show in Finder.\n2. Quit Courtside (Cmd+Q).\n3. Drag the new Courtside into Applications and click Replace.\n\n"
+      + "If macOS asked whether Courtside may modify apps, turn Courtside on in System Settings > Privacy & Security > "
+      + "App Management, and the next update installs by itself.",
+    buttons: ["Show in Finder", "Later"],
+    defaultId: 0,
+  });
+  if (response === 0) shell.showItemInFolder(last.app);
+}
+
+// Starts the swap of a downloaded Mac update as Courtside quits.
+function installMacUpdate() {
+  try {
+    macUpdate.install({ app: macStaged, bundle: macUpdate.bundlePath(process.execPath), dir: macUpdateDir(),
+      relaunch: relaunchAfterUpdate });
+  } catch (err) {
+    console.error("Couldn't start the update:", err);
+  }
+}
+
 // Checks the GitHub releases (app-update.yml, written at build time from package.json's "publish")
 // shortly after launch, every 15 minutes, and when the computer wakes up or Courtside comes back to the
-// front after a while (timers stop while a laptop sleeps). Windows downloads in the background and
-// installs on restart; the Mac only reports the new version (see CAN_INSTALL_UPDATES).
+// front after a while (timers stop while a laptop sleeps). Updates download in the background and
+// install on restart: Windows through electron-updater, a Mac through mac-update.js (see MAC_SELF_UPDATE).
 function setupUpdates() {
   if (!app.isPackaged) return; // development runs have no release feed
   let autoUpdater;
@@ -276,10 +351,17 @@ function setupUpdates() {
   }
   const logs = path.join(app.getPath("userData"), "logs");
   fs.mkdirSync(logs, { recursive: true });
-  autoUpdater.logger = fileLogger(path.join(logs, "updates.log"));
-  autoUpdater.autoDownload = CAN_INSTALL_UPDATES;
-  autoUpdater.autoInstallOnAppQuit = CAN_INSTALL_UPDATES;
+  const log = fileLogger(path.join(logs, "updates.log"));
+  autoUpdater.logger = log;
+  autoUpdater.autoDownload = UPDATER_INSTALLS;
+  autoUpdater.autoInstallOnAppQuit = UPDATER_INSTALLS;
   autoUpdater.disableWebInstaller = true; // releases ship the full installer
+  if (MAC_SELF_UPDATE) {
+    const problem = macUpdate.installProblem(macUpdate.bundlePath(process.execPath));
+    if (problem) log.warn(`Updates open the download page: ${problem}`);
+    canInstallUpdates = !problem;
+    reportMacInstall(log).catch((err) => log.error(`Couldn't check the last update: ${err?.stack ?? err}`));
+  }
 
   let manual = false; // a check from the Help menu answers "up to date" and errors in a dialog
   autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking" }));
@@ -292,9 +374,12 @@ function setupUpdates() {
     manual = false;
   });
   autoUpdater.on("update-available", (info) => {
-    publishUpdate({ status: CAN_INSTALL_UPDATES ? "downloading" : "available", version: info.version, percent: 0,
-      checkedAt: new Date().toISOString() });
+    const fromMenu = manual;
     manual = false;
+    const selfInstall = canInstallUpdates && !(MAC_SELF_UPDATE && macGaveUp(info.version));
+    publishUpdate({ status: selfInstall ? "downloading" : "available", version: info.version, percent: 0,
+      canInstall: selfInstall, checkedAt: new Date().toISOString() });
+    if (MAC_SELF_UPDATE && selfInstall) downloadMacUpdate(info, fromMenu, log);
   });
   autoUpdater.on("download-progress", (p) =>
     publishUpdate({ status: "downloading", version: update.version, percent: Math.round(p.percent) }));
@@ -326,7 +411,12 @@ function setupUpdates() {
       // The installer replaces the engine's files, so the engine has to be gone first.
       quitting = true;
       await stopEngine();
-      autoUpdater.quitAndInstall(true, true); // install silently, then reopen Courtside
+      if (MAC_SELF_UPDATE) {
+        relaunchAfterUpdate = true;
+        app.quit(); // will-quit starts the swap
+      } else {
+        autoUpdater.quitAndInstall(true, true); // install silently, then reopen Courtside
+      }
     },
   };
   setTimeout(check, 15_000);
@@ -444,4 +534,5 @@ app.on("before-quit", (event) => {
 });
 app.on("will-quit", () => {
   if (engineRunning()) engine.child.kill();
+  if (update.status === "ready" && macStaged) installMacUpdate();
 });

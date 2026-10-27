@@ -3,8 +3,9 @@ import { Download, RefreshCw } from "lucide-react";
 import type { UpdateState } from "../lib/api";
 
 /**
- * Desktop app only: pops up as soon as a new version is out. Windows downloads it by itself and then
- * offers to restart into it; a Mac opens the download.
+ * Desktop app only: pops up as soon as a new version is out. The app downloads it by itself and then
+ * offers to restart into it. Where it can't install it (a Mac that can't replace its own app, or a
+ * download that keeps failing), it opens the download page instead.
  */
 export function UpdatePopup() {
   const bridge = window.courtside?.updates;

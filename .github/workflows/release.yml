@@ -97,6 +97,11 @@ jobs:
           brew uninstall --ignore-dependencies libomp
           engine=$(ls -d desktop/release/mac*/Courtside.app)/Contents/Resources/engine/courtside-engine
           "$engine" --self-test
+      # Installed Macs update themselves with desktop/mac-update.js. This runs it on this build: download
+      # the zip, check it, swap it in for an older copy, and leave the old copy alone if macOS refuses.
+      - name: Self-test the Mac updater
+        if: runner.os == 'macOS'
+        run: node desktop/scripts/test-mac-update.mjs
       - name: Self-test a real installation
         if: runner.os == 'Windows'
         shell: pwsh

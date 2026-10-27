@@ -1,7 +1,7 @@
 {
   "name": "courtside-desktop",
   "productName": "Courtside",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Courtside fantasy basketball analytics for macOS and Windows",
   "main": "main.js",
   "author": "Courtside",
@@ -38,6 +38,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "mac-update.js",
       "web-dist/**/*",
       "package.json",
       "ai-config.json"

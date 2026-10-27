@@ -1,6 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.3.1
+## What's new in 0.3.2
+
+- **Macs update themselves.** No more going back to GitHub and running the Terminal command for every new version. Starting with the version after this one, a Mac downloads updates in the background the way Windows does, and the **New update released** popup offers **Update now**: click it and Courtside reopens on the new version a few seconds later, leagues and all. Or click **Later**, and it installs the next time you quit Courtside. The Terminal command was only ever needed because macOS flags apps downloaded in a browser; Courtside's own downloads aren't flagged.
+- **One last manual update.** 0.3.1 and older can't do this yet, so get 0.3.2 the old way, Terminal command included (see **Updating on a Mac** below). It's the last time.
+
+## In 0.3.1
 
 - **Pick both teams in a three-team trade.** On **Find trades > 3 teams**, picking a team under **Including** now shows a second **and** menu. Leave it on **Any team** and Courtside tries every other team as the third, or pick one to only see rotations between you and those two teams, in both directions. Leave **Including** on **Any two teams** to search the whole league as before.
 
@@ -102,12 +107,16 @@ To keep Courtside in the Dock, right-click its icon while it's open and choose *
 
 ### Updating on a Mac
 
-Macs can't install updates by themselves (that needs the paid certificate), so Courtside tells you instead. It checks every 15 minutes while it's open; when a new version is out, a **New update released** popup offers **Download now**, and the version label in the top bar turns blue (for example **0.2.8 available**).
+From 0.3.2 on, Courtside updates itself. It checks every 15 minutes while it's open and downloads a new version in the background; then a **New update released** popup offers **Update now**, and the version label in the top bar says the new version is ready (for example **0.3.3 ready**). Click either one and Courtside reopens on the new version, or it installs the next time you quit Courtside. Your leagues stay. There's nothing to download and no Terminal command.
 
-1. Click **Download** (or the version label) and unzip the new zip from Downloads.
+If macOS won't let Courtside replace itself, Courtside stays on the old version and says so the next time it opens, with a **Show in Finder** button for the new version it downloaded. Quit Courtside, drag that **Courtside** into Applications and click **Replace**; no Terminal needed for that one either. If macOS asks whether Courtside may modify apps, allow it (or turn Courtside on in **System Settings > Privacy & Security > App Management**) and the next update installs by itself.
+
+**On 0.3.1 or older?** Those versions can't update themselves, so get 0.3.2 by hand, one last time:
+
+1. Click **Download now** in the popup (or the version label) and unzip the new zip from Downloads.
 2. Quit Courtside with **Cmd + Q**.
 3. Drag the new **Courtside** into Applications and click **Replace**.
-4. Run the Terminal command from step 3 again, then open Courtside. Your leagues stay.
+4. Run the Terminal command from step 3 of the install steps again, then open Courtside. Your leagues stay.
 
 ## First run
 
