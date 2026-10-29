@@ -29,10 +29,11 @@ from fbb.connectors.espn import EspnClient, parse_player  # noqa: E402
 from fbb.history import CACHE_DIR, load_history  # noqa: E402
 from fbb.models import GameLog, LeagueSettings, LeagueSnapshot, Player, ProSchedule  # noqa: E402
 
-CUTOFFS = (0, 1, 3, 5, 10, 20, 35)  # games seen before projecting
+CUTOFFS = (0, 1, 3, 5, 10, 15, 20, 35)  # games seen before projecting
 MIN_GAMES, MIN_LEFT = 40, 10
 SETTINGS = {  # changes to the settings in fbb/projections.py; the first row is the app as it is
     "app now": {},
+    "keep last season": {"SEASON_ONLY_AFTER_GAMES": 10**9},
     "no closing games": {"CARRYOVER_RATE_WEIGHT": 0.0, "CARRYOVER_MINUTES_WEIGHT": 0.0},
     "closing games x0.5": {"CARRYOVER_RATE_WEIGHT": 0.5, "CARRYOVER_MINUTES_WEIGHT": 0.5},
     "all 20 closing games": {"CARRYOVER_GAMES": 20},

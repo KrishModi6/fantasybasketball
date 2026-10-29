@@ -73,6 +73,9 @@ def test_full_flow(client):
     pid = pl["players"][0]["id"]
     det = client.get(f"/api/leagues/{lid}/players/{pid}", headers=owner).json()
     assert det["sources"] and "explanation" in det
+    rostered = client.get(f"/api/leagues/{lid}/players/{team.json()['roster'][0]['id']}", headers=owner).json()
+    this = rostered["this_season"]
+    assert this["season"] == max(s["season"] for s in rostered["seasons"]) and this["gp"] > 0 and this["MIN"] == this["mpg"]
 
     team = client.get(f"/api/leagues/{lid}/teams/{tid}", headers=owner).json()
     other = next(t for t in teams if t["team_id"] != tid)["team_id"]

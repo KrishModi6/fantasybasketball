@@ -104,8 +104,10 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
           </div>
           <p className="panel-foot">
             This season: {p.games_played} game{p.games_played === 1 ? "" : "s"}{p.season_fp_pg != null ? ` at ${fmt1(p.season_fp_pg)} FP/G` : ""}, carrying {pct(p.in_season_weight)} of
-            the weight{p.carryover_games > 0 ? `; last season's final ${p.carryover_games} games add ${pct(p.carryover_weight)}` : ""} (updated stat by stat;
-            steals and blocks need more games than points or rebounds). Weights are each source's share across stats,
+            the weight{p.in_season_weight >= 1
+              ? ": from 15 games on, last season and the preseason blend no longer count"
+              : `${p.carryover_games > 0 ? `; last season's final ${p.carryover_games} games add ${pct(p.carryover_weight)}` : ""} (updated stat by stat; steals and blocks need more games than points or rebounds)`}.
+            Weights are each source's share across stats,
             weighted by their value under your scoring. Result: {fmt1(p.fp_pg)} FP/G in {fmt1(p.mpg)} minutes.
           </p>
         </Panel>
@@ -150,16 +152,25 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
           </Panel>
         )}
 
-        <Panel title="Projected per game" flush>
+        <Panel title="Per game" flush>
           <div className="table-wrap">
             <table className="data">
-              <thead><tr>{BOX.map((k) => <th key={k} className="n">{k}</th>)}<th className="n">FG%</th><th className="n">FT%</th></tr></thead>
+              <thead><tr><th />{BOX.map((k) => <th key={k} className="n">{k}</th>)}<th className="n">FG%</th><th className="n">FT%</th></tr></thead>
               <tbody>
                 <tr>
+                  <td>Projected</td>
                   {BOX.map((k) => <td key={k} className="n">{fmt1(p.per_game[k])}</td>)}
                   <td className="n">{p.fg_pct != null ? (p.fg_pct * 100).toFixed(1) : "–"}</td>
                   <td className="n">{p.ft_pct != null ? (p.ft_pct * 100).toFixed(1) : "–"}</td>
                 </tr>
+                {p.this_season && (
+                  <tr>
+                    <td>This season <span className="muted">({p.this_season.gp} g)</span></td>
+                    {BOX.map((k) => <td key={k} className="n">{fmt1(p.this_season![k] as number | null)}</td>)}
+                    <td className="n">{p.this_season.fg_pct != null ? ((p.this_season.fg_pct as number) * 100).toFixed(1) : "–"}</td>
+                    <td className="n">{p.this_season.ft_pct != null ? ((p.this_season.ft_pct as number) * 100).toFixed(1) : "–"}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
