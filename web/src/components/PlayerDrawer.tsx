@@ -10,7 +10,7 @@ import { useToast } from "../lib/toast";
 import type { PlayerDetail } from "../lib/types";
 import { Diverging, GameColumns, Sparkline } from "./charts";
 import { useLeagueCtx } from "./Layout";
-import { Delta, ErrorBox, Injury, Kpi, Kpis, LoadingBlock, Notice, Panel } from "./ui";
+import { Delta, ErrorBox, Injury, Kpi, Kpis, LoadingBlock, Notice, Panel, Term } from "./ui";
 
 const BOX = ["MIN", "PTS", "REB", "AST", "STL", "BLK", "TO", "3PM"];
 
@@ -78,16 +78,18 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
       <div className="drawer-body">
         {p.injury_note && <Notice level="warn">{p.injury_note}</Notice>}
         <Kpis label="Projection summary">
-          <Kpi k={isPoints ? "Projected FP/G" : "Value per game"} v={fmt1(isPoints ? p.fp_pg : p.value_pg)} s={`± ${fmt0(p.fp_sd)} per game`} />
-          <Kpi k="Games left" v={fmt0(p.ros_games)} s={p.games_out > 0 ? `${fmt0(p.games_out)} missed to injury` : `${pct(p.availability)} availability`} />
-          <Kpi k="Rest of season" v={fmt0(p.ros_value)} s={<>over replacement <Delta value={p.vorp} digits={0} /></>} />
+          <Kpi k={isPoints ? <Term t="fp_pg">Projected FP/G</Term> : <Term t="value_pg">Value per game</Term>} v={fmt1(isPoints ? p.fp_pg : p.value_pg)}
+            s={<Term t="fp_sd">± {fmt0(p.fp_sd)} per game</Term>} />
+          <Kpi k={<Term t="ros_games">Games left</Term>} v={fmt0(p.ros_games)}
+            s={p.games_out > 0 ? `${fmt0(p.games_out)} missed to injury` : <>{pct(p.availability)} <Term t="availability">availability</Term></>} />
+          <Kpi k={<Term t="ros">Rest of season</Term>} v={fmt0(p.ros_value)} s={<><Term t="over_repl">over replacement</Term> <Delta value={p.vorp} digits={0} /></>} />
           <Kpi k="Minutes" v={fmt1(p.mpg)} s="per game" />
         </Kpis>
 
         <Panel title="How the projection is built" flush>
           <div className="table-wrap">
             <table className="data">
-              <thead><tr><th>Source</th><th className="n">FP/G</th><th className="n">MPG</th><th className="n">Games %</th><th className="n">Weight</th></tr></thead>
+              <thead><tr><th>Source</th><th className="n">FP/G</th><th className="n">MPG</th><th className="n"><Term t="games_pct" /></th><th className="n"><Term t="source_weight" /></th></tr></thead>
               <tbody>
                 {p.sources.map((s) => (
                   <tr key={s.source}>
@@ -98,7 +100,7 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
                     <td className="n">{pct(s.weight)}</td>
                   </tr>
                 ))}
-                <tr><td>Preseason blend</td><td className="n strong">{fmt1(p.preseason_fp_pg)}</td><td /><td /><td /></tr>
+                <tr><td><Term t="preseason_blend" /></td><td className="n strong">{fmt1(p.preseason_fp_pg)}</td><td /><td /><td /></tr>
               </tbody>
             </table>
           </div>

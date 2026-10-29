@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.3.3
+## What's new in 0.3.4
+
+- **Every number explained.** Labels with a dotted underline now show what they mean when you point at them: **FP/G**, **± game**, **ROS**, **Over repl.**, **80% range**, **Swing**, **Power score**, a trade's **verdict** and **Fit**, and the rest. For example, **80% range** is where a team's score lands in 80% of the simulated matchups: one time in 10 it's lower than the first number, one time in 10 higher than the second.
+- **Glossary.** A new **Glossary** tab (top right, next to Methodology) lists every term in plain English, grouped by page.
+- The matchup simulator says **80% range** instead of just "80%".
+
+## In 0.3.3
 
 - **Last season stops counting after 15 games.** Once a player has played 15 games this season, his projection comes from this season's games only: points, rebounds, minutes and everything else. Before, last season's stats kept pulling on it well into the season, so a breakout (or a slump) took a long time to show up. The player card says when last season no longer counts.
 - **This season's stats on the player card.** The per-game box now shows a **This season** row (minutes, points, rebounds, assists, steals, blocks, turnovers, threes, FG% and FT%) right under the projection, so you can see how a player is actually doing next to what Courtside expects.

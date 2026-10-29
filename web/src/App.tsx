@@ -19,6 +19,7 @@ const TradesPage = lazy(() => import("./pages/TradesPage"));
 const MatchupsPage = lazy(() => import("./pages/MatchupsPage"));
 const LeagueHubPage = lazy(() => import("./pages/LeagueHubPage"));
 const MethodologyPage = lazy(() => import("./pages/MethodologyPage"));
+const GlossaryPage = lazy(() => import("./pages/GlossaryPage"));
 const AssistantPage = lazy(() => import("./pages/AssistantPage"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -66,6 +67,7 @@ export function App() {
               <Route path="assistant" element={page(<AssistantPage />)} />
               <Route path="league" element={page(<LeagueHubPage />)} />
               <Route path="methodology" element={page(<MethodologyPage />)} />
+              <Route path="glossary" element={page(<GlossaryPage />)} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

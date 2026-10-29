@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { RangeBar } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Meter, PageHead, Panel, PlayerName, SubTabs, Tag } from "../components/ui";
+import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Meter, PageHead, Panel, PlayerName, SubTabs, Tag, Term } from "../components/ui";
 import { fmt0, fmt1, pct, record, shortDate } from "../lib/format";
 import { useClaimTeam, useLineup, useTeam, useTeamReport } from "../lib/queries";
 import { useToast } from "../lib/toast";
@@ -83,11 +83,11 @@ export default function TeamPage() {
         <>
           <Kpis label="Team summary">
             <Kpi k="Record" v={record(data.record.wins, data.record.losses, data.record.ties)} s={`${fmt0(data.record.points_for)} points for`} />
-            <Kpi k="Power rank" v={st ? `${st.rank} / ${teams.length}` : "–"} s={st ? `${pct(st.power_score)} power score` : undefined} />
-            {isPoints && <Kpi k="Points per week" v={fmt0(st?.ppw)} s={st ? <><Delta value={st.ppw_vs_avg} digits={0} /> vs average</> : undefined} />}
-            <Kpi k="Projected record" v={st ? `${fmt0(st.proj_wins)}–${fmt0(st.proj_losses)}` : "–"} />
-            <Kpi k="Playoffs / title" v={st ? `${pct(st.playoff_odds)} / ${pct(st.title_odds)}` : "–"} />
-            <Kpi k="Rest of season" v={fmt0(data.ros_total)} s={`points over ${fmt1(data.weeks_remaining)} weeks`} />
+            <Kpi k="Power rank" v={st ? `${st.rank} / ${teams.length}` : "–"} s={st ? <>{pct(st.power_score)} <Term t="power">power score</Term></> : undefined} />
+            {isPoints && <Kpi k={<Term t="pts_wk_team">Points per week</Term>} v={fmt0(st?.ppw)} s={st ? <><Delta value={st.ppw_vs_avg} digits={0} /> <Term t="vs_avg">vs average</Term></> : undefined} />}
+            <Kpi k={<Term t="proj_record">Projected record</Term>} v={st ? `${fmt0(st.proj_wins)}–${fmt0(st.proj_losses)}` : "–"} />
+            <Kpi k={<><Term t="playoffs" /> / <Term t="title">title</Term></>} v={st ? `${pct(st.playoff_odds)} / ${pct(st.title_odds)}` : "–"} />
+            <Kpi k={<Term t="ros">Rest of season</Term>} v={fmt0(data.ros_total)} s={`points over ${fmt1(data.weeks_remaining)} weeks`} />
           </Kpis>
           <div className="stack" style={{ gap: 0 }}>
             <SubTabs label="Team sections" value={tab} onChange={setTab} tabs={[
@@ -121,9 +121,9 @@ function Roster({ team, isPoints }: { team: TeamDetail; isPoints: boolean }) {
           <thead>
             <tr>
               <th>Slot</th><th>Player</th><th className="hide-sm">Team</th><th className="hide-sm">Pos</th>
-              {today && <th className="n" title={live ? "Fantasy points so far today, refreshed every few minutes during games" : "Fantasy points today"}>Today</th>}
-              <th className="n">{isPoints ? "FP/G" : "Value/G"}</th><th className="n hide-sm">± game</th><th className="n hide-sm">Season</th><th className="n hide-sm">Last 10</th>
-              <th className="n">MPG</th><th className="n">Next 7</th><th className="n">Starts/wk</th><th className="n">Pts/wk</th><th className="n hide-sm">Over repl.</th>
+              {today && <th className="n"><Term t="today" /></th>}
+              <th className="n">{isPoints ? <Term t="fp_pg" /> : <Term t="value_pg" />}</th><th className="n hide-sm"><Term t="fp_sd" /></th><th className="n hide-sm"><Term t="season" /></th><th className="n hide-sm"><Term t="last10" /></th>
+              <th className="n"><Term t="mpg" /></th><th className="n"><Term t="next7" /></th><th className="n"><Term t="starts_wk" /></th><th className="n"><Term t="pts_wk_player" /></th><th className="n hide-sm"><Term t="over_repl" /></th>
             </tr>
           </thead>
           <tbody>
@@ -184,7 +184,7 @@ function Lineup({ teamId }: { teamId: number }) {
           {day.starters.length === 0 ? <Empty title="Nobody on this roster plays today" /> : (
             <div className="table-wrap">
               <table className="data">
-                <thead><tr><th>Slot</th><th>Player</th><th className="n">Proj</th><th>Confidence</th><th className="hide-sm">Next best</th></tr></thead>
+                <thead><tr><th>Slot</th><th>Player</th><th className="n">Proj</th><th><Term t="confidence" /></th><th className="hide-sm">Next best</th></tr></thead>
                 <tbody>
                   {day.starters.map((s) => (
                     <tr key={s.player_id}>
@@ -236,7 +236,7 @@ function Improve({ teamId }: { teamId: number }) {
           {data.moves.length === 0 ? <Empty title="No free agent improves this roster" /> : (
             <div className="table-wrap">
               <table className="data">
-                <thead><tr><th>Add</th><th>Drop</th><th className="hide-sm">Why</th><th className="n">Pts/wk</th><th className="n hide-sm">This week</th><th className="n">Rest of season</th></tr></thead>
+                <thead><tr><th>Add</th><th>Drop</th><th className="hide-sm">Why</th><th className="n"><Term t="move_wk">Pts/wk</Term></th><th className="n hide-sm"><Term t="this_week" /></th><th className="n"><Term t="move_ros">Rest of season</Term></th></tr></thead>
                 <tbody>
                   {data.moves.map((m) => (
                     <tr key={m.add + m.drop}>
@@ -258,7 +258,7 @@ function Improve({ teamId }: { teamId: number }) {
           {data.streaming.moves.length === 0 ? <Empty title="No streaming gains this week" /> : (
             <div className="table-wrap">
               <table className="data">
-                <thead><tr><th>Add</th><th>Drop</th><th className="n">Games</th><th className="n">This week</th><th className="n hide-sm">ROS cost</th></tr></thead>
+                <thead><tr><th>Add</th><th>Drop</th><th className="n">Games</th><th className="n"><Term t="this_week" /></th><th className="n hide-sm"><Term t="ros_cost" /></th></tr></thead>
                 <tbody>
                   {data.streaming.moves.map((m) => (
                     <tr key={m.add}>
@@ -307,7 +307,7 @@ function Schedule({ team }: { team: TeamDetail }) {
     <Panel flush foot="Partial weeks count only the days left. Two-week playoff rounds show the combined total. Bands are ±1 standard deviation.">
       <div className="table-wrap">
         <table className="data">
-          <thead><tr><th>Week</th><th>Dates</th><th>Opponent</th><th className="n">Projected</th><th className="n">± sd</th><th className="hide-sm" style={{ width: "34%" }}>Range</th></tr></thead>
+          <thead><tr><th>Week</th><th>Dates</th><th>Opponent</th><th className="n">Projected</th><th className="n"><Term t="week_sd" /></th><th className="hide-sm" style={{ width: "34%" }}>Range</th></tr></thead>
           <tbody>
             {team.upcoming.map((u) => (
               <tr key={u.matchup_period}>

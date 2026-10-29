@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Notice, PageHead, Panel, PlayerName } from "../components/ui";
+import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Notice, PageHead, Panel, PlayerName, Term } from "../components/ui";
 import { fmt0, pct, powerMix, record, relTime, shortDate } from "../lib/format";
 import { useActivity, useClaimTeam, useNews, useRankings, useTeamReport } from "../lib/queries";
 import { useToast } from "../lib/toast";
@@ -26,13 +26,13 @@ export function OverviewPage() {
       {rankings.isLoading && <LoadingBlock rows={10} />}
       {mine && (
         <Kpis label="Your team">
-          <Kpi k="Power rank" v={`${mine.rank} / ${teams.length}`} s={`${pct(mine.power_score)} power score`} />
-          {isPoints && <Kpi k="Points per week" v={fmt0(mine.ppw)} s={<><Delta value={mine.ppw_vs_avg} digits={0} /> vs league average</>} />}
-          <Kpi k="Projected record" v={`${fmt0(mine.proj_wins)}–${fmt0(mine.proj_losses)}`} s={`currently ${record(mine.wins, mine.losses, mine.ties)}`} />
-          <Kpi k="Playoff odds" v={pct(mine.playoff_odds)} s={mine.avg_seed ? `average seed ${mine.avg_seed.toFixed(1)}` : "5,000 simulated seasons"} />
-          <Kpi k="Title odds" v={pct(mine.title_odds)} />
+          <Kpi k="Power rank" v={`${mine.rank} / ${teams.length}`} s={<>{pct(mine.power_score)} <Term t="power">power score</Term></>} />
+          {isPoints && <Kpi k={<Term t="pts_wk_team">Points per week</Term>} v={fmt0(mine.ppw)} s={<><Delta value={mine.ppw_vs_avg} digits={0} /> <Term t="vs_avg">vs league average</Term></>} />}
+          <Kpi k={<Term t="proj_record">Projected record</Term>} v={`${fmt0(mine.proj_wins)}–${fmt0(mine.proj_losses)}`} s={`currently ${record(mine.wins, mine.losses, mine.ties)}`} />
+          <Kpi k={<Term t="playoffs">Playoff odds</Term>} v={pct(mine.playoff_odds)} s={mine.avg_seed ? `average seed ${mine.avg_seed.toFixed(1)}` : "5,000 simulated seasons"} />
+          <Kpi k={<Term t="title">Title odds</Term>} v={pct(mine.title_odds)} />
           {mine.current && (
-            <Kpi k={`Week ${mine.current.matchup_period} win probability`} v={pct(mine.current.win_prob)}
+            <Kpi k={<>Week {mine.current.matchup_period} <Term t="win_prob">win probability</Term></>} v={pct(mine.current.win_prob)}
               tone={mine.current.win_prob >= 0.5 ? "up" : "down"}
               s={`${fmt0(mine.current.proj_score)} – ${fmt0(mine.current.opp_proj_score)} vs ${opp?.name ?? "opponent"}`} />
           )}
@@ -47,8 +47,8 @@ export function OverviewPage() {
                 <table className="data">
                   <thead>
                     <tr>
-                      <th className="n">#</th><th>Team</th>{isPoints && <th className="n">Pts/wk</th>}{isPoints && <th className="n hide-sm">vs avg</th>}
-                      <th className="n">Power</th><th className="n hide-sm">Record</th><th className="n hide-sm">Proj.</th><th className="n">Playoffs</th><th className="n">Title</th>
+                      <th className="n">#</th><th>Team</th>{isPoints && <th className="n"><Term t="pts_wk_team" /></th>}{isPoints && <th className="n hide-sm"><Term t="vs_avg" /></th>}
+                      <th className="n"><Term t="power">Power</Term></th><th className="n hide-sm">Record</th><th className="n hide-sm"><Term t="proj_record" /></th><th className="n"><Term t="playoffs" /></th><th className="n"><Term t="title" /></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -89,7 +89,7 @@ function ThisWeek({ me, opp }: { me: TeamStrength; opp: TeamStrength }) {
       actions={<Link to={`matchups?a=${me.team_id}&b=${c.opponent_id}`} className="small">Simulate</Link>}>
       <div className="table-wrap">
         <table className="data">
-          <thead><tr><th>Team</th><th className="n">Projected</th><th className="n">Win</th><th style={{ width: "40%" }} className="hide-sm" /></tr></thead>
+          <thead><tr><th>Team</th><th className="n"><Term t="pts_wk_team">Projected</Term></th><th className="n"><Term t="win_prob" /></th><th style={{ width: "40%" }} className="hide-sm" /></tr></thead>
           <tbody>
             <tr className="mine">
               <td>{me.name}</td><td className="n">{fmt0(c.proj_score)}</td><td className="n strong">{pct(c.win_prob)}</td>
@@ -137,7 +137,7 @@ function QuickMoves({ teamId }: { teamId: number }) {
       {data && data.moves.length > 0 && (
         <div className="table-wrap">
           <table className="data">
-            <thead><tr><th>Add</th><th>Drop</th><th className="hide-sm">Why</th><th className="n">Pts/wk</th></tr></thead>
+            <thead><tr><th>Add</th><th>Drop</th><th className="hide-sm">Why</th><th className="n"><Term t="move_wk">Pts/wk</Term></th></tr></thead>
             <tbody>
               {data.moves.slice(0, 4).map((m) => (
                 <tr key={m.add + m.drop}>

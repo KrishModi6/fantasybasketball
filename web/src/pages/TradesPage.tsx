@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, Segmented, SubTabs, Tag } from "../components/ui";
+import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, Segmented, SubTabs, Tag, Term } from "../components/ui";
 import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -271,19 +271,19 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
 
 function SidePanel({ s }: { s: TradeSide }) {
   return (
-    <Panel title={s.team_name} actions={<Tag tone={verdictTone(s.verdict)}>{s.verdict}</Tag>}>
+    <Panel title={s.team_name} actions={<Tag tone={verdictTone(s.verdict)}><Term t="verdict">{s.verdict}</Term></Tag>}>
       <div className="kpi" style={{ marginBottom: 8 }}>
-        <span className="k">Change per week</span>
+        <span className="k"><Term t="change_wk" /></span>
         <span className={`v ${s.delta_per_week > 0 ? "up" : s.delta_per_week < 0 ? "down" : ""}`}>{s.delta_per_week > 0 ? "+" : ""}{fmt1(s.delta_per_week)}</span>
       </div>
       <dl className="kv">
-        <dt>Rest of season</dt><dd><Delta value={s.delta_ros} digits={0} /> ({signedPct(s.delta_pct)})</dd>
-        <dt>Fantasy playoff weeks</dt><dd><Delta value={s.delta_playoffs} digits={0} /></dd>
-        <dt>Raw value change</dt><dd><Delta value={s.raw_value_delta} digits={0} /></dd>
+        <dt><Term t="trade_ros" /></dt><dd><Delta value={s.delta_ros} digits={0} /> ({signedPct(s.delta_pct)})</dd>
+        <dt><Term t="playoff_weeks" /></dt><dd><Delta value={s.delta_playoffs} digits={0} /></dd>
+        <dt><Term t="raw_value" /></dt><dd><Delta value={s.raw_value_delta} digits={0} /></dd>
         {s.before_playoff_odds != null && (
           <>
-            <dt>Playoff odds</dt><dd>{pct(s.before_playoff_odds)} → {pct(s.after_playoff_odds)}</dd>
-            <dt>Title odds</dt><dd>{pct(s.before_title_odds)} → {pct(s.after_title_odds)}</dd>
+            <dt><Term t="odds_change">Playoff odds</Term></dt><dd>{pct(s.before_playoff_odds)} → {pct(s.after_playoff_odds)}</dd>
+            <dt><Term t="odds_change">Title odds</Term></dt><dd>{pct(s.before_title_odds)} → {pct(s.after_title_odds)}</dd>
           </>
         )}
       </dl>
@@ -308,8 +308,8 @@ export function TradeResult({ ev }: { ev: TradeEval }) {
         {ev.sides.map((s) => <SidePanel key={s.team_id} s={s} />)}
       </div>
       <Notice>
-        <strong>{ev.fairness.label}.</strong> {ev.summary} Chance {partners.map((p) => p.team_name).join(" and ")} {three ? "both see" : "sees"} it
-        as a gain: {pct(ev.fairness.partner_accept_likelihood)}.
+        <strong><Term t="fit">{ev.fairness.label}</Term>.</strong> {ev.summary} <Term t="accept">Chance {partners.map((p) => p.team_name).join(" and ")} {three ? "both see" : "sees"} it
+        as a gain</Term>: {pct(ev.fairness.partner_accept_likelihood)}.
       </Notice>
       <div className={`grid ${cols}`} style={{ alignItems: "start" }}>
         {ev.math.map((m) => (
@@ -322,7 +322,7 @@ export function TradeResult({ ev }: { ev: TradeEval }) {
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>Player</th><th className="hide-sm">From</th>{three && <th className="hide-sm">To</th>}<th className="hide-sm">Pos</th><th className="n">FP/G</th><th className="n">± game</th><th className="n">ROS games</th><th className="n">ROS pts</th><th className="n">Over repl.</th><th className="n hide-sm">Last 10</th></tr>
+              <tr><th>Player</th><th className="hide-sm">From</th>{three && <th className="hide-sm">To</th>}<th className="hide-sm">Pos</th><th className="n"><Term t="fp_pg" /></th><th className="n"><Term t="fp_sd" /></th><th className="n"><Term t="ros_games" /></th><th className="n"><Term t="ros">ROS pts</Term></th><th className="n"><Term t="over_repl" /></th><th className="n hide-sm"><Term t="last10" /></th></tr>
             </thead>
             <tbody>
               {ev.players.map((p) => (
@@ -428,7 +428,7 @@ function TwoTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
           <div className="table-wrap">
             <table className="data">
               <thead>
-                <tr><th>Partner</th><th>You give</th><th>You get</th><th className="n">You/wk</th><th className="n hide-sm">You ROS</th><th className="n">Partner</th><th className="hide-sm">Fit</th><th /></tr>
+                <tr><th>Partner</th><th>You give</th><th>You get</th><th className="n"><Term t="you_wk" /></th><th className="n hide-sm"><Term t="you_ros" /></th><th className="n"><Term t="partner_pct" /></th><th className="hide-sm"><Term t="fit" /></th><th /></tr>
               </thead>
               <tbody>
                 {q.data.suggestions.map((s, i) => (
@@ -511,7 +511,7 @@ function ThreeTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
           <div className="table-wrap">
             <table className="data">
               <thead>
-                <tr><th>You send</th><th>They pass on</th><th>You get</th><th className="n">You/wk</th><th className="n hide-sm">You ROS</th><th className="n">Partners</th><th /></tr>
+                <tr><th>You send</th><th>They pass on</th><th>You get</th><th className="n"><Term t="you_wk" /></th><th className="n hide-sm"><Term t="you_ros" /></th><th className="n"><Term t="partner_pct">Partners</Term></th><th /></tr>
               </thead>
               <tbody>
                 {q.data.suggestions.map((r) => {
@@ -673,7 +673,7 @@ function OfferTable({ title, offers, show, withTeam = false, onAnalyze }: {
           <thead>
             <tr>
               {withTeam && <th>From</th>}<th style={{ width: withTeam ? "35%" : "45%" }}>{show === "give" ? "You give" : "You get"}</th>
-              <th className="n">You/wk</th><th className="n hide-sm">You ROS</th><th className="n">Partner</th><th className="hide-sm">Fit</th><th />
+              <th className="n"><Term t="you_wk" /></th><th className="n hide-sm"><Term t="you_ros" /></th><th className="n"><Term t="partner_pct" /></th><th className="hide-sm"><Term t="fit" /></th><th />
             </tr>
           </thead>
           <tbody>

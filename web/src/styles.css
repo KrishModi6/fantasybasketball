@@ -300,6 +300,10 @@ th.n {
   border-left: 1px solid var(--border);
   border-right: 0;
 }
+.tabstrip .end ~ a {
+  border-left: 1px solid var(--border);
+  border-right: 0;
+}
 
 .workspace {
   display: grid;
@@ -937,6 +941,55 @@ table.data > tbody > tr.detail:hover > td {
   margin: 0;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- glossary terms ---------- */
+.term {
+  text-decoration: underline dotted var(--faint);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+button.term,
+table.data th button.term {
+  text-decoration: underline dotted var(--faint);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.term:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
+.term-tip {
+  position: fixed;
+  z-index: 200;
+  padding: 7px 9px;
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  font-weight: normal;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+}
+.glossary {
+  margin: 0;
+  font-size: 12.5px;
+}
+.glossary dt {
+  font-weight: 600;
+  margin-top: 8px;
+}
+.glossary dt:first-child {
+  margin-top: 0;
+}
+.glossary dd {
+  margin: 1px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 /* ---------- small charts ---------- */

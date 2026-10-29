@@ -61,6 +61,8 @@ Uncheck a player to see the odds if he sits, e.g. to decide on a questionable st
 
 **League.** Standings, scoring rules, members and which team each manages. Owners also see invite links, refresh settings, ESPN cookies, and delete. In the desktop app everyone runs their own copy, so league mates who join with your code don't appear as members on your computer; the app shows the number of teams instead.
 
+**Glossary.** Not sure what a number means? Point at any label with a dotted underline to see its definition, or open the **Glossary** tab (top right) for the full list in plain English.
+
 ## Adjusting a projection
 
 If you know something the data doesn't yet (a confirmed starting role, an absence), open the player and choose **Adjust projection for this league**. Overrides are capped at ±15% minutes, apply to the whole league, and are logged in the feed so everyone can see them.
@@ -71,6 +73,9 @@ If you know something the data doesn't yet (a confirmed starting role, an absenc
 - **Phone:** open the website and use *Add to Home Screen*. It works like an app.
 
 ## FAQ
+
+**What does "80% range" mean?** In 80% of the 10,000 simulated matchups, the score lands between the two numbers. One time in 10 it's lower than the first, one time in 10 higher than the second. A wide range means an unpredictable week.
+
 
 **Why is a player's FP/G different from ESPN's?** ESPN is one of three inputs. The blend weights come from a backtest in which the blend was more accurate than ESPN alone (Methodology page). As the season goes on, this season's games take over stat by stat, and from a player's 15th game they're all that counts.
 
