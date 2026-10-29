@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.3.2
+## What's new in 0.3.3
+
+- **Trade labels say who comes out ahead.** The trade analyzer used to call almost every trade **balanced**, even when one team's verdict was disadvantageous. Now it's **balanced** only when neither team gains or loses more than 1%, **win-win** or **lose-lose** when both teams gain or both lose, and otherwise names who it **favors**. The **Fit** column in **Find trades**, **Target a player** and **Shop a player** uses the same labels.
+
+On a Mac this is the first update that installs itself: click **Update now** in the popup.
+
+## In 0.3.2
 
 - **Macs update themselves.** No more going back to GitHub and running the Terminal command for every new version. Starting with the version after this one, a Mac downloads updates in the background the way Windows does, and the **New update released** popup offers **Update now**: click it and Courtside reopens on the new version a few seconds later, leagues and all. Or click **Later**, and it installs the next time you quit Courtside. The Terminal command was only ever needed because macOS flags apps downloaded in a browser; Courtside's own downloads aren't flagged.
 - **One last manual update.** 0.3.1 and older can't do this yet, so get 0.3.2 the old way, Terminal command included (see **Updating on a Mac** below). It's the last time.
