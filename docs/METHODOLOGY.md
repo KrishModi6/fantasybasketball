@@ -68,6 +68,7 @@ rate = (K · preseason_rate + Σ w_g · stat_g) / (K + Σ w_g · minutes_g)
 
 - `w_g = 0.5^(games_ago / 25)` is the exponential recency weight.
 - Early in a season the sum also includes the player's **last 10 games of last season** (ESPN returns each player's last 20 team games, which reach back across the summer), behind this season's games and at a quarter of the weight: `w_g = 0.25 · 0.5^(games_ago / 25)`. Those games are already part of last season's line in the preseason projection, hence the discount. They fade out as this season's games pile up.
+- From a player's **15th game** this season, last season stops counting: `K` is 0 and last season's games drop out, so rates, minutes per game and game-to-game volatility come from this season's games alone (still recency-weighted). The preseason projection is built from last season's stats, so it drops out too. Availability (share of games played) still comes from the preseason projection. This is a product choice, not the most accurate setting: in the recency backtest below it raised the error at 15 games from 4.12 to 4.84 FP/G (2025‑26) and from 3.61 to 4.36 (2024‑25), and at 35 games by 3-4%.
 - `K` is the **prior strength in minutes**, estimated per stat from the ensemble's own backtest errors by method of moments: `K = mean_rate / (Var(actual − projected) − φ · E[rate / minutes])`.
 - φ is the measured overdispersion of game counts relative to Poisson (from 2025‑26 game logs).
 - Established players, with more weighted history, get a stronger prior than young or low-minute players.

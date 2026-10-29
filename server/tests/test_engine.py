@@ -14,7 +14,7 @@ from fbb.context import AnalysisContext
 from fbb.enrich import enrich_players
 from fbb.lineup import SlotModel, solve_day
 from fbb.models import GameLog, Player, ScoringSettings, SeasonLine
-from fbb.projections import MANUAL_LIMIT, ProjectionEngine, games_from_injury_note
+from fbb.projections import MANUAL_LIMIT, SEASON_ONLY_AFTER_GAMES, ProjectionEngine, games_from_injury_note
 from fbb.strength import league_strength, round_robin
 from fbb.trades import TradeEvaluator, TradeSide, _fairness, _verdict, apply_trade, find_trades, pickup_pool
 
@@ -221,6 +221,15 @@ def test_last_seasons_closing_games_count_before_this_season_starts():
 def test_this_seasons_games_count_more_than_last_seasons():
     base = _with_games([]).fp_pg
     assert _with_games([2027]).fp_pg - base > 2 * (_with_games([2026]).fp_pg - base) > 0
+
+
+def test_last_season_stops_counting_once_this_season_has_enough_games():
+    big_per_min = ScoringSettings().fantasy_points(BIG_GAME) / 36
+    pr = _with_games([2026] * 5 + [2027] * SEASON_ONLY_AFTER_GAMES)
+    assert pr.fp_pg / pr.mpg == pytest.approx(big_per_min)  # no preseason prior left
+    assert pr.in_season_weight == 1 and pr.carryover_games == 0 and pr.carryover_weight == 0
+    early = _with_games([2026] * 5 + [2027] * (SEASON_ONLY_AFTER_GAMES - 1))
+    assert early.fp_pg / early.mpg < big_per_min and early.carryover_games == 5
 
 
 # ---- calendar --------------------------------------------------------------------

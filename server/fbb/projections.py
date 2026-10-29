@@ -11,7 +11,8 @@ Order of operations for every player (each step is recorded for the UI):
      minutes of prior evidence (K per stat, estimated from backtest error), and
      this season's games are added with exponential recency decay. Early in a
      season, last season's closing games are added too, behind this season's
-     and at a reduced weight.
+     and at a reduced weight. From SEASON_ONLY_AFTER_GAMES games played, the
+     prior and last season's games drop out: this season's games alone.
   3. Bounded adjustments (news layer). Only structured signals are used and
      each is capped:
        injury status / return date -> games missed (availability only)
@@ -66,6 +67,9 @@ PRIOR_STRENGTH_SCALE = 1.0  # multiplier on the learned per-stat prior strengths
 CARRYOVER_GAMES = 10
 CARRYOVER_RATE_WEIGHT = 0.25
 CARRYOVER_MINUTES_WEIGHT = 0.25
+# From this many games played this season, a projection is this season's games alone: the preseason prior
+# (built from last season's stats) and last season's closing games stop counting.
+SEASON_ONLY_AFTER_GAMES = 15
 POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
 
 INJURY_DEFAULT_GAMES = {
@@ -325,9 +329,13 @@ class ProjectionEngine:
             wm = _decay(len(games) + extra_gp / 2, MINUTES_HALF_LIFE_GAMES)
             w_minutes_sum += wm * extra_min
             mins_prior_w += wm * extra_gp
-        # Last season's closing games continue the decay behind everything from this season.
+        # Last season's closing games continue the decay behind everything from this season, until he has
+        # played SEASON_ONLY_AFTER_GAMES games this season.
         season_min = obs_min
         seen = max(len(games), int(cur.gp) if cur else 0)
+        season_only = seen >= SEASON_ONLY_AFTER_GAMES and season_min > 0
+        if season_only:
+            carry = []
         for i, g in enumerate(reversed(carry)):
             w = CARRYOVER_RATE_WEIGHT * _decay(seen + i, RATE_HALF_LIFE_GAMES)
             for k, v in line_rates_from_game(g.stats).items():
@@ -337,13 +345,12 @@ class ProjectionEngine:
             w_minutes_sum += wm * g.minutes
             mins_prior_w += wm
 
-        rates = {}
         w_min = pre["feats"].get("w_min", 0.0)
-        for k in RATE_STATS:
-            K = self._prior_k(k, w_min)
-            rates[k] = (K * prior_rates[k] + obs_tot[k]) / (K + obs_min)
-        mpg = (MINUTES_PRIOR_GAMES * prior_mpg + w_minutes_sum) / (MINUTES_PRIOR_GAMES + mins_prior_w)
-        k_avg = float(np.mean([self._prior_k(k, w_min) for k in ("FGM", "REB", "AST")]))
+        K = {k: 0.0 if season_only else self._prior_k(k, w_min) for k in RATE_STATS}
+        rates = {k: (K[k] * prior_rates[k] + obs_tot[k]) / (K[k] + obs_min) for k in RATE_STATS}
+        k_mpg = 0.0 if season_only else MINUTES_PRIOR_GAMES
+        mpg = (k_mpg * prior_mpg + w_minutes_sum) / (k_mpg + mins_prior_w)
+        k_avg = float(np.mean([K[k] for k in ("FGM", "REB", "AST")]))
         in_season_weight = season_min / (obs_min + k_avg) if obs_min else 0.0
         carryover_weight = (obs_min - season_min) / (obs_min + k_avg) if obs_min else 0.0
 
@@ -356,9 +363,10 @@ class ProjectionEngine:
         last10 = (carry + games)[-10:]
         recent_fp = float(np.mean([self._fp(g.stats) for g in last10])) if len(last10) >= 3 else None
 
-        # Game-to-game volatility: shrink observed SD (this + last season logs) to the population CV.
+        # Game-to-game volatility: shrink observed SD (this season's logs, plus last season's until the cutoff)
+        # to the population CV.
         fp = self._fp(per_game)
-        fps = [self._fp(g.stats) for g in done[-30:]]
+        fps = [self._fp(g.stats) for g in (games if season_only else done)[-30:]]
         prior_var = (self.fp_cv * max(fp, 5.0)) ** 2
         if len(fps) >= 5:
             n = len(fps)
