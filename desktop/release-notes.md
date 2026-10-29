@@ -2,6 +2,8 @@ Courtside runs on your computer: projections, power rankings, matchup simulation
 
 ## What's new in 0.3.3
 
+- **Last season stops counting after 15 games.** Once a player has played 15 games this season, his projection comes from this season's games only: points, rebounds, minutes and everything else. Before, last season's stats kept pulling on it well into the season, so a breakout (or a slump) took a long time to show up. The player card says when last season no longer counts.
+- **This season's stats on the player card.** The per-game box now shows a **This season** row (minutes, points, rebounds, assists, steals, blocks, turnovers, threes, FG% and FT%) right under the projection, so you can see how a player is actually doing next to what Courtside expects.
 - **Trade labels say who comes out ahead.** The trade analyzer used to call almost every trade **balanced**, even when one team's verdict was disadvantageous. Now it's **balanced** only when neither team gains or loses more than 1%, **win-win** or **lose-lose** when both teams gain or both lose, and otherwise names who it **favors**. The **Fit** column in **Find trades**, **Target a player** and **Shop a player** uses the same labels.
 
 On a Mac this is the first update that installs itself: click **Update now** in the popup.

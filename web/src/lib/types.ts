@@ -131,6 +131,7 @@ export interface PlayerDetail extends PlayerRow {
   fp_breakdown: Record<string, number>;
   game_log: { season: number; period: number; date: string | null; team: string; min: number; fp: number; [k: string]: number | string | null }[];
   seasons: { season: number; label: string; team: string; gp: number; mpg: number | null; fp_pg: number | null; [k: string]: number | string | null }[];
+  this_season: PlayerDetail["seasons"][number] | null; // this season's per-game line (with MIN), once he has played
   news: NewsItem[];
   trend: { as_of: string; fp_pg: number; mpg: number; games_out: number }[];
   override: { minutes_pct: number; out_games: number | null; note: string } | null;

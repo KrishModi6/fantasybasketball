@@ -152,16 +152,25 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
           </Panel>
         )}
 
-        <Panel title="Projected per game" flush>
+        <Panel title="Per game" flush>
           <div className="table-wrap">
             <table className="data">
-              <thead><tr>{BOX.map((k) => <th key={k} className="n">{k}</th>)}<th className="n">FG%</th><th className="n">FT%</th></tr></thead>
+              <thead><tr><th />{BOX.map((k) => <th key={k} className="n">{k}</th>)}<th className="n">FG%</th><th className="n">FT%</th></tr></thead>
               <tbody>
                 <tr>
+                  <td>Projected</td>
                   {BOX.map((k) => <td key={k} className="n">{fmt1(p.per_game[k])}</td>)}
                   <td className="n">{p.fg_pct != null ? (p.fg_pct * 100).toFixed(1) : "–"}</td>
                   <td className="n">{p.ft_pct != null ? (p.ft_pct * 100).toFixed(1) : "–"}</td>
                 </tr>
+                {p.this_season && (
+                  <tr>
+                    <td>This season <span className="muted">({p.this_season.gp} g)</span></td>
+                    {BOX.map((k) => <td key={k} className="n">{fmt1(p.this_season![k] as number | null)}</td>)}
+                    <td className="n">{p.this_season.fg_pct != null ? ((p.this_season.fg_pct as number) * 100).toFixed(1) : "–"}</td>
+                    <td className="n">{p.this_season.ft_pct != null ? ((p.this_season.ft_pct as number) * 100).toFixed(1) : "–"}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

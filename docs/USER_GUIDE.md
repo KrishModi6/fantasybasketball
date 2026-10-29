@@ -39,9 +39,10 @@ Courtside reopens where you left off. The back arrow (or your mouse's back butto
 
 **Players.** Free agents, rostered players, or everyone. Filter by position, search, and sort by projection, rest-of-season value, games next week and more. Click a player to see exactly how the projection was built:
 1. the three sources and their weights;
-2. how much this season's games count so far;
+2. how much this season's games count so far (from 15 games on, only this season counts);
 3. every adjustment applied (injuries, minutes budget, team change), with its cap;
-4. what moved the ML model.
+4. what moved the ML model;
+5. the projection per game next to his actual averages this season.
 
 **Matchups.** Pick a week and see every scheduled matchup with a quick win estimate, or pair any two teams. The selected matchup is simulated 10,000 times, game by game, and shows:
 - each team's chance to win, with its projected score and the range it lands in 80% of the time;
@@ -71,7 +72,7 @@ If you know something the data doesn't yet (a confirmed starting role, an absenc
 
 ## FAQ
 
-**Why is a player's FP/G different from ESPN's?** ESPN is one of three inputs. The blend weights come from a backtest in which the blend was more accurate than ESPN alone (Methodology page). As the season goes on, this season's games take over stat by stat.
+**Why is a player's FP/G different from ESPN's?** ESPN is one of three inputs. The blend weights come from a backtest in which the blend was more accurate than ESPN alone (Methodology page). As the season goes on, this season's games take over stat by stat, and from a player's 15th game they're all that counts.
 
 **Why does a trade that adds value still say "neutral"?** The verdict is based on your *lineup-adjusted* output. Two good players who play the same days or positions may not both start. The threshold is ±1% of your rest-of-season points.
 

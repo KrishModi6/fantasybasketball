@@ -87,8 +87,11 @@ def player_detail(a: LeagueAnalysis, pid: str, history_rows: list | None = None)
         seasons.append({"season": h.season, "label": season_label(h.season), "team": h.team, "gp": int(h.gp),
                         "mpg": _r(h.minutes / h.gp, 1) if h.gp else None,
                         "fp_pg": _r(a.engine.fp_scoring.fantasy_points(pg), 1) if pg else None,
-                        **{k: _r(pg.get(k, 0), 1) for k in ("PTS", "REB", "AST", "STL", "BLK", "TO", "3PM")}})
-    news = [n.model_dump(mode="json") for n in a.snapshot.news if pid in n.player_ids][:8]
+                        **{k: _r(pg.get(k, 0), 1) for k in ("PTS", "REB", "AST", "STL", "BLK", "TO", "3PM")},
+                        "fg_pct": _pct(h.stats.get("FGM", 0), h.stats.get("FGA", 0)),
+                        "ft_pct": _pct(h.stats.get("FTM", 0), h.stats.get("FTA", 0))})
+    this_season = next((s for s in seasons if s["season"] == a.snapshot.settings.season), None)
+    news =[n.model_dump(mode="json") for n in a.snapshot.news if pid in n.player_ids][:8]
     return {
         **row,
         "sources": [asdict(s) | {"per_game": {k: _r(v) for k, v in s.per_game.items() if k in BOX}}
@@ -101,6 +104,7 @@ def player_detail(a: LeagueAnalysis, pid: str, history_rows: list | None = None)
         "fp_breakdown": {k: _r(v) for k, v in a.engine.fp_scoring.breakdown(pr.per_game).items()},
         "game_log": games,
         "seasons": seasons,
+        "this_season": this_season and {**this_season, "MIN": this_season["mpg"]},
         "news": news,
         "trend": [{"as_of": r.as_of.isoformat(), "fp_pg": r.fp_pg, "mpg": r.mpg, "games_out": r.games_out}
                   for r in (history_rows or [])],
