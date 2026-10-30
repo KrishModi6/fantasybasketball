@@ -73,7 +73,7 @@ export function LeaguesPage() {
           )}
         </Panel>
 
-        <section className="stack" style={{ gap: 0 }} aria-label="Add a league">
+        <section className="stack" aria-label="Add a league">
           <SubTabs label="Add a league" value={mode} onChange={setMode} tabs={[
             { value: "espn", label: "Connect ESPN" },
             { value: "file", label: "Import file" },
@@ -81,7 +81,7 @@ export function LeaguesPage() {
             { value: "demo", label: "Demo league" },
             { value: "flaim", label: "Flaim (beta)" },
           ]} />
-          <div className="panel" style={{ borderTop: 0, borderRadius: "0 0 3px 3px" }}>
+          <div className="panel">
             {mode === "espn" && <EspnForm />}
             {mode === "file" && <FileForm />}
             {mode === "join" && <JoinForm />}

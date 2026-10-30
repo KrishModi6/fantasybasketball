@@ -165,7 +165,7 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
       <p className="small">{ex.summary}</p>
       <div className="grid cols-3" style={{ alignItems: "start" }}>
         {isPoints ? (
-          <div className="table-wrap" style={{ border: "1px solid var(--border)" }}>
+          <div className="table-wrap boxed">
             <table className="data">
               <thead><tr><th>Stat</th><th className="n"><Term t="pts_wk_team" /></th><th className="n">League</th><th className="n"><Term t="stat_diff" /></th><th /></tr></thead>
               <tbody>
@@ -182,7 +182,7 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
             </table>
           </div>
         ) : (
-          <div className="table-wrap" style={{ border: "1px solid var(--border)" }}>
+          <div className="table-wrap boxed">
             <table className="data">
               <thead><tr><th>Category</th><th className="n">Win vs avg team</th></tr></thead>
               <tbody>
@@ -193,7 +193,7 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
             </table>
           </div>
         )}
-        <div className="table-wrap" style={{ border: "1px solid var(--border)" }}>
+        <div className="table-wrap boxed">
           <table className="data">
             <thead><tr><th>Player</th><th className="n"><Term t="pts_wk_player" /></th><th className="n"><Term t="share" /></th><th className="n"><Term t="starts_ros" /></th></tr></thead>
             <tbody>
@@ -216,7 +216,7 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
             <dt><Term t="bench_games">Playable games on bench per week</Term></dt><dd>{fmt1(ex.depth.bench_games_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_bench)}</span></dd>
           </dl>
           {ex.injuries.length > 0 && (
-            <div className="table-wrap" style={{ border: "1px solid var(--border)" }}>
+            <div className="table-wrap boxed">
               <table className="data">
                 <thead><tr><th>Injured</th><th className="n">Games</th><th className="n"><Term t="pts_lost" /></th></tr></thead>
                 <tbody>

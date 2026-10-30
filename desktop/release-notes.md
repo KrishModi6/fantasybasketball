@@ -5,6 +5,7 @@ Courtside runs on your computer: projections, power rankings, matchup simulation
 - **Every number explained.** Labels with a dotted underline now show what they mean when you point at them: **FP/G**, **± game**, **ROS**, **Over repl.**, **80% range**, **Swing**, **Power score**, a trade's **verdict** and **Fit**, and the rest. For example, **80% range** is where a team's score lands in 80% of the simulated matchups: one time in 10 it's lower than the first number, one time in 10 higher than the second.
 - **Glossary.** A new **Glossary** tab (top right, next to Methodology) lists every term in plain English, grouped by page.
 - The matchup simulator says **80% range** instead of just "80%".
+- **A more modern look.** Rounded cards with a soft shadow, pill-shaped tabs and filters, rounded buttons, boxes and bars, and a player card that slides in with rounded corners. Same layout and numbers, in both the dark and light themes.
 
 ## In 0.3.3
 
