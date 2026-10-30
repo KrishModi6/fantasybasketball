@@ -49,7 +49,7 @@ export const GLOSSARY = {
   week_sd: { term: "± sd", def: "How far the weekly score typically lands from the projection. About two weeks in three are within this many points; the bar shows that range." },
 
   power: { term: "Power score", def: "A 0–100% rating of team strength. This season's record counts for the share of the season played; the rest is how often the team would beat every other team in a week (its all-play win rate) from its projections." },
-  proj_record: { term: "Proj.", def: "Projected final record: wins so far plus the wins expected from simulating the rest of the season." },
+  proj_record: { term: "Proj.", def: "Projected final record: the record so far plus the wins expected from simulating the rest of the regular season, in whole games. With an odd number of teams one team sits out each week (a bye), so teams with more byes play fewer games." },
   playoffs: { term: "Playoffs", def: "Chance to make the playoffs, from 5,000 simulated seasons." },
   title: { term: "Title", def: "Chance to win the championship, from 5,000 simulated seasons." },
   share: { term: "Share", def: "The share of the team's weekly fantasy points that comes from this player." },

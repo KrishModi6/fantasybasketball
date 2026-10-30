@@ -167,6 +167,9 @@ export interface TeamStrength {
   ties: number;
   proj_wins: number;
   proj_losses: number;
+  proj_ties: number;
+  proj_games: number;
+  byes: number;
   playoff_odds: number;
   title_odds: number;
   avg_seed: number;

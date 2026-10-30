@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Notice, PageHead, Panel, PlayerName, Term } from "../components/ui";
-import { fmt0, pct, powerMix, record, relTime, shortDate } from "../lib/format";
+import { count, fmt0, pct, powerMix, projRecord, projRecordNote, record, relTime, shortDate } from "../lib/format";
 import { useActivity, useClaimTeam, useNews, useRankings, useTeamReport } from "../lib/queries";
 import { useToast } from "../lib/toast";
 import type { TeamStrength } from "../lib/types";
@@ -28,7 +28,8 @@ export function OverviewPage() {
         <Kpis label="Your team">
           <Kpi k="Power rank" v={`${mine.rank} / ${teams.length}`} s={<>{pct(mine.power_score)} <Term t="power">power score</Term></>} />
           {isPoints && <Kpi k={<Term t="pts_wk_team">Points per week</Term>} v={fmt0(mine.ppw)} s={<><Delta value={mine.ppw_vs_avg} digits={0} /> <Term t="vs_avg">vs league average</Term></>} />}
-          <Kpi k={<Term t="proj_record">Projected record</Term>} v={`${fmt0(mine.proj_wins)}–${fmt0(mine.proj_losses)}`} s={`currently ${record(mine.wins, mine.losses, mine.ties)}`} />
+          <Kpi k={<Term t="proj_record">Projected record</Term>} v={projRecord(mine)}
+            s={`currently ${record(mine.wins, mine.losses, mine.ties)}${mine.byes ? `, ${count(mine.byes, "bye week")}` : ""}`} />
           <Kpi k={<Term t="playoffs">Playoff odds</Term>} v={pct(mine.playoff_odds)} s={mine.avg_seed ? `average seed ${mine.avg_seed.toFixed(1)}` : "5,000 simulated seasons"} />
           <Kpi k={<Term t="title">Title odds</Term>} v={pct(mine.title_odds)} />
           {mine.current && (
@@ -60,7 +61,7 @@ export function OverviewPage() {
                         {isPoints && <td className="n hide-sm"><Delta value={t.ppw_vs_avg} digits={0} /></td>}
                         <td className="n" title={powerMix(t)}>{pct(t.power_score)}</td>
                         <td className="n hide-sm">{record(t.wins, t.losses, t.ties)}</td>
-                        <td className="n hide-sm">{fmt0(t.proj_wins)}–{fmt0(t.proj_losses)}</td>
+                        <td className="n hide-sm" title={projRecordNote(t)}>{projRecord(t)}</td>
                         <td className="n">{pct(t.playoff_odds)}</td>
                         <td className="n">{pct(t.title_odds)}</td>
                       </tr>

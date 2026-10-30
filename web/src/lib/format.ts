@@ -13,6 +13,16 @@ export const signedInt = (x: number) => signed(x, 0).replace(/\B(?=(\d{3})+(?!\d
 export const signedPct = (x: number, digits = 1) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(x * 100).toFixed(digits)}%`;
 export const record = (w: number, l: number, t = 0) => (t ? `${w}–${l}–${t}` : `${w}–${l}`);
 export const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+type Projected = { proj_wins: number; proj_ties: number; proj_games: number; byes: number };
+/** The projected final record in whole games: expected wins rounded, the rest losses (and the ties so far),
+ * so it adds up to the team's games. Rounding wins and losses each on their own could make it a game more. */
+export const projRecord = (t: Projected) => {
+  const w = Math.round(t.proj_wins);
+  return record(w, t.proj_games - t.proj_ties - w, t.proj_ties);
+};
+/** What a projected record is made of: the expected wins, out of the team's games and bye weeks. */
+export const projRecordNote = (t: Projected) =>
+  `${fmt1(t.proj_wins)} expected wins in ${count(t.proj_games, "game")}${t.byes ? ` (${count(t.byes, "bye week")})` : ""}`;
 /** How a power score is made up: this season's record for the share played, the projection for the rest. */
 export const powerMix = (t: { wins: number; losses: number; ties: number; record_weight: number; projected_allplay: number }) =>
   t.record_weight > 0

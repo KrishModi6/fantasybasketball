@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Bar, Diverging } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented, Term } from "../components/ui";
-import { fmt0, fmt1, pct, powerMix, record, shortDate, signed } from "../lib/format";
+import { fmt0, fmt1, pct, powerMix, projRecord, projRecordNote, record, shortDate, signed } from "../lib/format";
 import { useRankings, useWeekly } from "../lib/queries";
 import type { TeamStrength } from "../lib/types";
 
@@ -53,7 +53,7 @@ export default function RankingsPage() {
                       {isPoints && <td className="n">{fmt0(t.ppw)}</td>}
                       {isPoints && <td className="n"><Delta value={t.ppw_vs_avg} digits={0} /></td>}
                       <td className="n">{record(t.wins, t.losses, t.ties)}</td>
-                      <td className="n hide-sm">{fmt0(t.proj_wins)}–{fmt0(t.proj_losses)}</td>
+                      <td className="n hide-sm" title={projRecordNote(t)}>{projRecord(t)}</td>
                       <td className="n">{pct(t.playoff_odds)}</td>
                       <td className="n">{pct(t.title_odds)}</td>
                     </tr>
