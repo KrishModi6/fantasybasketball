@@ -142,11 +142,23 @@ cd server
 ```
 The server hot-reloads the model when the file changes. Set `FBB_RETRAIN_ENABLED=true` to retrain weekly.
 
+## AWS (optional)
+
+The NBA.com tracking cache and the xFP model also live in a private, versioned S3 bucket in the `courtside` AWS project (`us-east-2`). After `fetch_tracking`:
+```bash
+cd server
+.venv/Scripts/python -m pip install -r requirements-dev.txt   # once: boto3[crt]
+aws login --profile courtside                                 # when the 12-hour session has lapsed
+.venv/Scripts/python -m scripts.push_tracking_s3              # sends only changed files; --dry-run to preview
+```
+It costs about $0.01 a month. [docs/AWS.md](docs/AWS.md) covers what's in the bucket and how it's locked down, why the AI assistant stays on OpenAI rather than Amazon Bedrock, and which AWS services would be overkill here.
+
 ## Documentation
 
 - [Methodology & model card](docs/METHODOLOGY.md)
 - [User guide](docs/USER_GUIDE.md)
 - [Admin guide](docs/ADMIN_GUIDE.md)
 - [API reference](docs/API.md) (interactive docs at `/docs` on a running server)
+- [AWS: S3 backup, Bedrock evaluation, costs](docs/AWS.md)
 - [Connectors](docs/CONNECTORS.md)
 - [AI assistant and the Cloudflare proxy](docs/AI.md)

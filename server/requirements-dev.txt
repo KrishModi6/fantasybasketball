@@ -1,3 +1,5 @@
 -r requirements.txt
+# scripts.push_tracking_s3 (docs/AWS.md); the crt extra reads `aws login` sessions
+boto3[crt]==1.43.122
 # Embedded Postgres for running the test suite against Postgres (FBB_TEST_POSTGRES=1)
 pgserver
