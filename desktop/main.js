@@ -25,6 +25,8 @@ const WEB_ROOT = path.join(__dirname, "web-dist");
 const ENGINE_NAME = process.platform === "win32" ? "courtside-engine.exe" : "courtside-engine";
 const ENGINE_START_TIMEOUT_MS = 90_000;
 const RELEASES_URL = "https://github.com/KrishModi6/fantasybasketball/releases/latest";
+// The newest release's version file, the one electron-updater reads (see latestVersion).
+const FEED_URL = `${RELEASES_URL}/download/${process.platform === "darwin" ? "latest-mac.yml" : "latest.yml"}`;
 // A check is two small requests to GitHub, so new versions show up within minutes of being published.
 const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 // Windows: electron-updater downloads and installs updates. Mac: electron-updater only finds them,
@@ -39,11 +41,13 @@ protocol.registerSchemesAsPrivileged([
 
 let engine = null; // { child, url }
 let quitting = false;
-let updater = null; // { check, install } once auto-update is running
+let updater = null; // { check, install, downloaded, failed } once auto-update is running
 // False on a Mac that can't replace its own app (see macUpdate.installProblem): it offers the download page.
 let canInstallUpdates = UPDATER_INSTALLS || MAC_SELF_UPDATE;
 let macStaged = null; // the downloaded Courtside.app, once a Mac update is ready
 let relaunchAfterUpdate = false; // reopen Courtside once the Mac update is swapped in
+let installing = false; // Update now was clicked: later clicks (popup, version label, menu) do nothing
+let installWhenReady = false; // a newer release turned up at Update now: install it once it's downloaded
 // What the app shows: idle | checking | current | downloading | ready (to install) | available (to download) | error
 let update = { status: "idle" };
 
@@ -252,15 +256,21 @@ function loadApp(win) {
 }
 
 function publishUpdate(next) {
-  update = { checkedAt: update.checkedAt, canInstall: canInstallUpdates, ...next, current: app.getVersion() };
+  update = { checkedAt: update.checkedAt, canInstall: canInstallUpdates, ...next, current: app.getVersion(), installing };
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send("courtside:update", update);
   }
 }
 
+// Writes each line at once, so the last lines before Courtside quits (installing an update) are kept.
 function fileLogger(file) {
-  const write = (level) => (...parts) =>
-    fs.appendFile(file, `${new Date().toISOString()} ${level} ${parts.join(" ")}\n`, () => undefined);
+  const write = (level) => (...parts) => {
+    try {
+      fs.appendFileSync(file, `${new Date().toISOString()} ${level} ${parts.join(" ")}\n`);
+    } catch {
+      /* logging must never break updating */
+    }
+  };
   return { info: write("INFO"), warn: write("WARN"), error: write("ERROR"), debug: () => undefined };
 }
 
@@ -281,11 +291,14 @@ let macFailures = { version: null, count: 0 };
 const macGaveUp = (version) => macFailures.version === version && macFailures.count >= 3;
 
 async function downloadMacUpdate(info, fromMenu, log) {
+  macStaged = null; // staging a newer release deletes an older download
   try {
     macStaged = await macUpdate.stage({ info, dir: macUpdateDir(), fetch: net.fetch, log,
       onProgress: (percent) => publishUpdate({ status: "downloading", version: info.version, percent }) });
     publishUpdate({ status: "ready", version: info.version });
+    updater?.downloaded();
   } catch (err) {
+    updater?.failed();
     log.error(`Couldn't download ${info.version}: ${err?.stack ?? err}`);
     const message = err?.message ?? String(err);
     macFailures = { version: info.version, count: macFailures.version === info.version ? macFailures.count + 1 : 1 };
@@ -336,6 +349,23 @@ function installMacUpdate() {
   }
 }
 
+// "0.3.10" > "0.3.9": compares versions number by number.
+function isNewer(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+}
+
+// The newest release's version, or null when GitHub can't be reached in a few seconds.
+async function latestVersion() {
+  const res = await net.fetch(FEED_URL, { cache: "no-store", signal: AbortSignal.timeout(8000) });
+  if (!res.ok) return null;
+  return /^version:\s*['"]?([\d.]+)/m.exec(await res.text())?.[1] ?? null;
+}
+
 // Checks the GitHub releases (app-update.yml, written at build time from package.json's "publish")
 // shortly after launch, every 15 minutes, and when the computer wakes up or Courtside comes back to the
 // front after a while (timers stop while a laptop sleeps). Updates download in the background and
@@ -364,8 +394,16 @@ function setupUpdates() {
   }
 
   let manual = false; // a check from the Help menu answers "up to date" and errors in a dialog
-  autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking" }));
+  // Checks go on while a downloaded update waits to be installed, so a newer release replaces it; those
+  // checks leave the waiting update on screen unless they find a newer one.
+  const waiting = () => update.status === "ready";
+  const giveUpInstall = () => {
+    installing = false;
+    installWhenReady = false;
+  };
+  autoUpdater.on("checking-for-update", () => waiting() || publishUpdate({ status: "checking" }));
   autoUpdater.on("update-not-available", () => {
+    giveUpInstall();
     publishUpdate({ status: "current", checkedAt: new Date().toISOString() });
     if (manual) {
       dialog.showMessageBox({ type: "info", title: "Courtside", message: "You're up to date.",
@@ -376,16 +414,32 @@ function setupUpdates() {
   autoUpdater.on("update-available", (info) => {
     const fromMenu = manual;
     manual = false;
+    if (waiting() && info.version === update.version) {
+      // Nothing newer than the waiting update after all (GitHub's release list can lag its files a moment).
+      if (installWhenReady) installNow();
+      return;
+    }
+    if (waiting()) log.info(`Courtside ${info.version} replaces ${update.version}, which was waiting to install`);
     const selfInstall = canInstallUpdates && !(MAC_SELF_UPDATE && macGaveUp(info.version));
+    if (!selfInstall) giveUpInstall();
     publishUpdate({ status: selfInstall ? "downloading" : "available", version: info.version, percent: 0,
       canInstall: selfInstall, checkedAt: new Date().toISOString() });
     if (MAC_SELF_UPDATE && selfInstall) downloadMacUpdate(info, fromMenu, log);
   });
   autoUpdater.on("download-progress", (p) =>
     publishUpdate({ status: "downloading", version: update.version, percent: Math.round(p.percent) }));
-  autoUpdater.on("update-downloaded", (info) => publishUpdate({ status: "ready", version: info.version }));
+  autoUpdater.on("update-downloaded", (info) => {
+    publishUpdate({ status: "ready", version: info.version });
+    if (installWhenReady) installNow();
+  });
   autoUpdater.on("error", (err) => {
     const message = err?.message ?? String(err);
+    if (waiting() && !manual) {
+      // A check failed while an update waits: it still installs, now if Update now is waiting on this check.
+      if (installWhenReady) installNow();
+      return;
+    }
+    giveUpInstall();
     publishUpdate({ status: "error", version: update.version, error: message, checkedAt: new Date().toISOString() });
     if (manual) {
       dialog.showMessageBox({ type: "warning", title: "Courtside", message: "Couldn't check for updates.",
@@ -396,28 +450,50 @@ function setupUpdates() {
 
   let lastCheck = Date.now(); // wall-clock time of the last check (the launch check below counts)
   const check = (fromMenu = false) => {
-    if (update.status === "ready") return fromMenu && promptRestart();
-    if (update.status === "downloading" || update.status === "checking") return;
+    if (installing || update.status === "downloading" || update.status === "checking") return;
+    if (waiting() && fromMenu) return promptRestart();
     manual = fromMenu;
     lastCheck = Date.now();
     autoUpdater.checkForUpdates().catch(() => undefined); // failures also arrive as "error" events
   };
   // Timers stop while the computer sleeps, so the interval alone can go days without firing on a laptop.
   const checkIfDue = () => Date.now() - lastCheck >= UPDATE_CHECK_INTERVAL_MS && check();
+
+  // Quits Courtside and installs the downloaded update.
+  async function installNow() {
+    installWhenReady = false;
+    // The installer replaces the engine's files, so the engine has to be gone first.
+    quitting = true;
+    await stopEngine();
+    if (MAC_SELF_UPDATE) {
+      relaunchAfterUpdate = true;
+      app.quit(); // will-quit starts the swap
+    } else {
+      autoUpdater.quitAndInstall(true, true); // install silently, then reopen Courtside
+    }
+  }
   updater = {
     check,
+    // Update now (the popup, the version label or the restart dialog). Runs once, however often it's clicked.
     install: async () => {
-      if (update.status !== "ready") return;
-      // The installer replaces the engine's files, so the engine has to be gone first.
-      quitting = true;
-      await stopEngine();
-      if (MAC_SELF_UPDATE) {
-        relaunchAfterUpdate = true;
-        app.quit(); // will-quit starts the swap
-      } else {
-        autoUpdater.quitAndInstall(true, true); // install silently, then reopen Courtside
+      if (update.status !== "ready" || installing) return;
+      installing = true;
+      // A newer release may be out since this one downloaded: get that one first and install it as soon
+      // as it's down, so nobody has to update twice. Offline, the downloaded one installs.
+      const latest = await latestVersion().catch(() => null);
+      if (latest && isNewer(latest, update.version)) {
+        log.info(`Courtside ${latest} is out: downloading it before installing, instead of ${update.version}`);
+        installWhenReady = true;
+        lastCheck = Date.now();
+        autoUpdater.checkForUpdates().catch(() => undefined);
+        return;
       }
+      await installNow();
     },
+    // A Mac download finished (downloadMacUpdate): installs it if Update now is waiting on it.
+    downloaded: () => installWhenReady && installNow(),
+    // A Mac download failed: Update now can be clicked again once a download is ready.
+    failed: giveUpInstall,
   };
   setTimeout(check, 15_000);
   setInterval(check, UPDATE_CHECK_INTERVAL_MS);

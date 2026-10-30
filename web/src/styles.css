@@ -821,6 +821,13 @@ input[type="checkbox"] {
   color: var(--accent-text);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
+/* W / L / T after a played week's score */
+.result {
+  display: inline-block;
+  width: 10px;
+  margin-left: 5px;
+  text-align: center;
+}
 .inj {
   display: inline-block;
   margin-left: 6px;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { UpdatePopup } from "../components/UpdatePopup";
 import { VersionBadge } from "../components/VersionBadge";
 import type { UpdateState } from "../lib/api";
@@ -22,6 +22,7 @@ function desktop(initial: UpdateState) {
 
 describe("version label", () => {
   afterEach(() => {
+    cleanup();
     delete window.courtside;
   });
 
@@ -52,6 +53,7 @@ describe("version label", () => {
 
 describe("update popup", () => {
   afterEach(() => {
+    cleanup();
     delete window.courtside;
   });
 
@@ -73,5 +75,26 @@ describe("update popup", () => {
     push({ status: "ready", version: "0.2.4", current: "0.2.3" });
     fireEvent.click(screen.getByRole("button", { name: "Update now" }));
     expect(updates.install).toHaveBeenCalledOnce();
+  });
+
+  it("follows a newer release found at Update now, then restarts into it without another click", async () => {
+    const { updates, push } = desktop({ status: "ready", version: "0.2.4", current: "0.2.3" });
+    render(<UpdatePopup />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update now" }));
+    expect(screen.getByRole("button", { name: "Restarting…" })).toBeDisabled();
+    push({ status: "downloading", version: "0.2.5", current: "0.2.3", percent: 30, installing: true });
+    expect(screen.getByRole("dialog")).toHaveTextContent("Courtside 0.2.5 is out (you have 0.2.3). Downloading it now (30%)… Courtside restarts into it when it's done.");
+    push({ status: "ready", version: "0.2.5", current: "0.2.3", installing: true });
+    expect(screen.getByRole("button", { name: "Restarting…" })).toBeDisabled();
+    expect(updates.install).toHaveBeenCalledOnce();
+  });
+
+  it("can be clicked again when the newer download fails and a later one is ready", async () => {
+    const { push } = desktop({ status: "ready", version: "0.2.4", current: "0.2.3" });
+    render(<UpdatePopup />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update now" }));
+    push({ status: "error", version: "0.2.5", current: "0.2.3", error: "offline" });
+    push({ status: "ready", version: "0.2.5", current: "0.2.3" });
+    expect(screen.getByRole("button", { name: "Update now" })).toBeEnabled();
   });
 });

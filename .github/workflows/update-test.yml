@@ -1,0 +1,213 @@
+name: Test updates
+
+# Updates a real installation, the way a friend's copy does: installs an older published release,
+# opens it, and lets it find the newest release on GitHub, download it and install it by itself.
+# Passes when the installed app is the newest version afterwards and the updated app starts.
+#
+# The app installs a downloaded update as it quits, so the test quits it: on a Mac with SIGTERM
+# (Electron quits the way Cmd+Q does), on Windows by closing its windows (WM_CLOSE, as their X buttons do).
+#
+# Runs after every published release (from the two releases before it), and from the Actions tab
+# with any older version to start from.
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "Published version to update from (blank: the two releases before the latest)"
+        type: string
+        default: ""
+  workflow_run:
+    workflows: ["Build desktop app"]
+    types: [completed]
+  pull_request:
+    paths: [".github/workflows/update-test.yml"]
+
+permissions:
+  contents: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  versions:
+    # After a build: only one that published a release (a pushed tag) and succeeded.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    outputs:
+      to: ${{ steps.pick.outputs.to }}
+      from: ${{ steps.pick.outputs.from }}
+    steps:
+      - id: pick
+        env:
+          FROM: ${{ inputs.from }}
+        run: |
+          tags=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 3 --json tagName -q '.[].tagName' | sed 's/^v//')
+          to=$(echo "$tags" | sed -n 1p)
+          if [ -n "$FROM" ]; then
+            from=$(jq -cn --arg v "${FROM#v}" '[$v]')
+          else
+            from=$(echo "$tags" | sed -n '2,3p' | jq -Rcs 'split("\n") | map(select(length > 0))')
+          fi
+          echo "to=$to" >> "$GITHUB_OUTPUT"
+          echo "from=$from" >> "$GITHUB_OUTPUT"
+          echo "Updating from $from to $to"
+
+  mac:
+    needs: versions
+    strategy:
+      fail-fast: false
+      matrix:
+        from: ${{ fromJSON(needs.versions.outputs.from) }}
+    name: Mac ${{ matrix.from }} → ${{ needs.versions.outputs.to }}
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      FROM: ${{ matrix.from }}
+      TO: ${{ needs.versions.outputs.to }}
+    steps:
+      - name: Install Courtside ${{ matrix.from }} into Applications
+        run: |
+          gh release download "v$FROM" --repo "$GITHUB_REPOSITORY" --pattern "Courtside-$FROM-mac-arm64.zip" --dir "$RUNNER_TEMP"
+          ditto -x -k "$RUNNER_TEMP/Courtside-$FROM-mac-arm64.zip" /Applications
+          installed=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" /Applications/Courtside.app/Contents/Info.plist)
+          test "$installed" = "$FROM"
+      - name: Open it and wait for it to download ${{ needs.versions.outputs.to }}
+        run: |
+          open /Applications/Courtside.app
+          staged="$HOME/Library/Caches/courtside-mac-update/staged.json"
+          for _ in $(seq 120); do
+            grep -qs "\"version\":\"$TO\"" "$staged" && break
+            sleep 5
+          done
+          grep "\"version\":\"$TO\"" "$staged"
+      - name: Quit it, and check it installed ${{ needs.versions.outputs.to }}
+        run: |
+          pkill -TERM -x Courtside
+          plist=/Applications/Courtside.app/Contents/Info.plist
+          for _ in $(seq 60); do
+            [ "$(cat "$HOME/Library/Caches/courtside-mac-update/result" 2>/dev/null)" = installed ] && break
+            sleep 2
+          done
+          echo "Swap: $(cat "$HOME/Library/Caches/courtside-mac-update/result")"
+          installed=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$plist")
+          echo "Installed: $installed"
+          test "$installed" = "$TO"
+      - name: Check the updated app starts
+        run: |
+          open /Applications/Courtside.app
+          for _ in $(seq 60); do
+            pgrep -f "Courtside.app/Contents/Resources/engine/courtside-engine" > /dev/null && break
+            sleep 2
+          done
+          pgrep -fl "Courtside.app/Contents/Resources/engine/courtside-engine"
+          pkill -TERM -x Courtside
+          echo "Mac: $FROM updated itself to $TO and started" >> "$GITHUB_STEP_SUMMARY"
+      - name: Show the app's logs
+        if: always()
+        run: |
+          for f in "$HOME/Library/Application Support/Courtside/logs/"*.log "$HOME/Library/Caches/courtside-mac-update/"result*; do
+            [ -f "$f" ] && { echo "== $f"; tail -n 60 "$f"; }
+          done
+          true
+
+  windows:
+    needs: versions
+    strategy:
+      fail-fast: false
+      matrix:
+        from: ${{ fromJSON(needs.versions.outputs.from) }}
+    name: Windows ${{ matrix.from }} → ${{ needs.versions.outputs.to }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      FROM: ${{ matrix.from }}
+      TO: ${{ needs.versions.outputs.to }}
+    steps:
+      - name: Install Courtside ${{ matrix.from }}
+        run: |
+          gh release download "v$env:FROM" --repo $env:GITHUB_REPOSITORY --pattern "Courtside-Setup-$env:FROM.exe" --dir $env:RUNNER_TEMP
+          # The installer now and then crashes on a fresh runner (exit -1073741819, an access violation): retry once.
+          foreach ($try in 1..2) {
+            $p = Start-Process "$env:RUNNER_TEMP\Courtside-Setup-$env:FROM.exe" -ArgumentList "/S" -Wait -PassThru
+            if ($p.ExitCode -eq 0) { break }
+            "::warning::The installer exited with code $($p.ExitCode) (try $try)"
+          }
+          if ($p.ExitCode -ne 0) { throw "The installer failed with exit code $($p.ExitCode)" }
+          $installed = (Get-Item "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe").VersionInfo.FileVersion
+          if ($installed -ne $env:FROM) { throw "Installed $installed, not $env:FROM" }
+      - name: Open it and wait for it to download ${{ needs.versions.outputs.to }}
+        run: |
+          $app = Start-Process "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe" -PassThru
+          $app.Id | Set-Content "$env:RUNNER_TEMP\courtside.pid"
+          $log = "$env:APPDATA\Courtside\logs\updates.log"
+          foreach ($i in 1..120) {
+            if ((Test-Path $log) -and (Select-String -Path $log -SimpleMatch "New version $env:TO has been downloaded" -Quiet)) { break }
+            Start-Sleep 5
+          }
+          if (-not (Select-String -Path $log -SimpleMatch "New version $env:TO has been downloaded" -Quiet)) {
+            throw "Courtside didn't download $env:TO"
+          }
+      - name: Close it, and check it installed ${{ needs.versions.outputs.to }}
+        run: |
+          $app = Get-Process -Id (Get-Content "$env:RUNNER_TEMP\courtside.pid")
+          Add-Type -TypeDefinition @'
+          using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+          public static class Windows {
+            delegate bool EnumProc(IntPtr hwnd, IntPtr arg);
+            [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr arg);
+            [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder text, int max);
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
+            public static List<IntPtr> Of(uint pid) {
+              var found = new List<IntPtr>();
+              EnumWindows((hwnd, arg) => { uint owner; GetWindowThreadProcessId(hwnd, out owner); if (owner == pid) found.Add(hwnd); return true; }, IntPtr.Zero);
+              return found;
+            }
+            public static string Title(IntPtr hwnd) { var s = new StringBuilder(256); GetWindowText(hwnd, s, 256); return s.ToString(); }
+            public static string Class(IntPtr hwnd) { var s = new StringBuilder(256); GetClassName(hwnd, s, 256); return s.ToString(); }
+          }
+          '@
+          # Close each of Courtside's own windows (Chromium's are Chrome_WidgetWin_1), as with their X buttons.
+          # The app quits when its last window closes, and installs the update as it quits.
+          foreach ($hwnd in [Windows]::Of($app.Id)) {
+            $class = [Windows]::Class($hwnd)
+            "Window $hwnd ${class}: '$([Windows]::Title($hwnd))', visible: $([Windows]::IsWindowVisible($hwnd))"
+            if ($class -eq "Chrome_WidgetWin_1") { [void][Windows]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) } # WM_CLOSE
+          }
+          if ($app.WaitForExit(60000)) {
+            "Courtside quit with exit code $($app.ExitCode)"
+          } else {
+            "Courtside is still running a minute after its windows were closed"
+          }
+          $exe = "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe"
+          foreach ($i in 1..90) {
+            $busy = Get-Process Courtside, Courtside-Setup-*, courtside-engine -ErrorAction SilentlyContinue
+            if (-not $busy -and (Get-Item $exe).VersionInfo.FileVersion -eq $env:TO) { break }
+            if ($i % 10 -eq 1) { "Running: $(($busy | ForEach-Object { "$($_.ProcessName) $($_.Id)" }) -join ', ')" }
+            Start-Sleep 2
+          }
+          $installed = (Get-Item $exe).VersionInfo.FileVersion
+          $listed = (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Courtside*").DisplayVersion
+          "Installed: $installed (Apps list: $listed)"
+          if ($installed -ne $env:TO -or $listed -ne $env:TO) { throw "Courtside is still $installed" }
+      - name: Check the updated app starts
+        run: |
+          Start-Process "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe"
+          foreach ($i in 1..60) {
+            if (Get-Process courtside-engine -ErrorAction SilentlyContinue) { break }
+            Start-Sleep 2
+          }
+          Get-Process courtside-engine | Select-Object Name, Id, Path
+          Get-Process Courtside, courtside-engine -ErrorAction SilentlyContinue | Stop-Process -Force
+          "Windows: $env:FROM updated itself to $env:TO and started" >> $env:GITHUB_STEP_SUMMARY
+      - name: Show the app's logs
+        if: always()
+        run: |
+          Get-ChildItem "$env:APPDATA\Courtside\logs\*.log" -ErrorAction SilentlyContinue | ForEach-Object {
+            "== $($_.FullName)"; Get-Content $_ -Tail 60
+          }

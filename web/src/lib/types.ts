@@ -180,13 +180,24 @@ export interface TeamStrength {
 
 export interface WeeklyPoints {
   scoring: string;
-  weeks: { matchup_period: number; start: string | null; end: string | null; days: number; playoffs: boolean; current: boolean }[];
+  // Weeks already played (final: true, with results) come first, then the current week and the rest.
+  weeks: { matchup_period: number; start: string | null; end: string | null; days: number; playoffs: boolean; current: boolean; final: boolean }[];
   teams: {
     team_id: number;
     name: string;
     abbrev: string;
     owner: string | null;
-    weeks: { matchup_period: number; proj: number; sd: number; scored: number | null; opponent_id: number | null; win_prob: number | null }[];
+    weeks: {
+      matchup_period: number;
+      proj: number | null; // null in a played week
+      sd: number | null;
+      scored: number | null;
+      opponent_id: number | null;
+      win_prob: number | null;
+      final?: number | null; // played weeks: the final score, the opponent's, and W, L or T
+      opp_final?: number | null;
+      result?: "W" | "L" | "T" | null;
+    }[];
   }[];
   as_of: { date: string | null };
 }

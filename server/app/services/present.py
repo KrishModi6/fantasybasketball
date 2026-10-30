@@ -130,21 +130,39 @@ def strength_rows(a: LeagueAnalysis) -> list[dict]:
 
 
 def weekly_points(a: LeagueAnalysis) -> dict:
-    """Every team's projected total in each remaining week, with its scheduled opponent and win odds.
+    """Every team's season week by week: the final score and result of the weeks already played, then
+    the projected total, scheduled opponent and win odds of each week left.
 
     The current week adds the points already scored to the days left, so it reads as a final score.
+    Played weeks appear once the league has their results (a demo league has none).
     """
     ctx = a.ctx
     s = a.snapshot
     mm = MatchupModel(ctx, a.windows)
     reg = s.settings.regular_season_matchups
+    remaining = ctx.remaining_mps()
+    played = sorted({m.matchup_period for m in s.matchups
+                     if m.matchup_period not in remaining and m.winner != "UNDECIDED"})
+    results: dict[tuple[int, int], dict] = {}
+    for m in s.matchups:
+        if m.matchup_period not in played:
+            continue
+        sides = [(m.home_team_id, m.home_score, m.away_team_id, m.away_score, "HOME")]
+        if m.away_team_id is not None:
+            sides.append((m.away_team_id, m.away_score, m.home_team_id, m.home_score, "AWAY"))
+        for tid, pts, opp, opp_pts, side in sides:
+            result = None if m.winner == "UNDECIDED" else "T" if m.winner == "TIE" else "W" if m.winner == side else "L"
+            results[(tid, m.matchup_period)] = {"opponent_id": opp, "final": _r(pts, 1),
+                                                "opp_final": _r(opp_pts, 1) if opp is not None else None, "result": result}
+
     weeks = []
-    for mp in ctx.remaining_mps():
+    for mp in played + remaining:
         days = s.settings.matchup_periods.get(mp, [])
         d0 = s.schedule.period_dates.get(days[0]) if days else None
         d1 = s.schedule.period_dates.get(days[-1]) if days else None
         weeks.append({"matchup_period": mp, "start": d0.isoformat() if d0 else None, "end": d1.isoformat() if d1 else None,
-                      "days": len(days), "playoffs": mp > reg, "current": mp == s.current_matchup_period})
+                      "days": len(days), "playoffs": mp > reg, "current": mp == s.current_matchup_period,
+                      "final": mp in played})
     opponents: dict[tuple[int, int], int] = {}
     for m in s.matchups:
         if m.away_team_id is not None:
@@ -155,6 +173,12 @@ def weekly_points(a: LeagueAnalysis) -> dict:
         cells = []
         for w in weeks:
             mp = w["matchup_period"]
+            if w["final"]:
+                r = results.get((t.id, mp), {})
+                cells.append({"matchup_period": mp, "proj": None, "sd": None, "scored": None, "win_prob": None,
+                              "opponent_id": r.get("opponent_id"), "final": r.get("final"),
+                              "opp_final": r.get("opp_final"), "result": r.get("result")})
+                continue
             mean, var = mm.dist(t.id, mp)
             opp = opponents.get((t.id, mp))
             cells.append({"matchup_period": mp, "proj": _r(mean, 1), "sd": _r(var ** 0.5, 1),

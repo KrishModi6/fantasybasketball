@@ -53,9 +53,9 @@ def test_full_flow(client):
     wk = client.get(f"/api/leagues/{lid}/weekly", headers=owner).json()
     assert wk["scoring"] == "points" and wk["weeks"] and len(wk["teams"]) == 10
     assert {w["matchup_period"] for w in wk["weeks"]} == {c["matchup_period"] for c in wk["teams"][0]["weeks"]}
-    future = [i for i, w in enumerate(wk["weeks"]) if not w["current"] and not w["playoffs"]]
+    future = [i for i, w in enumerate(wk["weeks"]) if not w["current"] and not w["playoffs"] and not w["final"]]
     assert all(t["weeks"][i]["proj"] > 0 for t in wk["teams"] for i in future)
-    scheduled = [c for t in wk["teams"] for c in t["weeks"] if c["opponent_id"] is not None]
+    scheduled = [c for t in wk["teams"] for c in t["weeks"] if c["opponent_id"] is not None and c["proj"] is not None]
     assert scheduled and all(0 <= c["win_prob"] <= 1 for c in scheduled)
 
     tid = teams[0]["team_id"]
