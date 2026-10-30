@@ -108,7 +108,12 @@ jobs:
         run: |
           $dir = "$env:RUNNER_TEMP\Courtside"
           $setup = Get-Item desktop\release\Courtside-Setup-*.exe
-          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/S", "/D=$dir" -Wait -PassThru
+          # The installer now and then crashes on a fresh runner (exit -1073741819, an access violation): retry once.
+          foreach ($try in 1..2) {
+            $p = Start-Process -FilePath $setup.FullName -ArgumentList "/S", "/D=$dir" -Wait -PassThru
+            if ($p.ExitCode -eq 0) { break }
+            "::warning::The installer exited with code $($p.ExitCode) (try $try)"
+          }
           if ($p.ExitCode -ne 0) { throw "The installer failed with exit code $($p.ExitCode)" }
           $p = Start-Process -FilePath "$dir\resources\engine\courtside-engine.exe" -ArgumentList "--self-test" -Wait -PassThru -NoNewWindow
           if ($p.ExitCode -ne 0) { throw "The installed engine failed its self-test with exit code $($p.ExitCode)" }

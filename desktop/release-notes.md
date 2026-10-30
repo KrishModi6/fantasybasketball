@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.3.4
+## What's new in 0.3.5
+
+- **Results of the weeks already played.** **Projected points by week** on **Power rankings** used to start at the current week. Now it starts with the weeks already played, marked **final**: each team's final score with a **W** or **L** next to it (in **Win odds**, the opponent and the result). The **Avg** column averages the real scores for those weeks.
+- **Updates install the newest version in one go.** If a new version came out while an update was already downloaded and waiting, Courtside installed the older one and you had to update again (0.3.2 to 0.3.3, then 0.3.3 to 0.3.4). Now it keeps checking while an update waits, and **Update now** looks for a newer one first and installs that instead, with one restart. Starting with the next update after this one.
+- **Update now runs once.** Clicking it again, or the version label, while Courtside is restarting no longer starts a second install. The popup says when Courtside will restart on its own once a newer download finishes.
+
+## In 0.3.4
 
 - **Every number explained.** Labels with a dotted underline now show what they mean when you point at them: **FP/G**, **± game**, **ROS**, **Over repl.**, **80% range**, **Swing**, **Power score**, a trade's **verdict** and **Fit**, and the rest. For example, **80% range** is where a team's score lands in 80% of the simulated matchups: one time in 10 it's lower than the first number, one time in 10 higher than the second.
 - **Glossary.** A new **Glossary** tab (top right, next to Methodology) lists every term in plain English, grouped by page.

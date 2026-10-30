@@ -13,6 +13,7 @@ export interface UpdateState {
   error?: string;
   canInstall?: boolean;
   checkedAt?: string; // when the last check finished
+  installing?: boolean; // Update now was clicked: Courtside restarts once the newest release is downloaded
 }
 
 declare global {
