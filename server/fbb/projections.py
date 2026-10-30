@@ -46,7 +46,7 @@ from .ml.features import build_features
 from .ml.model import ProjectionModel
 from .models import GameLog, LeagueSnapshot, Player, ScoringSettings, SeasonLine
 from .schedule import period_for_date
-from .xfp import XfpModel
+from .xfp import XfpModel, xfp_per_game
 
 DEFAULT_ENSEMBLE = {"sps": 0.4, "espn": 0.4, "ml": 0.2}
 DEFAULT_PRIOR_MINUTES = {
@@ -124,6 +124,10 @@ class PlayerProjection:
     in_season_weight: float = 0.0
     carryover_games: int = 0  # last season's closing games in the update
     carryover_weight: float = 0.0
+    # Season to date per NBA.com: fantasy points per game as they happened and as his opportunities were
+    # worth (xFP). The gap is luck, which the projection already discounts.
+    tracked_fp_pg: float | None = None
+    xfp_pg: float | None = None
     flags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -386,6 +390,7 @@ class ProjectionEngine:
             sd = math.sqrt(prior_var)
 
         self._feats[p.id] = pre["feats"] if pre["has_ml"] else None
+        tracked_fp, xfp_fp = xfp_per_game(xt, self.fp_scoring) if xt and xt.gp else (None, None)
 
         return PlayerProjection(
             player_id=p.id, name=p.name, pro_team=p.pro_team, positions=p.positions,
@@ -394,7 +399,7 @@ class ProjectionEngine:
             recent_fp_pg=recent_fp, games_played=int(cur.gp) if cur else 0,
             sources=pre["sources"], in_season_weight=in_season_weight,
             carryover_games=len(carry) if CARRYOVER_RATE_WEIGHT or CARRYOVER_MINUTES_WEIGHT else 0,
-            carryover_weight=carryover_weight,
+            carryover_weight=carryover_weight, tracked_fp_pg=tracked_fp, xfp_pg=xfp_fp,
         )
 
     def explain(self, pr: PlayerProjection) -> list[dict]:

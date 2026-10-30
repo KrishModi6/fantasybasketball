@@ -55,6 +55,11 @@ _SHOTS = dict(
 )
 # Hustle stats (deflections, contested shots) start with 2016-17.
 FIRST_HUSTLE_SEASON = 2017
+# Dashboard columns kept, by endpoint.
+BOX = ("GP", "MIN", "FGM", "FGA", "FG3M", "FG3A", "FTM", "FTA", "AST", "REB", "OREB", "DREB", "STL", "BLK", "TOV")
+PASSING = ("POTENTIAL_AST", "SECONDARY_AST", "FT_AST", "PASSES_MADE")
+REBOUNDING = ("REB_CHANCES", "OREB_CHANCES", "DREB_CHANCES", "REB_CONTEST")
+HUSTLE = ("DEFLECTIONS", "CONTESTED_SHOTS", "CONTESTED_SHOTS_2PT", "CONTESTED_SHOTS_3PT", "BOX_OUTS")
 
 
 def _mdy(d: date | None) -> str:
@@ -68,16 +73,25 @@ def _rows(payload: dict) -> list[dict[str, Any]]:
     return [dict(zip(headers, row)) for row in first.get("rowSet") or []]
 
 
+def compact_shot(r: dict) -> list:
+    """[yyyymmdd, player, game, period, seconds left in period, action, is 3, zone, feet, x, y, made]"""
+    return [int(r["GAME_DATE"]), r["PLAYER_ID"], r["GAME_ID"], r["PERIOD"],
+            r["MINUTES_REMAINING"] * 60 + r["SECONDS_REMAINING"], r["ACTION_TYPE"],
+            int(r["SHOT_TYPE"].startswith("3")), r["SHOT_ZONE_BASIC"], r["SHOT_DISTANCE"], r["LOC_X"], r["LOC_Y"],
+            r["SHOT_MADE_FLAG"]]
+
+
 class NbaStatsClient:
-    def __init__(self, timeout: float = 60.0):
+    def __init__(self, timeout: float = 60.0, attempts: int = 4):
         self._http = httpx.Client(timeout=timeout, headers=HEADERS, follow_redirects=True)
+        self.attempts = attempts
 
     def close(self) -> None:
         self._http.close()
 
     def get(self, endpoint: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         last_exc: Exception | None = None
-        for attempt in range(4):
+        for attempt in range(self.attempts):
             _limiter.wait()
             try:
                 r = self._http.get(f"{BASE}/{endpoint}", params=params)
@@ -112,6 +126,20 @@ class NbaStatsClient:
             return []
         return self.get("leaguehustlestatsplayer", {**_DASH, "Season": season_label(season), "DateTo": _mdy(date_to)})
 
+    def dashboards(self, season: int, date_to: date | None = None) -> dict[int, dict]:
+        """Box score, passing, rebounding and hustle totals through a date, merged per NBA.com player id."""
+        out: dict[int, dict] = {}
+        for r in self.box(season, date_to):
+            out[r["PLAYER_ID"]] = {"name": r["PLAYER_NAME"], "team": r["TEAM_ABBREVIATION"],
+                                   **{k: r.get(k) or 0 for k in BOX}}
+        for rows, keys in ((self.tracking(season, "Passing", date_to), PASSING),
+                           (self.tracking(season, "Rebounding", date_to), REBOUNDING),
+                           (self.hustle(season, date_to), HUSTLE)):
+            for r in rows:
+                if r["PLAYER_ID"] in out:
+                    out[r["PLAYER_ID"]].update({k: r.get(k) or 0 for k in keys})
+        return out
+
     def shots(self, season: int, start: date, end: date) -> list[dict]:
         """Every field-goal attempt between two dates (inclusive), with location, type and result."""
         rows = self.get("shotchartdetail", {**_SHOTS, "Season": season_label(season),
@@ -120,9 +148,11 @@ class NbaStatsClient:
             raise ConnectorError(f"shotchartdetail hit its row cap for {start}..{end}; use a shorter window")
         return rows
 
-    def season_shots(self, season: int, through: date | None = None, window_days: int = 21) -> list[dict]:
-        """All of a regular season's shots, fetched in windows small enough to stay under the row cap."""
-        start = date(season - 1, 10, 1)
+    def season_shots(self, season: int, through: date | None = None, start: date | None = None,
+                     window_days: int = 21) -> list[dict]:
+        """A regular season's shots (from ``start``, through ``through``), fetched in windows small enough to
+        stay under the row cap."""
+        start = start or date(season - 1, 10, 1)
         end = min(through or date(season, 5, 31), date(season, 5, 31))  # 2020-21 ran to mid-May
         out: list[dict] = []
         while start <= end:

@@ -24,27 +24,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from fbb.connectors.nba_stats import NbaStatsClient, match_ids  # noqa: E402
+from fbb.connectors.nba_stats import NbaStatsClient, compact_shot, match_ids  # noqa: E402
 from fbb.history import CACHE_DIR, HISTORY_DIR, load_history  # noqa: E402
 
 NBA_DIR = CACHE_DIR / "nba"
 CUTOFF_DAYS = (7, 14, 28, 42, 63, 91)  # days after opening night
 ESPN_TO_NBA_TEAM = {"GS": "GSW", "NO": "NOP", "NY": "NYK", "SA": "SAS", "UTAH": "UTA", "WSH": "WAS", "PHO": "PHX"}
-
-# Dashboard columns kept, by endpoint.
-BOX = ("GP", "MIN", "FGM", "FGA", "FG3M", "FG3A", "FTM", "FTA", "AST", "REB", "OREB", "DREB", "STL", "BLK", "TOV")
-PASSING = ("POTENTIAL_AST", "SECONDARY_AST", "FT_AST", "PASSES_MADE")
-REBOUNDING = ("REB_CHANCES", "OREB_CHANCES", "DREB_CHANCES", "REB_CONTEST")
-HUSTLE = ("DEFLECTIONS", "CONTESTED_SHOTS", "CONTESTED_SHOTS_2PT", "CONTESTED_SHOTS_3PT", "BOX_OUTS")
-
-
-def compact_shot(r: dict) -> list:
-    """[yyyymmdd, player, game, period, seconds left in period, action, is 3, zone, feet, x, y, made]"""
-    return [int(r["GAME_DATE"]), r["PLAYER_ID"], r["GAME_ID"], r["PERIOD"],
-            r["MINUTES_REMAINING"] * 60 + r["SECONDS_REMAINING"], r["ACTION_TYPE"],
-            int(r["SHOT_TYPE"].startswith("3")), r["SHOT_ZONE_BASIC"], r["SHOT_DISTANCE"], r["LOC_X"], r["LOC_Y"],
-            r["SHOT_MADE_FLAG"]]
-
 
 def shots_path(season: int) -> Path:
     return NBA_DIR / f"shots_{season}.json.gz"
@@ -66,20 +51,6 @@ def dash_path(season: int, tag: str) -> Path:
 
 def load_dash(season: int, tag: str) -> dict[int, dict]:
     return {int(k): v for k, v in json.loads(dash_path(season, tag).read_text()).items()}
-
-
-def fetch_dash(client: NbaStatsClient, season: int, date_to: date | None) -> dict[int, dict]:
-    out: dict[int, dict] = {}
-    for r in client.box(season, date_to):
-        out[r["PLAYER_ID"]] = {"name": r["PLAYER_NAME"], "team": r["TEAM_ABBREVIATION"],
-                               **{k: r.get(k) or 0 for k in BOX}}
-    for rows, keys in ((client.tracking(season, "Passing", date_to), PASSING),
-                       (client.tracking(season, "Rebounding", date_to), REBOUNDING),
-                       (client.hustle(season, date_to), HUSTLE)):
-        for r in rows:
-            if r["PLAYER_ID"] in out:
-                out[r["PLAYER_ID"]].update({k: r.get(k) or 0 for k in keys})
-    return out
 
 
 def save_dash(season: int, tag: str, dash: dict[int, dict]) -> None:
@@ -120,6 +91,7 @@ def main() -> None:
                     help="seasons to also fetch as of each in-season cutoff (for the backtest)")
     ap.add_argument("--refresh", action="store_true", help="re-download files that already exist")
     args = ap.parse_args()
+    sys.stdout.reconfigure(errors="replace")  # player names with accents on a cp1252 console
     NBA_DIR.mkdir(parents=True, exist_ok=True)
     client = NbaStatsClient()
     seasons = list(range(args.first, args.last + 1))
@@ -132,14 +104,14 @@ def main() -> None:
                 json.dump([compact_shot(r) for r in rows], f)
             print(f"{season}: {len(rows)} shots", flush=True)
         if args.refresh or in_progress or not dash_path(season, "full").exists():
-            dash = fetch_dash(client, season, None)
+            dash = client.dashboards(season)
             save_dash(season, "full", dash)
             print(f"{season}: dashboards for {len(dash)} players", flush=True)
         if season in args.cutoffs:
             opening = opening_day(season)
             for days in CUTOFF_DAYS:
                 if args.refresh or not dash_path(season, f"d{days}").exists():
-                    save_dash(season, f"d{days}", fetch_dash(client, season, opening + timedelta(days=days - 1)))
+                    save_dash(season, f"d{days}", client.dashboards(season, opening + timedelta(days=days - 1)))
             print(f"{season}: in-season dashboards through days {', '.join(map(str, CUTOFF_DAYS))} "
                   f"after {opening:%b %d}", flush=True)
     client.close()

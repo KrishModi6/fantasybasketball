@@ -25,18 +25,22 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import joblib
 import lightgbm as lgb
 import numpy as np
 
-from .history import DATA_DIR
-from .models import ScoringSettings, TrackingLine
+from .history import CACHE_DIR, DATA_DIR, HISTORY_DIR
+from .models import Player, ScoringSettings, TrackingLine
 
 log = logging.getLogger(__name__)
 MODEL_PATH = DATA_DIR / "model" / "xfp_model.joblib"
+NBA_IDS_PATH = HISTORY_DIR / "nba_ids.json"  # NBA.com id -> ESPN id (scripts/fetch_tracking.py)
+EASTERN = ZoneInfo("America/New_York")
 
 # stat -> (opportunity, conversion) columns of the NBA.com dashboards; shooting is handled by the shot model.
 COMPONENTS = {
@@ -100,6 +104,22 @@ class ShotModel:
     @classmethod
     def from_dict(cls, d: dict) -> "ShotModel":
         return cls(lgb.Booster(model_str=d["booster"]), d["actions"], d["zones"])
+
+
+def calibrate(shots: list[list], probs: np.ndarray, through: int | None = None) -> np.ndarray:
+    """Scale the shot model to the league's make rate this season (twos and threes apart), through a
+    yyyymmdd date. League shooting drifts up most years; that drift is not any one player's luck."""
+    if not shots:
+        return probs
+    arr = np.array([(s[0], s[6], s[11]) for s in shots])
+    upto = arr[:, 0] <= through if through is not None else np.ones(len(arr), bool)
+    out = probs.copy()
+    for three in (0, 1):
+        kind = arr[:, 1] == three
+        expected = probs[kind & upto].sum()
+        if expected > 0:
+            out[kind] *= arr[kind & upto, 2].sum() / expected
+    return np.clip(out, 0.0, 1.0)
 
 
 def shot_totals(shots: list[list], probs: np.ndarray, through: int | None = None) -> dict[int, dict[str, float]]:
@@ -186,17 +206,26 @@ def xfp_per_game(line: TrackingLine, scoring: ScoringSettings) -> tuple[float, f
 # ---- trained bundle ----------------------------------------------------------
 
 class XfpModel:
-    """The shot model, league rates and per-stat blend weights saved by scripts/backtest_xfp.py."""
+    """The shot model, league rates, per-stat blend weights and established rates for the coming season,
+    saved by scripts/backtest_xfp.py."""
 
     def __init__(self, bundle: dict):
         self.bundle = bundle
         self.shot_model = ShotModel.from_dict(bundle["shot_model"])
         self.beta: dict[str, float] = bundle["beta"]
         self.league: dict[str, float] = bundle["league"]
+        self.skills_season: int | None = bundle.get("skills_season")
+        self.skills: dict[str, dict[str, float]] = bundle.get("skills") or {}
 
     def rate_beta(self) -> dict[str, float]:
         """BETA expanded to the engine's rate stats."""
         return {k: b for g, b in self.beta.items() for k in BETA_GROUPS[g]}
+
+    def skill(self, nba_id: int, season: int) -> dict[str, float]:
+        """Established rates going into ``season``; league rates for a player with no history."""
+        if season == self.skills_season and str(nba_id) in self.skills:
+            return self.skills[str(nba_id)]
+        return skills([], self.league)
 
     @classmethod
     @lru_cache(maxsize=1)
@@ -211,9 +240,80 @@ class XfpModel:
             return None
 
 
-def save_bundle(shot_model: ShotModel, beta: dict[str, float], league: dict[str, float], metrics: dict) -> None:
+def save_bundle(shot_model: ShotModel, beta: dict[str, float], league: dict[str, float], metrics: dict,
+                skill_table: dict[str, dict[str, float]], skills_season: int) -> None:
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump({"shot_model": shot_model.to_dict(), "beta": beta, "league": league,
-                 "pseudo_counts": PSEUDO_COUNTS, "metrics": metrics}, MODEL_PATH)
+    joblib.dump({"shot_model": shot_model.to_dict(), "beta": beta, "league": league, "pseudo_counts": PSEUDO_COUNTS,
+                 "skills": skill_table, "skills_season": skills_season, "metrics": metrics}, MODEL_PATH)
     (MODEL_PATH.parent / "xfp_metrics.json").write_text(json.dumps(
         {**metrics, "beta": beta, "league": league, "pseudo_counts": PSEUDO_COUNTS}, indent=2))
+
+
+# ---- live season (sync time) --------------------------------------------------
+
+LIVE_TTL = timedelta(hours=6)
+
+
+def _live_path(season: int) -> Path:
+    return CACHE_DIR / "nba" / f"live_{season}.json"
+
+
+def _load_live(season: int) -> dict:
+    try:
+        return json.loads(_live_path(season).read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def refresh_live(season: int, client=None) -> dict:
+    """This season's shots and dashboards through yesterday (US Eastern), cached for LIVE_TTL. Only shots
+    from days not yet cached are downloaded, so a sync costs a handful of requests."""
+    from .connectors.nba_stats import NbaStatsClient, compact_shot
+
+    live = _load_live(season)
+    now = datetime.now(timezone.utc)
+    through = datetime.now(EASTERN).date() - timedelta(days=1)
+    if live.get("through") == through.isoformat() and now - datetime.fromisoformat(live["fetched"]) < LIVE_TTL:
+        return live
+    own = client is None
+    client = client or NbaStatsClient(timeout=12, attempts=1)  # a blocked (cloud) host fails fast
+    try:
+        dash = client.dashboards(season, through)
+        shots = live.get("shots", []) if live.get("season") == season else []
+        start = date.fromisoformat(live["through"]) + timedelta(days=1) if shots else None
+        shots = [s for s in shots if s[0] <= int(through.strftime("%Y%m%d"))]
+        shots += [compact_shot(r) for r in client.season_shots(season, through=through, start=start)]
+    finally:
+        if own:
+            client.close()
+    live = {"season": season, "through": through.isoformat(), "fetched": now.isoformat(), "dash": dash, "shots": shots}
+    path = _live_path(season)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(live))
+    return live
+
+
+def attach_tracking(players: dict[str, Player], season: int) -> int:
+    """Give every player NBA.com can see a season-to-date TrackingLine. Returns how many got one.
+
+    Raises when NBA.com is unreachable; callers treat xFP as optional."""
+    from .connectors.nba_stats import match_ids
+
+    model = XfpModel.load()
+    if model is None:
+        return 0
+    live = refresh_live(season)
+    dash = {int(k): v for k, v in live["dash"].items()}
+    shots = live["shots"]
+    totals = shot_totals(shots, calibrate(shots, model.shot_model.predict(shots)))
+    ids = {int(k): v for k, v in json.loads(NBA_IDS_PATH.read_text()).items()} if NBA_IDS_PATH.exists() else {}
+    unknown = {n: (r["name"], r["team"]) for n, r in dash.items() if ids.get(n) not in players}
+    ids.update(match_ids(unknown, {pid: (p.name, p.pro_team) for pid, p in players.items()}))
+    n = 0
+    for nid, row in dash.items():
+        p = players.get(ids.get(nid, ""))
+        if p is None or not row.get("MIN"):
+            continue
+        p.tracking = tracking_line(season, row, totals.get(nid), model.skill(nid, season))
+        n += 1
+    return n
