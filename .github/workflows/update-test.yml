@@ -5,7 +5,7 @@ name: Test updates
 # Passes when the installed app is the newest version afterwards and the updated app starts.
 #
 # The app installs a downloaded update as it quits, so the test quits it: on a Mac with SIGTERM
-# (Electron quits the way Cmd+Q does), on Windows by closing its window.
+# (Electron quits the way Cmd+Q does), on Windows by asking its windows to close (taskkill without /F).
 #
 # Runs after every published release (from the two releases before it), and from the Actions tab
 # with any older version to start from.
@@ -148,8 +148,9 @@ jobs:
       - name: Close it, and check it installed ${{ needs.versions.outputs.to }}
         run: |
           $app = Get-Process -Id (Get-Content "$env:RUNNER_TEMP\courtside.pid")
-          "Window: '$($app.MainWindowTitle)' (handle $($app.MainWindowHandle))"
-          if (-not $app.CloseMainWindow()) { throw "Courtside has no window to close" }
+          Get-Process Courtside | ForEach-Object { "Process $($_.Id): window '$($_.MainWindowTitle)' ($($_.MainWindowHandle))" }
+          # Close all of its windows, as with their X buttons: taskkill without /F only asks them to close.
+          taskkill /PID $app.Id
           if ($app.WaitForExit(60000)) {
             "Courtside quit with exit code $($app.ExitCode)"
           } else {
