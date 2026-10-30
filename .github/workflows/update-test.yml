@@ -5,7 +5,7 @@ name: Test updates
 # Passes when the installed app is the newest version afterwards and the updated app starts.
 #
 # The app installs a downloaded update as it quits, so the test quits it: on a Mac with SIGTERM
-# (Electron quits the way Cmd+Q does), on Windows by asking its windows to close (taskkill without /F).
+# (Electron quits the way Cmd+Q does), on Windows by closing its windows (WM_CLOSE, as their X buttons do).
 #
 # Runs after every published release (from the two releases before it), and from the Actions tab
 # with any older version to start from.
@@ -129,7 +129,12 @@ jobs:
       - name: Install Courtside ${{ matrix.from }}
         run: |
           gh release download "v$env:FROM" --repo $env:GITHUB_REPOSITORY --pattern "Courtside-Setup-$env:FROM.exe" --dir $env:RUNNER_TEMP
-          $p = Start-Process "$env:RUNNER_TEMP\Courtside-Setup-$env:FROM.exe" -ArgumentList "/S" -Wait -PassThru
+          # The installer now and then crashes on a fresh runner (exit -1073741819, an access violation): retry once.
+          foreach ($try in 1..2) {
+            $p = Start-Process "$env:RUNNER_TEMP\Courtside-Setup-$env:FROM.exe" -ArgumentList "/S" -Wait -PassThru
+            if ($p.ExitCode -eq 0) { break }
+            "::warning::The installer exited with code $($p.ExitCode) (try $try)"
+          }
           if ($p.ExitCode -ne 0) { throw "The installer failed with exit code $($p.ExitCode)" }
           $installed = (Get-Item "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe").VersionInfo.FileVersion
           if ($installed -ne $env:FROM) { throw "Installed $installed, not $env:FROM" }
@@ -148,13 +153,36 @@ jobs:
       - name: Close it, and check it installed ${{ needs.versions.outputs.to }}
         run: |
           $app = Get-Process -Id (Get-Content "$env:RUNNER_TEMP\courtside.pid")
-          Get-Process Courtside | ForEach-Object { "Process $($_.Id): window '$($_.MainWindowTitle)' ($($_.MainWindowHandle))" }
-          # Close all of its windows, as with their X buttons: taskkill without /F only asks them to close.
-          taskkill /PID $app.Id
+          Add-Type -TypeDefinition @'
+          using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+          public static class Windows {
+            delegate bool EnumProc(IntPtr hwnd, IntPtr arg);
+            [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr arg);
+            [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder text, int max);
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
+            public static List<IntPtr> Of(uint pid) {
+              var found = new List<IntPtr>();
+              EnumWindows((hwnd, arg) => { uint owner; GetWindowThreadProcessId(hwnd, out owner); if (owner == pid) found.Add(hwnd); return true; }, IntPtr.Zero);
+              return found;
+            }
+            public static string Title(IntPtr hwnd) { var s = new StringBuilder(256); GetWindowText(hwnd, s, 256); return s.ToString(); }
+            public static string Class(IntPtr hwnd) { var s = new StringBuilder(256); GetClassName(hwnd, s, 256); return s.ToString(); }
+          }
+          '@
+          # Close each of Courtside's own windows (Chromium's are Chrome_WidgetWin_1), as with their X buttons.
+          # The app quits when its last window closes, and installs the update as it quits.
+          foreach ($hwnd in [Windows]::Of($app.Id)) {
+            $class = [Windows]::Class($hwnd)
+            "Window $hwnd ${class}: '$([Windows]::Title($hwnd))', visible: $([Windows]::IsWindowVisible($hwnd))"
+            if ($class -eq "Chrome_WidgetWin_1") { [void][Windows]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) } # WM_CLOSE
+          }
           if ($app.WaitForExit(60000)) {
             "Courtside quit with exit code $($app.ExitCode)"
           } else {
-            "Courtside is still running a minute after its window was closed"
+            "Courtside is still running a minute after its windows were closed"
           }
           $exe = "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe"
           foreach ($i in 1..90) {
