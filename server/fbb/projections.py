@@ -46,6 +46,7 @@ from .ml.features import build_features
 from .ml.model import ProjectionModel
 from .models import GameLog, LeagueSnapshot, Player, ScoringSettings, SeasonLine
 from .schedule import period_for_date
+from .xfp import XfpModel
 
 DEFAULT_ENSEMBLE = {"sps": 0.4, "espn": 0.4, "ml": 0.2}
 DEFAULT_PRIOR_MINUTES = {
@@ -183,6 +184,8 @@ class ProjectionEngine:
         self.ensemble = (self.model.ensemble if self.model else {}) or {}
         self.prior_minutes = (self.model.prior_minutes if self.model else {}) or DEFAULT_PRIOR_MINUTES
         self.fp_cv = (self.model.bundle.get("fp_game_cv") if self.model else None) or POPULATION_CV
+        xfp = XfpModel.load()
+        self.xfp_beta: dict[str, float] = xfp.rate_beta() if xfp else {}
         self._feats: dict[str, dict | None] = {}
         self._importance: dict[str, float] | None = None
 
@@ -329,9 +332,17 @@ class ProjectionEngine:
             wm = _decay(len(games) + extra_gp / 2, MINUTES_HALF_LIFE_GAMES)
             w_minutes_sum += wm * extra_min
             mins_prior_w += wm * extra_gp
+        # xFP: this season's shooting, passing, rebounding, steals and blocks move part of the way from what
+        # happened toward what his opportunities were worth (fbb/xfp.py), by weights learned in
+        # scripts/backtest_xfp.py. Attempts, minutes and everything else stay as they happened.
+        season_min = obs_min
+        xt = p.tracking if p.tracking and p.tracking.season == self.season and p.tracking.minutes > 0 else None
+        if xt and season_min > 0:
+            act, exp = line_rates_from_game(xt.actual), line_rates_from_game(xt.expected)
+            for k, beta in self.xfp_beta.items():
+                obs_tot[k] = max(0.0, obs_tot[k] + beta * (exp[k] - act[k]) / xt.minutes * season_min)
         # Last season's closing games continue the decay behind everything from this season, until he has
         # played SEASON_ONLY_AFTER_GAMES games this season.
-        season_min = obs_min
         seen = max(len(games), int(cur.gp) if cur else 0)
         season_only = seen >= SEASON_ONLY_AFTER_GAMES and season_min > 0
         if season_only:
