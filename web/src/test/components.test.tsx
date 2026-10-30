@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { Delta, Injury, Meter, Term } from "../components/ui";
+import { AdvancedStats } from "../components/PlayerDrawer";
 import { GLOSSARY, GLOSSARY_SECTIONS } from "../lib/glossary";
 
 describe("ui primitives", () => {
@@ -41,5 +42,23 @@ describe("ui primitives", () => {
     const listed = GLOSSARY_SECTIONS.flatMap((s) => s.keys);
     expect(new Set(listed).size).toBe(listed.length);
     expect([...listed].sort()).toEqual(Object.keys(GLOSSARY).sort());
+  });
+});
+
+describe("advanced stats", () => {
+  const xfp = {
+    games: 12,
+    per_game: Object.fromEntries(["PTS", "FGM", "3PM", "FTM", "AST", "REB", "STL", "BLK"].map((k) => [k, { actual: 5, expected: 4 }])),
+  };
+  it("shows actual, expected and luck per stat with a read on the gap", () => {
+    render(<AdvancedStats p={{ xfp, xfp_pg: 30, luck_pg: 3.2 }} />);
+    expect(screen.getByText(/12 games this season/)).toBeInTheDocument();
+    expect(screen.getAllByText("+1.0")).toHaveLength(8);
+    expect(screen.getByText(/sell-high candidate/)).toBeInTheDocument();
+    expect(screen.getByText(/against 33\.2 scored/)).toBeInTheDocument();
+  });
+  it("is hidden without tracking data", () => {
+    const { container } = render(<AdvancedStats p={{ xfp: null, xfp_pg: null, luck_pg: null }} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

@@ -6,6 +6,7 @@ export interface GlossaryEntry {
 
 export const GLOSSARY_SECTIONS: { title: string; keys: TermKey[] }[] = [
   { title: "Players", keys: ["fp_pg", "value_pg", "fp_sd", "season", "last10", "mpg", "ros", "ros_games", "over_repl", "next7", "availability", "rostered", "today"] },
+  { title: "Advanced stats", keys: ["xfp", "luck", "xfp_expected"] },
   { title: "How a projection is built", keys: ["source_weight", "games_pct", "preseason_blend"] },
   { title: "Your team", keys: ["pts_wk_team", "pts_wk_player", "vs_avg", "starts_wk", "confidence", "move_wk", "this_week", "move_ros", "ros_cost", "week_sd"] },
   { title: "Rankings and the season", keys: ["power", "proj_record", "playoffs", "title", "share", "starts_ros", "player_games_wk", "empty_slots", "bench_games", "pts_lost", "stat_diff"] },
@@ -27,6 +28,10 @@ export const GLOSSARY = {
   availability: { term: "Availability", def: "The share of his team's games he's expected to play, based on how often he has played in the past." },
   rostered: { term: "Rostered", def: "The share of ESPN leagues where he's on a team. A rough measure of how popular he is." },
   today: { term: "Today", def: "Fantasy points he has scored so far today. During games it refreshes every few minutes." },
+
+  xfp: { term: "xFP/G", def: "Expected fantasy points per game this season: what his chances were worth, from NBA.com player tracking. Every shot is priced by where and how it was taken, and his passes, rebound chances, deflections and contests by how often he has converted them over the last two seasons." },
+  luck: { term: "Luck", def: "Fantasy points per game this season minus xFP/G. Well above zero means he's scoring more than his chances were worth (a sell-high candidate); well below means less (a buy-low). The projection already expects part of the gap to close." },
+  xfp_expected: { term: "Expected", def: "A stat as his chances were worth: made shots from the shots he took, assists from his potential assists, rebounds from his rebound chances, steals from deflections and blocks from contested shots." },
 
   source_weight: { term: "Weight", def: "How much each source counts in his preseason projection. The weights come from testing which mix predicted past seasons best." },
   games_pct: { term: "Games %", def: "The share of his team's games that source expects him to play." },

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import gzip
+import json
+
 import pytest
 
 pytest.importorskip("boto3")  # requirements-dev.txt
@@ -18,6 +21,7 @@ class FakeS3:
     def __init__(self):
         self.objects: dict[str, dict] = {}  # key -> metadata
         self.uploads: list[tuple[str, str]] = []  # (key, content type)
+        self.puts: list[dict] = []
 
     def head_object(self, Bucket, Key):
         if Key not in self.objects:
@@ -27,6 +31,9 @@ class FakeS3:
     def upload_file(self, Filename, Bucket, Key, ExtraArgs):
         self.uploads.append((Key, ExtraArgs["ContentType"]))
         self.objects[Key] = ExtraArgs["Metadata"]
+
+    def put_object(self, **kw):
+        self.puts.append(kw)
 
 
 class DeniedS3(FakeS3):
@@ -83,3 +90,16 @@ def test_dry_run_uploads_nothing(data):
 def test_errors_other_than_missing_object_propagate(data):
     with pytest.raises(ClientError):
         P.push(DeniedS3(), "bucket", P.tracking_files(*data))
+
+
+def test_live_file_is_published_gzipped_to_public_without_our_etag():
+    s3 = FakeS3()
+    live = {"season": 2027, "through": "2026-10-29", "fetched": "2026-10-30T12:00:00+00:00", "dash": {"77": {}},
+            "shots": [[20261029, 77]], "etag": '"v1"'}
+    assert P.publish_live(s3, "bucket", live) == "public/live_2027.json.gz"
+    put = s3.puts[0]
+    assert put["Key"] == "public/live_2027.json.gz" and put["ContentType"] == "application/gzip"
+    assert put["CacheControl"] == "public, max-age=600"
+    assert json.loads(gzip.decompress(put["Body"])) == {k: v for k, v in live.items() if k != "etag"}
+    P.publish_live(s3, "bucket", live, dry_run=True)
+    assert len(s3.puts) == 1

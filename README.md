@@ -151,7 +151,9 @@ cd server
 aws login --profile courtside                                 # when the 12-hour session has lapsed
 .venv/Scripts/python -m scripts.push_tracking_s3              # sends only changed files; --dry-run to preview
 ```
-It costs about $0.01 a month. [docs/AWS.md](docs/AWS.md) covers what's in the bucket and how it's locked down, why the AI assistant stays on OpenAI rather than Amazon Bedrock, and which AWS services would be overkill here.
+The same bucket feeds xFP (Courtside 0.5.0): a daily task on the home PC runs `push_tracking_s3 --live`, which publishes this season's tracking file to the bucket's `public/` folder, and every app downloads it through CloudFront (`https://d3n5zp4ghqw542.cloudfront.net`) before asking NBA.com itself. Set `FBB_TRACKING_URL=""` to skip it.
+
+It all costs about $0.01 a month, under a $5 budget alert. [docs/AWS.md](docs/AWS.md) covers what's in the bucket and how it's locked down, the daily feed and its scheduled task, why the AI assistant stays on OpenAI rather than Amazon Bedrock, and which AWS services would be overkill here.
 
 ## Documentation
 

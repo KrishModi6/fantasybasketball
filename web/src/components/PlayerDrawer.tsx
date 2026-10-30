@@ -185,6 +185,8 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
           )}
         </Panel>
 
+        <AdvancedStats p={p} />
+
         {last.length > 0 && (
           <Panel title={`Last ${last.length} games`} flush>
             <div style={{ padding: "0 10px 8px" }}>
@@ -257,6 +259,42 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
         <OverrideForm p={p} />
       </div>
     </>
+  );
+}
+
+const XFP_STATS = ["PTS", "FGM", "3PM", "FTM", "AST", "REB", "STL", "BLK"];
+
+/** This season per NBA.com tracking: each stat as it happened and as his chances were worth (xFP). */
+export function AdvancedStats({ p }: { p: Pick<PlayerDetail, "xfp" | "xfp_pg" | "luck_pg"> }) {
+  const x = p.xfp;
+  if (!x) return null;
+  const luck = p.luck_pg ?? 0;
+  const read = luck >= 2 ? "He's scoring more than his chances were worth: a sell-high candidate."
+    : luck <= -2 ? "He's scoring less than his chances were worth: a buy-low candidate."
+      : "He's scoring about what his chances were worth.";
+  return (
+    <Panel title="Advanced stats" flush
+      note={`NBA.com player tracking, ${x.games} game${x.games === 1 ? "" : "s"} this season, per game. Refreshed daily.`}>
+      <div className="table-wrap">
+        <table className="data">
+          <thead><tr><th />{XFP_STATS.map((k) => <th key={k} className="n">{k}</th>)}</tr></thead>
+          <tbody>
+            <tr><td>Actual</td>{XFP_STATS.map((k) => <td key={k} className="n">{fmt1(x.per_game[k]?.actual)}</td>)}</tr>
+            <tr><td><Term t="xfp_expected" /></td>{XFP_STATS.map((k) => <td key={k} className="n">{fmt1(x.per_game[k]?.expected)}</td>)}</tr>
+            <tr>
+              <td><Term t="luck" /></td>
+              {XFP_STATS.map((k) => <td key={k} className="n"><Delta value={(x.per_game[k]?.actual ?? 0) - (x.per_game[k]?.expected ?? 0)} /></td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {p.xfp_pg != null && (
+        <p className="panel-foot">
+          <Term t="xfp">xFP/G</Term> {fmt1(p.xfp_pg)} against {fmt1(p.xfp_pg + luck)} scored, <Term t="luck">luck</Term>{" "}
+          <Delta value={luck} />. {read} The projection already expects part of the gap to close.
+        </p>
+      )}
+    </Panel>
   );
 }
 

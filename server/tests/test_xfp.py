@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import gzip
+import json
 import random
+from datetime import date, timedelta
 
+import httpx
 import numpy as np
 import pytest
 
@@ -139,3 +143,126 @@ def test_attach_tracking_links_players_offline(monkeypatch):
     monkeypatch.setattr(X, "NBA_IDS_PATH", X.CACHE_DIR / "no-such-file.json")
     assert X.attach_tracking(snap.players, 2027) == 1
     assert p.tracking is not None and p.tracking.gp == ROW["GP"] and p.tracking.expected["AST"] == pytest.approx(33)
+
+
+# ---- live file: the published copy first, then NBA.com ----------------------
+
+class FakeNba:
+    """Stands in for NbaStatsClient: one dashboard row and no new shots; records where shots resumed."""
+
+    def __init__(self, fail: bool = False):
+        self.fail, self.calls, self.starts = fail, 0, []
+
+    def dashboards(self, season, through):
+        self.calls += 1
+        if self.fail:
+            raise httpx.ConnectTimeout("stats.nba.com did not answer")
+        return {"77": ROW}
+
+    def season_shots(self, season, through=None, start=None):
+        self.starts.append(start)
+        return []
+
+    def close(self):
+        pass
+
+
+def _day_before(day: str) -> str:
+    return (date.fromisoformat(day) - timedelta(days=1)).isoformat()
+
+
+def _live(through: str, **extra) -> dict:
+    shot = [int(through.replace("-", "")), 77, "g", 1, 300, "Layup Shot", 0, "Restricted Area", 1, 0, 10, 1]
+    return {"season": 2027, "through": through, "fetched": "2026-10-01T00:00:00+00:00", "dash": {"77": ROW},
+            "shots": [shot], **extra}
+
+
+@pytest.fixture
+def live_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(X, "CACHE_DIR", tmp_path)
+    return tmp_path
+
+
+def test_published_copy_through_yesterday_means_no_nba_requests(live_dir, monkeypatch):
+    y = X.live_through()
+    monkeypatch.setattr(X, "fetch_cloud_live", lambda season, etag="": _live(y, etag='"v1"'))
+    nba = FakeNba()
+    live = X.refresh_live(2027, client=nba)
+    assert live["through"] == y and nba.calls == 0
+    assert X._load_live(2027)["etag"] == '"v1"'  # kept, so the next check can be a 304
+
+
+def test_unchanged_published_copy_keeps_ours(live_dir, monkeypatch):
+    y = X.live_through()
+    X._save_live(2027, _live(y, etag='"v1"'))  # fetched long ago, so past LIVE_TTL
+    sent = []
+    monkeypatch.setattr(X, "fetch_cloud_live", lambda season, etag="": sent.append(etag) or {})
+    nba = FakeNba()
+    live = X.refresh_live(2027, client=nba)
+    assert sent == ['"v1"'] and nba.calls == 0 and live["fetched"] > "2026-10-01"
+
+
+def test_stale_published_copy_is_finished_from_nba(live_dir, monkeypatch):
+    y = X.live_through()
+    monkeypatch.setattr(X, "fetch_cloud_live", lambda season, etag="": _live(_day_before(y), etag='"v0"'))
+    nba = FakeNba()
+    live = X.refresh_live(2027, client=nba)
+    assert nba.starts == [date.fromisoformat(y)]  # only the day the published copy lacks
+    assert live["through"] == y and len(live["shots"]) == 1 and "etag" not in live
+
+
+def test_without_either_source_an_older_copy_is_used(live_dir, monkeypatch):
+    monkeypatch.setattr(X, "fetch_cloud_live", lambda season, etag="": None)
+    with pytest.raises(httpx.ConnectTimeout):
+        X.refresh_live(2027, client=FakeNba(fail=True))
+    older = _day_before(X.live_through())
+    X._save_live(2027, _live(older))
+    assert X.refresh_live(2027, client=FakeNba(fail=True))["through"] == older
+
+
+def test_publisher_skips_the_published_copy(live_dir, monkeypatch):
+    monkeypatch.setattr(X, "fetch_cloud_live", lambda *a, **k: pytest.fail("read the published copy"))
+    assert X.refresh_live(2027, client=FakeNba(), cloud=False)["through"] == X.live_through()
+
+
+def _serve(monkeypatch, status: int, content: bytes = b"") -> list:
+    sent = []
+
+    def get(url, timeout=None, headers=None):
+        sent.append((url, headers))
+        return httpx.Response(status, content=content, headers={"ETag": '"v2"'}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(X, "TRACKING_URL", "https://tracking.test")
+    monkeypatch.setattr(X.httpx, "get", get)
+    return sent
+
+
+def test_fetch_cloud_live_reads_the_gzipped_file(monkeypatch):
+    sent = _serve(monkeypatch, 200, gzip.compress(json.dumps(_live("2026-10-28")).encode()))
+    live = X.fetch_cloud_live(2027)
+    assert live["through"] == "2026-10-28" and live["etag"] == '"v2"'
+    assert sent == [("https://tracking.test/live_2027.json.gz", None)]
+    _serve(monkeypatch, 304)
+    assert X.fetch_cloud_live(2027, etag='"v2"') == {}
+
+
+@pytest.mark.parametrize("status,content", [
+    (403, b""),  # CloudFront's answer for a file that isn't there
+    (200, b"not gzip"),
+    (200, gzip.compress(b"[]")),
+    (200, gzip.compress(json.dumps({**_live("2026-10-28"), "season": 2026}).encode())),
+])
+def test_fetch_cloud_live_ignores_missing_or_bad_files(monkeypatch, status, content):
+    _serve(monkeypatch, status, content)
+    assert X.fetch_cloud_live(2027) is None
+
+
+def test_fetch_cloud_live_can_be_turned_off(monkeypatch):
+    _serve(monkeypatch, 200, gzip.compress(json.dumps(_live("2026-10-28")).encode()))
+    monkeypatch.setattr(X, "TRACKING_URL", "")
+    assert X.fetch_cloud_live(2027) is None
+
+
+def test_current_season_turns_over_in_august():
+    assert X.current_season(date(2026, 10, 30)) == 2027
+    assert X.current_season(date(2027, 4, 10)) == 2027 and X.current_season(date(2027, 8, 1)) == 2028

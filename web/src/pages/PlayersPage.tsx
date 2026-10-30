@@ -17,6 +17,8 @@ const COLUMNS: { key: string; label: string; term: TermKey; hideSm?: boolean }[]
   { key: "mpg", label: "MPG", term: "mpg", hideSm: true },
   { key: "season_fp_pg", label: "Season", term: "season", hideSm: true },
   { key: "recent_fp_pg", label: "Last 10", term: "last10", hideSm: true },
+  { key: "xfp_pg", label: "xFP/G", term: "xfp", hideSm: true },
+  { key: "luck_pg", label: "Luck", term: "luck", hideSm: true },
   { key: "ownership_pct", label: "Rostered", term: "rostered", hideSm: true },
 ];
 
@@ -97,6 +99,8 @@ export default function PlayersPage() {
                     <td className="n hide-sm">{fmt1(p.mpg)}</td>
                     <td className="n hide-sm">{fmt1(p.season_fp_pg)}</td>
                     <td className="n hide-sm">{fmt1(p.recent_fp_pg)}</td>
+                    <td className="n hide-sm">{fmt1(p.xfp_pg)}</td>
+                    <td className="n hide-sm">{p.luck_pg != null ? <Delta value={p.luck_pg} /> : <span className="muted">–</span>}</td>
                     <td className="n hide-sm muted">{p.ownership_pct != null ? `${fmt1(p.ownership_pct)}%` : "–"}</td>
                     {!isPoints && cats.map((c) => <td key={c} className="n hide-sm"><Delta value={p.gscores?.[c] ?? 0} digits={2} /></td>)}
                   </tr>

@@ -22,14 +22,17 @@ actual toward expected (BETA per stat, learned in scripts/backtest_xfp.py) befor
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
+import os
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import httpx
 import joblib
 import lightgbm as lgb
 import numpy as np
@@ -252,6 +255,26 @@ def save_bundle(shot_model: ShotModel, beta: dict[str, float], league: dict[str,
 # ---- live season (sync time) --------------------------------------------------
 
 LIVE_TTL = timedelta(hours=6)
+# A daily copy of the live file, published from a home connection by `scripts.push_tracking_s3 --live`
+# and served by CloudFront from the Courtside S3 bucket (docs/AWS.md). Apps read it before asking NBA.com,
+# which also gives xFP to hosts NBA.com won't answer. FBB_TRACKING_URL="" turns it off.
+TRACKING_URL = os.environ.get("FBB_TRACKING_URL", "https://d3n5zp4ghqw542.cloudfront.net").rstrip("/")
+
+
+def current_season(day: date | None = None) -> int:
+    """The app's id for the season on ``day`` (2027 = 2026-27); a new one starts in August."""
+    day = day or datetime.now(EASTERN).date()
+    return day.year + (day.month >= 8)
+
+
+def live_through() -> str:
+    """The last day a live file can cover: yesterday, US Eastern."""
+    return (datetime.now(EASTERN).date() - timedelta(days=1)).isoformat()
+
+
+def live_key(season: int) -> str:
+    """The published copy's name, under TRACKING_URL and the bucket's public/ folder."""
+    return f"live_{season}.json.gz"
 
 
 def _live_path(season: int) -> Path:
@@ -265,32 +288,74 @@ def _load_live(season: int) -> dict:
         return {}
 
 
-def refresh_live(season: int, client=None) -> dict:
-    """This season's shots and dashboards through yesterday (US Eastern), cached for LIVE_TTL. Only shots
-    from days not yet cached are downloaded, so a sync costs a handful of requests."""
-    from .connectors.nba_stats import NbaStatsClient, compact_shot
-
-    live = _load_live(season)
-    now = datetime.now(timezone.utc)
-    through = datetime.now(EASTERN).date() - timedelta(days=1)
-    if live.get("through") == through.isoformat() and now - datetime.fromisoformat(live["fetched"]) < LIVE_TTL:
-        return live
-    own = client is None
-    client = client or NbaStatsClient(timeout=12, attempts=1)  # a blocked (cloud) host fails fast
-    try:
-        dash = client.dashboards(season, through)
-        shots = live.get("shots", []) if live.get("season") == season else []
-        start = date.fromisoformat(live["through"]) + timedelta(days=1) if shots else None
-        shots = [s for s in shots if s[0] <= int(through.strftime("%Y%m%d"))]
-        shots += [compact_shot(r) for r in client.season_shots(season, through=through, start=start)]
-    finally:
-        if own:
-            client.close()
-    live = {"season": season, "through": through.isoformat(), "fetched": now.isoformat(), "dash": dash, "shots": shots}
+def _save_live(season: int, live: dict) -> dict:
     path = _live_path(season)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(live))
     return live
+
+
+def fetch_cloud_live(season: int, etag: str = "") -> dict | None:
+    """The published copy, or None when there isn't a readable one. Sends ``etag`` so an unchanged
+    file costs an empty 304, returned as {} (nothing new)."""
+    if not TRACKING_URL:
+        return None
+    try:
+        r = httpx.get(f"{TRACKING_URL}/{live_key(season)}", timeout=10,
+                      headers={"If-None-Match": etag} if etag else None)
+        if r.status_code == 304:
+            return {}
+        r.raise_for_status()  # CloudFront answers 403 for a file that isn't there
+        live = json.loads(gzip.decompress(r.content))
+    except (httpx.HTTPError, OSError, EOFError, ValueError) as exc:
+        log.info("no published tracking for %s: %s", season, exc)
+        return None
+    if not (isinstance(live, dict) and live.get("season") == season and isinstance(live.get("dash"), dict)
+            and isinstance(live.get("shots"), list)):
+        return None
+    return {**live, "etag": r.headers.get("ETag", "")}
+
+
+def refresh_live(season: int, client=None, cloud: bool = True) -> dict:
+    """This season's shots and dashboards through yesterday (US Eastern), cached for LIVE_TTL.
+
+    The published copy comes first; when it reaches yesterday NBA.com isn't asked at all. Otherwise only
+    shots from days neither copy has are downloaded, so a sync costs a handful of requests, and when
+    NBA.com can't be reached the newest copy on hand is used even if it's a day or two old."""
+    from .connectors.nba_stats import NbaStatsClient, compact_shot
+
+    live = _load_live(season)
+    now = datetime.now(timezone.utc)
+    through = live_through()
+    if live.get("through") == through and now - datetime.fromisoformat(live["fetched"]) < LIVE_TTL:
+        return live
+    if cloud:
+        remote = fetch_cloud_live(season, live.get("etag", ""))
+        if remote == {}:  # unchanged, so ours is the published copy
+            remote = live
+        if remote and remote["through"] >= live.get("through", ""):
+            live = _save_live(season, {**remote, "fetched": now.isoformat()})
+            if live["through"] == through:
+                return live
+    own = client is None
+    try:
+        client = client or NbaStatsClient(timeout=12, attempts=1)  # a blocked (cloud) host fails fast
+        dash = client.dashboards(season, date.fromisoformat(through))
+        shots = live.get("shots", []) if live.get("season") == season else []
+        start = date.fromisoformat(live["through"]) + timedelta(days=1) if shots else None
+        shots = [s for s in shots if s[0] <= int(through.replace("-", ""))]
+        shots += [compact_shot(r) for r in client.season_shots(season, through=date.fromisoformat(through),
+                                                               start=start)]
+    except Exception as exc:  # noqa: BLE001 - NBA.com is optional; an older copy beats none
+        if live.get("season") != season or not live.get("dash"):
+            raise
+        log.info("NBA.com unavailable (%s); using tracking through %s", exc, live["through"])
+        return live
+    finally:
+        if own and client is not None:
+            client.close()
+    return _save_live(season, {"season": season, "through": through, "fetched": now.isoformat(), "dash": dash,
+                               "shots": shots})
 
 
 def attach_tracking(players: dict[str, Player], season: int) -> int:

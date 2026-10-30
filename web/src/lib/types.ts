@@ -81,6 +81,8 @@ export interface PlayerRow {
   preseason_fp_pg: number;
   season_fp_pg: number | null;
   recent_fp_pg: number | null;
+  xfp_pg: number | null; // expected FP/G this season from NBA.com tracking (xFP); null without tracking
+  luck_pg: number | null; // FP/G this season minus xfp_pg
   today_fp: number | null; // today's game so far, once he has played in it
   today_min: number | null;
   games_played: number;
@@ -129,6 +131,8 @@ export interface PlayerDetail extends PlayerRow {
   carryover_games: number;
   carryover_weight: number;
   fp_breakdown: Record<string, number>;
+  // This season per NBA.com tracking, per game: each stat as it happened and as his chances were worth.
+  xfp: { games: number; per_game: Record<string, { actual: number; expected: number }> } | null;
   game_log: { season: number; period: number; date: string | null; team: string; min: number; fp: number; [k: string]: number | string | null }[];
   seasons: { season: number; label: string; team: string; gp: number; mpg: number | null; fp_pg: number | null; [k: string]: number | string | null }[];
   this_season: PlayerDetail["seasons"][number] | null; // this season's per-game line (with MIN), once he has played

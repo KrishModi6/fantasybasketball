@@ -1,26 +1,31 @@
 """Copy the NBA.com tracking cache and the xFP model to the Courtside S3 bucket (docs/AWS.md).
 
-Run it on the home machine right after scripts.fetch_tracking. stats.nba.com blocks cloud hosts, so
-the data has to be fetched at home; the bucket is the off-machine, versioned copy.
+Run it on the home machine. stats.nba.com blocks cloud hosts, so the data has to be fetched at home.
 
-Uploads (keys mirror server/data/):
+Backup (the default), right after scripts.fetch_tracking; keys mirror server/data/:
   cache/nba/shots_<season>.json.gz, cache/nba/dash_<season>_<tag>.json
   model/xfp_model.joblib, model/xfp_metrics.json
-Skips live_<season>.json, a six-hour cache the app rebuilds on every sync.
+Skips live_<season>.json, a six-hour cache the app rebuilds on every sync. Each object carries its
+SHA-256 in metadata; files whose hash matches the copy in S3 are not sent again, so the bucket's
+versions only grow when the data really changed.
 
-Each object carries its SHA-256 in metadata; files whose hash matches the copy in S3 are not sent
-again, so the bucket's versions only grow when the data really changed.
+--live, once a day (the scheduled task in docs/AWS.md): brings this season's live file up to date from
+NBA.com and uploads it gzipped to public/live_<season>.json.gz. CloudFront serves that folder, and every
+Courtside app reads it before asking NBA.com itself (fbb.xfp.refresh_live).
 
 Credentials come from `aws login --profile courtside` (needs boto3[crt], in requirements-dev.txt).
 The bucket defaults to courtside-<account id>-<region>-an, the name created in docs/AWS.md.
 
-Usage: python -m scripts.push_tracking_s3 [--dry-run] [--bucket NAME] [--profile courtside]
+Usage: python -m scripts.push_tracking_s3 [--live [--season 2027]] [--dry-run] [--bucket NAME]
+       [--profile courtside]
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -32,10 +37,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from fbb.history import CACHE_DIR  # noqa: E402
-from fbb.xfp import MODEL_PATH  # noqa: E402
+from fbb.xfp import MODEL_PATH, current_season, live_key, live_through, refresh_live  # noqa: E402
 
 CONTENT_TYPES = {".gz": "application/gzip", ".json": "application/json"}
 EXPIRED = ("ExpiredToken", "ExpiredTokenException", "InvalidClientTokenId", "InvalidToken")
+PUBLIC_MAX_AGE = 600  # seconds CloudFront and apps may reuse the published file before checking again
 
 
 def tracking_files(cache_dir: Path = CACHE_DIR, model_path: Path = MODEL_PATH) -> list[tuple[Path, str]]:
@@ -85,6 +91,18 @@ def push(s3, bucket: str, files: list[tuple[Path, str]], dry_run: bool = False) 
     return sent, same
 
 
+def publish_live(s3, bucket: str, live: dict, dry_run: bool = False) -> str:
+    """Upload a live file to public/, where CloudFront serves it. Returns the key."""
+    key = f"public/{live_key(live['season'])}"
+    body = gzip.compress(json.dumps({k: v for k, v in live.items() if k != "etag"}).encode())
+    if not dry_run:
+        s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/gzip",
+                      CacheControl=f"public, max-age={PUBLIC_MAX_AGE}")
+    print(f"  {'would upload' if dry_run else 'uploaded'} {key} ({len(body) / 1e6:.2f} MB, through "
+          f"{live['through']}, {len(live['dash'])} players, {len(live['shots'])} shots)", flush=True)
+    return key
+
+
 def default_bucket(session: boto3.Session) -> str:
     account = session.client("sts").get_caller_identity()["Account"]
     return f"courtside-{account}-{session.region_name}-an"
@@ -97,15 +115,30 @@ def main() -> int:
     ap.add_argument("--bucket", default=os.environ.get("FBB_S3_BUCKET"),
                     help="defaults to courtside-<account id>-<region>-an")
     ap.add_argument("--dry-run", action="store_true", help="list what would be uploaded, upload nothing")
+    ap.add_argument("--live", action="store_true", help="publish this season's live file to public/")
+    ap.add_argument("--season", type=int, default=current_season(), help="with --live; default: this season")
     args = ap.parse_args()
 
     files = tracking_files()
-    if not files:
+    if not args.live and not files:
         print(f"Nothing to upload: no tracking files under {CACHE_DIR / 'nba'}. Run scripts.fetch_tracking first.")
         return 1
     try:
         session = boto3.Session(profile_name=args.profile, region_name=args.region)
-        bucket = args.bucket or default_bucket(session)
+        bucket = args.bucket or default_bucket(session)  # checks the sign-in before NBA.com is asked
+        if args.live:
+            try:
+                live = refresh_live(args.season, cloud=False)
+            except Exception as exc:  # noqa: BLE001 - any NBA.com failure means there's nothing new to publish
+                print(f"NBA.com unavailable ({exc}); nothing published", file=sys.stderr)
+                return 1
+            if live["through"] != live_through():
+                print(f"NBA.com unavailable: the newest data is through {live['through']}; nothing published",
+                      file=sys.stderr)
+                return 1
+            print(f"s3://{bucket}: publishing season {args.season}", flush=True)
+            publish_live(session.client("s3"), bucket, live, dry_run=args.dry_run)
+            return 0
         print(f"s3://{bucket}: checking {len(files)} files", flush=True)
         sent, same = push(session.client("s3"), bucket, files, dry_run=args.dry_run)
     except (BotoCoreError, ClientError) as exc:
