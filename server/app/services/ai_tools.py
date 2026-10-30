@@ -34,7 +34,11 @@ def _slim_player(row: dict) -> dict:
         "fp_per_game": _r(row["fp_pg"]), "game_to_game_sd": _r(row["fp_sd"]), "minutes": _r(row["mpg"]),
         "games_next_7_days": _r(row["games_next7"]), "rest_of_season_value": _r(row["ros_value"], 0),
         "value_over_replacement": _r(row["vorp"], 0), "season_fp_per_game": _r(row["season_fp_pg"]),
-        "last10_fp_per_game": _r(row["recent_fp_pg"]), "injury": row["injury_status"],
+        "last10_fp_per_game": _r(row["recent_fp_pg"]),
+        # NBA.com tracking: what his shots, passes, rebound chances and deflections were worth this season, and
+        # how far his actual FP/G ran above (lucky, sell-high) or below (unlucky, buy-low) that.
+        "expected_fp_per_game_so_far": _r(row.get("xfp_pg")), "luck_fp_per_game_so_far": _r(row.get("luck_pg")),
+        "injury": row["injury_status"],
         "games_out": _r(row["games_out"]), "rostered_on_espn_pct": _r(row["ownership_pct"], 0),
     }
 
@@ -272,6 +276,7 @@ class ToolBox:
             "last_season_closing_games_weight": _r(d["carryover_weight"], 2),
             "adjustments": [{"what": x["label"], "detail": x["detail"]} for x in d["adjustments"]],
             "ml_factors_fp_per_game": d["explanation"][:5],
+            "this_season_actual_vs_expected_per_game": d["xfp"],
             "projected_per_game": {k: _r(v) for k, v in d["per_game"].items()},
             "recent_games": [{k: g[k] for k in ("date", "team", "min", "fp", "PTS", "REB", "AST", "STL", "BLK", "TO")}
                              for g in d["game_log"][:5]],

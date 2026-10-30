@@ -13,6 +13,7 @@ Fantasy basketball analytics for a whole league: player projections, team power 
 | Area | What you get |
 |---|---|
 | **Player projections** | Per-minute rates for 14 stats, plus minutes and availability, blended from a statistical baseline (Basketball-Reference SPS), ESPN's projection and a LightGBM model. Blend weights are learned out of sample, then updated in-season with Bayesian shrinkage. Every player shows its sources, weights, adjustments and SHAP factors. |
+| **Expected fantasy points (xFP)** | The Next Gen Stats idea applied to fantasy. NBA.com tracking prices each player's chances this season: every shot (by a shot model), potential assists, rebound chances, deflections and contests. Projections lean on those chances rather than how many went in, which cut rest-of-season error about 3% in a three-season backtest. Each player shows xFP/G and luck (FP/G minus xFP/G), so the buy-lows and sell-highs stand out. See [METHODOLOGY 1.5.1](docs/METHODOLOGY.md#151-expected-fantasy-points-xfp). |
 | **Team strength model** | A day-by-day optimal-lineup simulation for every team over the rest of the season gives weekly score distributions. Teams are ranked by a power score that counts this season's record for the share of the season played and the projected all-play win rate for the rest, with projected records plus playoff and title odds from 5,000 simulated seasons of your actual schedule and bracket. A week-by-week grid shows every team's projected points (or win odds against that week's opponent) for the rest of the season. Each rank comes with a "why": stat-by-stat edges, top contributors, depth, schedule and injury drag. |
 | **Team improvement** | Weak spots ranked by points at stake. Add/drop moves are simulated against your lineup. Also: streaming pickups for the current week and daily lineups with a confidence score for every start. |
 | **Matchup simulator** | Plays any week's head-to-head out 10,000 times, box score by box score: who suits up, each player's night, bench fill-ins when a starter sits, and points already scored. You get win probability, score and margin distributions, a day-by-day breakdown, each player's range and "swing", and what-if toggles to sit players. Works for points and category leagues. |
@@ -135,8 +136,24 @@ cd server
 .venv/Scripts/python -m scripts.build_history     # refresh player seasons + ages from ESPN
 .venv/Scripts/python -m scripts.fetch_game_logs   # game logs for the overdispersion estimate
 .venv/Scripts/python -m scripts.train_model       # backtest, learn blend weights, save model + metrics
+.venv/Scripts/python -m scripts.fetch_tracking    # NBA.com shots + tracking (home connection; NBA.com blocks cloud hosts)
+.venv/Scripts/python -m scripts.backtest_xfp      # shot model, xFP weights and established rates -> xfp_model.joblib
+.venv/Scripts/python -m scripts.xfp_report        # this season's luck board: who is running hot or cold
 ```
 The server hot-reloads the model when the file changes. Set `FBB_RETRAIN_ENABLED=true` to retrain weekly.
+
+## AWS (optional)
+
+The NBA.com tracking cache and the xFP model also live in a private, versioned S3 bucket in the `courtside` AWS project (`us-east-2`). After `fetch_tracking`:
+```bash
+cd server
+.venv/Scripts/python -m pip install -r requirements-dev.txt   # once: boto3[crt]
+aws login --profile courtside                                 # when the 12-hour session has lapsed
+.venv/Scripts/python -m scripts.push_tracking_s3              # sends only changed files; --dry-run to preview
+```
+The same bucket feeds xFP (Courtside 0.5.0): a daily task on the home PC runs `push_tracking_s3 --live`, which publishes this season's tracking file to the bucket's `public/` folder, and every app downloads it through CloudFront (`https://d3n5zp4ghqw542.cloudfront.net`) before asking NBA.com itself. Set `FBB_TRACKING_URL=""` to skip it.
+
+It all costs about $0.01 a month, under a $5 budget alert. [docs/AWS.md](docs/AWS.md) covers what's in the bucket and how it's locked down, the daily feed and its scheduled task, why the AI assistant stays on OpenAI rather than Amazon Bedrock, and which AWS services would be overkill here.
 
 ## Documentation
 
@@ -144,5 +161,6 @@ The server hot-reloads the model when the file changes. Set `FBB_RETRAIN_ENABLED
 - [User guide](docs/USER_GUIDE.md)
 - [Admin guide](docs/ADMIN_GUIDE.md)
 - [API reference](docs/API.md) (interactive docs at `/docs` on a running server)
+- [AWS: S3 backup, Bedrock evaluation, costs](docs/AWS.md)
 - [Connectors](docs/CONNECTORS.md)
 - [AI assistant and the Cloudflare proxy](docs/AI.md)

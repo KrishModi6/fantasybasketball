@@ -14,6 +14,7 @@ os.environ.setdefault("FBB_SECRET_KEY", "test-secret-key-not-for-production-use-
 os.environ.setdefault("FBB_SCHEDULER_ENABLED", "false")
 os.environ.setdefault("FBB_CRON_TOKEN", "test-cron-token")
 os.environ.setdefault("FBB_CACHE_DIR", os.path.join(_tmp, "cache"))
+os.environ.setdefault("FBB_TRACKING_URL", "")  # no published xFP file; tests that want one fake it
 
 # FBB_TEST_POSTGRES=1 runs the API tests against a real (embedded) Postgres instead of SQLite.
 # Needs `pip install -r requirements-dev.txt`. Must happen before the app is imported.

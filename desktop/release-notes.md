@@ -1,6 +1,17 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.3.5
+## What's new in 0.5.0
+
+Advanced stats, powered by AWS.
+
+- **xFP: what a player's chances were worth.** Courtside now reads NBA.com's player tracking: every shot and where and how it was taken, every pass that led to a shot, every rebound chance, deflection and contested shot. From those it works out **xFP/G**, the fantasy points per game his chances were worth, and **Luck**, how far his real scoring is above or below that. A player scoring 45 FP/G on chances worth 38 has **+7.0** luck: he's been hitting more than usual, a sell-high candidate. One at −7.0 is a buy-low.
+- **xFP/G and Luck columns on Players.** Click **Luck** to sort: the players running hottest come first. Point at either label for what it means.
+- **Advanced stats on the player card.** Points, made shots, threes, free throws, assists, rebounds, steals and blocks per game, as they happened next to what his chances were worth, with the gap for each.
+- **Steadier projections early in the season.** A hot or cold start now counts for less: before this season's games are added in, each stat moves part of the way toward what the chances were worth. Tested on the last three seasons, rest-of-season projections came out 2.5–3.3% closer to what players went on to score.
+- **Powered by AWS.** The tracking data is published once a day to Amazon Web Services (S3, served by CloudFront), and every copy of Courtside downloads that one small file instead of asking NBA.com on each refresh. If the daily file is ever late, Courtside goes to NBA.com directly like before.
+- The **Glossary** has a new **Advanced stats** section.
+
+## In 0.3.5
 
 - **Results of the weeks already played.** **Projected points by week** on **Power rankings** used to start at the current week. Now it starts with the weeks already played, marked **final**: each team's final score with a **W** or **L** next to it (in **Win odds**, the opponent and the result). The **Avg** column averages the real scores for those weeks.
 - **Updates install the newest version in one go.** If a new version came out while an update was already downloaded and waiting, Courtside installed the older one and you had to update again (0.3.2 to 0.3.3, then 0.3.3 to 0.3.4). Now it keeps checking while an update waits, and **Update now** looks for a newer one first and installs that instead, with one restart. Starting with the next update after this one.
