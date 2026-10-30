@@ -29,7 +29,7 @@ Courtside reopens where you left off. The back arrow (or your mouse's back butto
 - injuries.
 
 **Team** (any team via the switcher; the league table on the left of wide screens also opens teams)
-- **Roster:** projected FP/G, recent form, games in the next 7 days, expected starts and points per week, value over replacement. On game days, **Today** shows each player's fantasy points so far. **Last 10** needs at least 3 games, counting the end of last season while this one is young, so it stays blank for players who sat out last season's final stretch until they've played 3 games this season.
+- **Roster:** projected FP/G, recent form, **xFP/G** and **Luck** (as on **Players**), games in the next 7 days, expected starts and points per week, value over replacement. On game days, **Today** shows each player's fantasy points so far. **Last 10** needs at least 3 games, counting the end of last season while this one is young, so it stays blank for players who sat out last season's final stretch until they've played 3 games this season.
 - **Daily lineup:** the optimal lineup for each of the next 7 days. *Confidence* is the chance a starter outscores the best bench player who could take that slot. "Locked in" means nobody could replace him.
 - **Improve my team:**
   - weak spots, ranked by points at stake;
