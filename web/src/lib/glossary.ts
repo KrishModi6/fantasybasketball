@@ -11,7 +11,7 @@ export const GLOSSARY_SECTIONS: { title: string; keys: TermKey[] }[] = [
   { title: "Your team", keys: ["pts_wk_team", "pts_wk_player", "vs_avg", "starts_wk", "confidence", "move_wk", "this_week", "move_ros", "ros_cost", "week_sd"] },
   { title: "Rankings and the season", keys: ["power", "proj_record", "playoffs", "title", "share", "starts_ros", "player_games_wk", "empty_slots", "bench_games", "pts_lost", "stat_diff"] },
   { title: "Matchups", keys: ["win_prob", "range80", "margin", "player_games", "tie", "sim_games", "sim_starts", "sim_pts", "swing"] },
-  { title: "Trades", keys: ["verdict", "fit", "change_wk", "trade_ros", "playoff_weeks", "raw_value", "odds_change", "you_wk", "you_ros", "partner_pct", "accept"] },
+  { title: "Trades", keys: ["verdict", "fit", "change_wk", "vs_roster", "trade_ros", "playoff_weeks", "raw_value", "odds_change", "you_wk", "you_ros", "partner_pct", "accept"] },
 ];
 
 export const GLOSSARY = {
@@ -49,7 +49,7 @@ export const GLOSSARY = {
   week_sd: { term: "± sd", def: "How far the weekly score typically lands from the projection. About two weeks in three are within this many points; the bar shows that range." },
 
   power: { term: "Power score", def: "A 0–100% rating of team strength. This season's record counts for the share of the season played; the rest is how often the team would beat every other team in a week (its all-play win rate) from its projections." },
-  proj_record: { term: "Proj.", def: "Projected final record: wins so far plus the wins expected from simulating the rest of the season." },
+  proj_record: { term: "Proj.", def: "Projected final record: the record so far plus the wins expected from simulating the rest of the regular season, in whole games. With an odd number of teams one team sits out each week (a bye), so teams with more byes play fewer games." },
   playoffs: { term: "Playoffs", def: "Chance to make the playoffs, from 5,000 simulated seasons." },
   title: { term: "Title", def: "Chance to win the championship, from 5,000 simulated seasons." },
   share: { term: "Share", def: "The share of the team's weekly fantasy points that comes from this player." },
@@ -72,7 +72,8 @@ export const GLOSSARY = {
 
   verdict: { term: "Verdict", def: "Advantageous if the trade raises that team's rest-of-season points by 1% or more, disadvantageous if it lowers them by 1% or more, neutral in between." },
   fit: { term: "Fit", def: "How fair the trade is: win-win if every team gains, balanced if nobody gains or loses more than 1%, lose-lose if every team loses, otherwise who it favors." },
-  change_wk: { term: "Change per week", def: "How many points per week the team's lineup gains or loses with the trade." },
+  change_wk: { term: "Change per week", def: "How many points per week the team's lineup gains or loses with the trade, compared with what it could do on waivers instead: a player who projects below a free agent counts as that free agent." },
+  vs_roster: { term: "Against today's roster", def: "The change per week compared with the roster as it is, without swapping anyone for a free agent first. The two sides of a trade still don't cancel out: each team scores only with its own daily lineup, so the same player is worth more to a team that would start him." },
   trade_ros: { term: "Rest of season", def: "The total change in the team's points for the rest of the season, and that as a % of everything it would have scored." },
   playoff_weeks: { term: "Fantasy playoff weeks", def: "The change in points during the fantasy playoff weeks only." },
   raw_value: { term: "Raw value change", def: "The change in the players' combined projected points, before checking who would actually start. The lineup-based numbers above are the ones that count." },

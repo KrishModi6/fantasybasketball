@@ -13,9 +13,9 @@ from fbb.connectors.fileimport import normalize_name, parse_upload
 from fbb.context import AnalysisContext
 from fbb.enrich import enrich_players
 from fbb.lineup import SlotModel, solve_day
-from fbb.models import GameLog, Player, ScoringSettings, SeasonLine
+from fbb.models import GameLog, Player, RosterEntry, ScoringSettings, SeasonLine
 from fbb.projections import MANUAL_LIMIT, SEASON_ONLY_AFTER_GAMES, ProjectionEngine, games_from_injury_note
-from fbb.strength import league_strength, round_robin
+from fbb.strength import MatchupModel, TeamStrength, league_strength, round_robin, team_windows
 from fbb.trades import TradeEvaluator, TradeSide, _fairness, _verdict, apply_trade, find_trades, pickup_pool
 
 from factories import make_line, make_snapshot
@@ -277,6 +277,72 @@ def test_league_strength_probabilities(snapshot):
     assert all(0 <= t.power_score <= 1 for t in st)
 
 
+def _start_week(snap, mp: int) -> None:
+    snap.current_matchup_period = mp
+    snap.current_period = snap.settings.matchup_periods[mp][0]
+
+
+def _strength(snap):
+    return {ts.team_id: ts for ts in league_strength(AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all()))}
+
+
+def test_projected_records_add_up_to_each_teams_games():
+    # Five teams: one sits out every week, so over 12 weeks some play 9 games and some 10.
+    snap = make_snapshot(n_teams=5)
+    scheduled = {t.id: 0 for t in snap.teams}
+    for m in snap.matchups:
+        scheduled[m.home_team_id] += 1
+        scheduled[m.away_team_id] += 1
+    assert set(scheduled.values()) == {9, 10}
+    # Weeks 1 and 2 played: the home team won, except a tie in week 1's first game.
+    _start_week(snap, 3)
+    team = {t.id: t for t in snap.teams}
+    for i, m in enumerate(m for m in snap.matchups if m.matchup_period < 3):
+        home, away = team[m.home_team_id], team[m.away_team_id]
+        if i == 0:
+            m.winner, home.ties, away.ties = "TIE", home.ties + 1, away.ties + 1
+        else:
+            m.winner, home.wins, away.losses = "HOME", home.wins + 1, away.losses + 1
+    for tid, ts in _strength(snap).items():
+        assert ts.proj_games == scheduled[tid] and ts.byes == 12 - scheduled[tid]
+        assert ts.proj_ties == team[tid].ties
+        assert ts.proj_wins + ts.proj_losses + ts.proj_ties == pytest.approx(ts.proj_games)
+        w, l, t = ts.proj_record()
+        assert w + l + t == ts.proj_games and abs(w - ts.proj_wins) <= 0.5
+
+
+def test_projected_record_rounds_wins_and_derives_losses():
+    ts = TeamStrength(team_id=1, name="A", abbrev="A", owner=None, proj_wins=8.5, proj_losses=8.5, proj_games=17)
+    assert ts.proj_record() == (9, 8, 0)  # not 9-9 from rounding both halves up
+    ts = TeamStrength(team_id=1, name="A", abbrev="A", owner=None, proj_wins=9.5, proj_losses=5.5, proj_ties=1,
+                      proj_games=16)
+    assert ts.proj_record() == (10, 5, 1)
+
+
+def test_a_played_week_without_a_result_still_counts():
+    # A demo league (and ESPN until a week's results post): week 1 is over with no result, every record 0-0.
+    snap = make_snapshot()
+    _start_week(snap, 2)
+    assert all(ts.proj_games == 12 and ts.byes == 0 for ts in _strength(snap).values())
+    # A file import's records already count week 1, which still has no result: it isn't counted twice.
+    team = {t.id: t for t in snap.teams}
+    for m in snap.matchups:
+        if m.matchup_period == 1:
+            team[m.home_team_id].wins += 1
+            team[m.away_team_id].losses += 1
+    assert all(ts.proj_games == 12 for ts in _strength(snap).values())
+
+
+def test_a_played_weeks_final_score_decides_it_before_the_result_posts():
+    snap = make_snapshot()
+    _start_week(snap, 2)
+    m = next(m for m in snap.matchups if m.matchup_period == 1)
+    m.home_score, m.away_score = 900.0, 1000.0
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    mm = MatchupModel(ctx, team_windows(ctx))
+    assert mm.p_win(m.home_team_id, m.away_team_id, 1) < 0.001
+
+
 def test_two_for_one_drops_and_backfills(snapshot):
     ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
     a, b = ctx.team_roster(1), ctx.team_roster(2)
@@ -317,6 +383,11 @@ def test_a_player_below_a_pickup_counts_as_one(snapshot):
     assert me["counted_as_pickups"] == [[weak, fa]]  # trading him is compared with swapping him for a pickup
     assert me["raw_value_delta"] == pytest.approx(ev.values[b[0]]["ros_value"] - ev.values[fa]["ros_value"])
     assert any("counts as that pickup" in line for line in r["math"][0]["lines"])
+    # The calculation also says what the trade does against the roster as it is.
+    as_is = ev.baseline(1)[2]
+    weeks = max(1.0, len(ctx.days) / 7)
+    assert me["delta_vs_roster_per_week"] == pytest.approx((me["after_ros"] - as_is.mean) / weeks)
+    assert any("Against the roster as it is" in line for line in r["math"][0]["lines"])
 
 
 def test_getting_an_injured_player_opens_no_spot():
@@ -328,6 +399,66 @@ def test_getting_an_injured_player_opens_no_spot():
     me, them = r["sides"]
     assert not me["auto_adds"] and not me["auto_drops"]  # his IR slot isn't a free pickup
     assert them["open_spot_adds"] and not them["auto_adds"]  # team 2's open spot was there either way
+
+
+def test_a_day_to_day_player_in_the_ir_slot_keeps_it():
+    # ESPN leaves a player in the IR slot after he's upgraded to day-to-day: his team isn't over the limit,
+    # so a trade mustn't drop someone for it (this cost a 2-for-2 50 points a week).
+    snap = make_snapshot()
+    fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    fa.fantasy_team_id, fa.injury_status = 2, "DAY_TO_DAY"
+    snap.team(2).roster.append(RosterEntry(player_id=fa.id, slot="IR"))
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), ctx.team_roster(2)
+    r = ev.evaluate(1, 2, [a[0], a[1]], [b[0], b[1]], with_sim=False)
+    them = r["sides"][1]
+    assert not them["auto_drops"] and not them["auto_adds"] and not them["open_spot_adds"]
+    # Trading him away takes the spot with him, though: then his old team has to drop a player.
+    r = ev.evaluate(1, 2, [a[0]], [fa.id], with_sim=False)
+    me, them = r["sides"]
+    assert not me["auto_drops"] and them["auto_drops"]
+    # And the team that gets him can't put a day-to-day player on IR, so two for one costs it a drop.
+    r = ev.evaluate(1, 2, [a[0]], [fa.id, b[0]], with_sim=False)
+    assert len(r["sides"][0]["auto_drops"]) == 1
+
+
+def test_an_injured_player_got_two_for_one_takes_the_empty_ir_slot():
+    snap = make_snapshot(injured={"9": "OUT"})  # team 2's first player; team 1's IR slot is empty
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), [p for p in ctx.team_roster(2) if p != "9"]
+    r = ev.evaluate(1, 2, [a[0]], ["9", b[0]], with_sim=False)
+    me = r["sides"][0]
+    assert not me["auto_drops"] and not me["auto_adds"]  # he goes on IR, as he would in ESPN
+
+
+def test_a_team_already_over_its_limit_isnt_charged_a_drop_by_a_trade():
+    snap = make_snapshot()
+    fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    fa.fantasy_team_id = 2
+    snap.team(2).roster.append(RosterEntry(player_id=fa.id))  # a player more than its slots, on the bench
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), ctx.team_roster(2)
+    r = ev.evaluate(1, 2, [a[0]], [b[0]], with_sim=False)
+    assert not r["sides"][1]["auto_drops"]
+
+
+def test_an_even_trade_drops_nobody_unless_an_ir_spot_leaves():
+    # Every 1-for-1 between every two teams, with OUT players about and a day-to-day one in team 2's IR slot:
+    # only trading him away for a player who can't take that IR slot costs a drop.
+    snap = make_snapshot(injured={"1": "OUT", "20": "OUT"})
+    fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    fa.fantasy_team_id, fa.injury_status = 2, "DAY_TO_DAY"
+    snap.team(2).roster.append(RosterEntry(player_id=fa.id, slot="IR"))
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    pool = pickup_pool(ctx)
+    for t, u in itertools.permutations([t.id for t in snap.teams], 2):
+        for p, q in itertools.product(ctx.team_roster(t), ctx.team_roster(u)):
+            _, drops, adds = apply_trade(ctx, t, [p], [q], pool)
+            spot_leaves = p == fa.id and snap.players[q].injury_status != "OUT"
+            assert not adds and bool(drops) == spot_leaves, (t, p, q, drops)
 
 
 def test_trade_evaluation_shape_and_validation(snapshot):

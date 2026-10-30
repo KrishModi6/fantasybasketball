@@ -277,6 +277,9 @@ function SidePanel({ s }: { s: TradeSide }) {
         <span className={`v ${s.delta_per_week > 0 ? "up" : s.delta_per_week < 0 ? "down" : ""}`}>{s.delta_per_week > 0 ? "+" : ""}{fmt1(s.delta_per_week)}</span>
       </div>
       <dl className="kv">
+        {s.counted_as_pickups.length > 0 && (
+          <><dt><Term t="vs_roster" /></dt><dd><Delta value={s.delta_vs_roster_per_week} /> per week</dd></>
+        )}
         <dt><Term t="trade_ros" /></dt><dd><Delta value={s.delta_ros} digits={0} /> ({signedPct(s.delta_pct)})</dd>
         <dt><Term t="playoff_weeks" /></dt><dd><Delta value={s.delta_playoffs} digits={0} /></dd>
         <dt><Term t="raw_value" /></dt><dd><Delta value={s.raw_value_delta} digits={0} /></dd>

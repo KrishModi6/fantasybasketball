@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { RangeBar } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Meter, PageHead, Panel, PlayerName, SubTabs, Tag, Term } from "../components/ui";
-import { fmt0, fmt1, pct, record, shortDate } from "../lib/format";
+import { fmt0, fmt1, pct, projRecord, projRecordNote, record, shortDate } from "../lib/format";
 import { useClaimTeam, useLineup, useTeam, useTeamReport } from "../lib/queries";
 import { useToast } from "../lib/toast";
 import type { TeamDetail } from "../lib/types";
@@ -85,7 +85,7 @@ export default function TeamPage() {
             <Kpi k="Record" v={record(data.record.wins, data.record.losses, data.record.ties)} s={`${fmt0(data.record.points_for)} points for`} />
             <Kpi k="Power rank" v={st ? `${st.rank} / ${teams.length}` : "–"} s={st ? <>{pct(st.power_score)} <Term t="power">power score</Term></> : undefined} />
             {isPoints && <Kpi k={<Term t="pts_wk_team">Points per week</Term>} v={fmt0(st?.ppw)} s={st ? <><Delta value={st.ppw_vs_avg} digits={0} /> <Term t="vs_avg">vs average</Term></> : undefined} />}
-            <Kpi k={<Term t="proj_record">Projected record</Term>} v={st ? `${fmt0(st.proj_wins)}–${fmt0(st.proj_losses)}` : "–"} />
+            <Kpi k={<Term t="proj_record">Projected record</Term>} v={st ? projRecord(st) : "–"} s={st ? projRecordNote(st) : undefined} />
             <Kpi k={<><Term t="playoffs" /> / <Term t="title">title</Term></>} v={st ? `${pct(st.playoff_odds)} / ${pct(st.title_odds)}` : "–"} />
             <Kpi k={<Term t="ros">Rest of season</Term>} v={fmt0(data.ros_total)} s={`points over ${fmt1(data.weeks_remaining)} weeks`} />
           </Kpis>

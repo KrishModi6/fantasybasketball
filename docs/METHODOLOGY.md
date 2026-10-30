@@ -212,7 +212,7 @@ The simulator's team means land within ~1% of the analytic weekly projection. Th
 
 - **Evaluation.**
   - Both rosters are re-simulated over the rest of the season with the trade applied.
-  - Roster size is enforced: a team over the limit drops its lowest-value player (never one it just received), and an open spot is filled by the best healthy free agent. IR slots count only for injured players.
+  - Roster size is enforced: a team over the limit drops its lowest-value player (never one it just received), and an open spot is filled by the best healthy free agent. IR slots hold OUT players, plus whoever is already in a team's IR slot: ESPN leaves a player there after he's upgraded to day-to-day, but the team that gets him in a trade can't put him on IR. An injured player a team gets goes in an empty IR slot instead of costing a drop, but never opens a spot for a pickup. A team already over its limit isn't charged a drop for that by a trade.
   - Outputs per team: change in rest-of-season points, per week, this week and in playoff weeks, plus playoff and title odds before and after (3,000-run simulation).
   - Verdict: **advantageous** at ≥ +1% of rest-of-season output, **disadvantageous** at ≤ −1%, otherwise **neutral**.
   - Fairness label: **win-win** if every team gains, **lose-lose** if every team loses, **balanced** if every verdict is neutral, otherwise **favors** the team(s) that gain. Partner acceptance likelihood is a logistic curve in their % change.

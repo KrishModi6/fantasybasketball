@@ -21,9 +21,13 @@ MAX_PARALLEL = 2
 async def refresh_loop() -> None:
     sem = asyncio.Semaphore(MAX_PARALLEL)  # stay gentle with ESPN's rate limits
     last_retrain = time.time()
+    first = True
     while True:
         try:
-            ids = await run_in_threadpool(due_leagues)
+            # The first check also refreshes leagues an older version of the app synced, so an update
+            # shows what it adds (and recalculates projections and odds with it) right away.
+            ids = await run_in_threadpool(due_leagues, None, first)
+            first = False
 
             async def one(lid: str):
                 async with sem:

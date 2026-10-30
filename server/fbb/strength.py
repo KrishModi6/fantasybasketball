@@ -51,8 +51,11 @@ class TeamStrength:
     wins: int = 0
     losses: int = 0
     ties: int = 0
-    proj_wins: float = 0.0
-    proj_losses: float = 0.0
+    proj_wins: float = 0.0  # expected final wins
+    proj_losses: float = 0.0  # proj_wins + proj_losses + proj_ties == proj_games
+    proj_ties: int = 0  # ties so far (the simulation plays the rest to a result)
+    proj_games: int = 0  # regular-season games: fewer than the weeks when the team has byes
+    byes: int = 0  # regular-season weeks without a game (an odd number of teams leaves one out each week)
     playoff_odds: float = 0.0
     title_odds: float = 0.0
     avg_seed: float = 0.0
@@ -62,6 +65,13 @@ class TeamStrength:
     def to_dict(self):
         return asdict(self)
 
+    def proj_record(self) -> tuple[int, int, int]:
+        """The projected record in whole games: expected wins rounded, the rest losses (and the ties so far),
+        so it adds up to the team's games. Rounding wins and losses each on their own could make it a game
+        more."""
+        w = math.floor(self.proj_wins + 0.5)
+        return w, self.proj_games - self.proj_ties - w, self.proj_ties
+
 
 class MatchupModel:
     """Win probabilities from per-team, per-matchup-period window results."""
@@ -69,14 +79,16 @@ class MatchupModel:
     def __init__(self, ctx: AnalysisContext, results: dict[int, WindowResult]):
         self.ctx = ctx
         self.results = results
+        # Points already scored in an undecided week: this week's so far, or the final score of a week that's
+        # over but has no result in the league yet (which then decides it).
         self.partial: dict[tuple[int, int], float] = {}
         cur = ctx.s.current_matchup_period
         if ctx.is_points:
             for m in ctx.s.matchups:
-                if m.matchup_period == cur and m.winner == "UNDECIDED":
-                    self.partial[(m.home_team_id, cur)] = m.home_score
+                if m.matchup_period <= cur and m.winner == "UNDECIDED":
+                    self.partial[(m.home_team_id, m.matchup_period)] = m.home_score
                     if m.away_team_id is not None:
-                        self.partial[(m.away_team_id, cur)] = m.away_score
+                        self.partial[(m.away_team_id, m.matchup_period)] = m.away_score
 
     def dist(self, team_id: int, mp: int) -> tuple[float, float]:
         m, v = self.results[team_id].by_mp.get(mp, [0.0, 0.0])
@@ -142,13 +154,32 @@ def team_windows(ctx: AnalysisContext, rosters: dict[int, list[str]] | None = No
 
 
 def remaining_schedule(ctx: AnalysisContext) -> list[tuple[int, int, int]]:
-    """(mp, home, away) for undecided regular-season matchups; round-robin if unknown."""
+    """(mp, home, away) for the regular-season matchups not in the teams' records; round-robin if unknown.
+
+    That's every undecided matchup from the current week on, and a week that's over with no result yet
+    (ESPN between a week's end and its results; a demo league, which never has any). A file import's
+    records can already count those weeks, so a past one is added only while both teams' records and
+    games left fall short of their schedule.
+    """
     reg = ctx.s.settings.regular_season_matchups
     cur = ctx.s.current_matchup_period
-    games = [(m.matchup_period, m.home_team_id, m.away_team_id) for m in ctx.s.matchups
-             if m.away_team_id is not None and m.matchup_period <= reg and m.matchup_period >= cur
-             and m.winner == "UNDECIDED"]
-    if games:
+    scheduled = [m for m in ctx.s.matchups if m.away_team_id is not None and m.matchup_period <= reg]
+    if scheduled:
+        games = [(m.matchup_period, m.home_team_id, m.away_team_id) for m in scheduled
+                 if m.matchup_period >= cur and m.winner == "UNDECIDED"]
+        short = {t.id: -(t.wins + t.losses + t.ties) for t in ctx.s.teams}
+        for m in scheduled:
+            short[m.home_team_id] = short.get(m.home_team_id, 0) + 1
+            short[m.away_team_id] = short.get(m.away_team_id, 0) + 1
+        for _, a, b in games:
+            short[a] -= 1
+            short[b] -= 1
+        past = [m for m in scheduled if m.matchup_period < cur and m.winner == "UNDECIDED"]
+        for m in sorted(past, key=lambda m: -m.matchup_period):  # the latest week is the one still to post
+            if short[m.home_team_id] > 0 and short[m.away_team_id] > 0:
+                games.append((m.matchup_period, m.home_team_id, m.away_team_id))
+                short[m.home_team_id] -= 1
+                short[m.away_team_id] -= 1
         return games
     ids = [t.id for t in ctx.s.teams]
     rr = round_robin(ids)
@@ -182,22 +213,19 @@ def simulate_season(ctx: AnalysisContext, mm: MatchupModel, n: int = N_SIMS, see
     ids = [t.id for t in ctx.s.teams]
     col = {tid: i for i, tid in enumerate(ids)}
     T = len(ids)
-    wins = np.zeros((n, T))
-    for t in ctx.s.teams:
-        wins[:, col[t.id]] = t.wins + 0.5 * t.ties
-    games = remaining_schedule(ctx)
+    won = np.zeros((n, T))  # wins in the games simulated
+    left = {tid: 0 for tid in ids}
     pcache: dict[tuple, float] = {}
-    for mp, a, b in games:
+    for mp, a, b in remaining_schedule(ctx):
         key = (a, b, mp)
         if key not in pcache:
             pcache[key] = mm.p_win(a, b, mp)
         a_wins = rng.random(n) < pcache[key]
-        wins[:, col[a]] += a_wins
-        wins[:, col[b]] += ~a_wins
-    reg_games_left = {tid: 0 for tid in ids}
-    for _, a, b in games:
-        reg_games_left[a] += 1
-        reg_games_left[b] += 1
+        won[:, col[a]] += a_wins
+        won[:, col[b]] += ~a_wins
+        left[a] += 1
+        left[b] += 1
+    wins = won + np.array([t.wins + 0.5 * t.ties for t in ctx.s.teams])  # standings: a tie is half a win
 
     # Seeding: wins, then a tiebreak that favours stronger teams (proxy for H2H/points).
     strength = np.array([ppw.get(tid, 0.0) if ppw else 0.0 for tid in ids])
@@ -209,23 +237,24 @@ def simulate_season(ctx: AnalysisContext, mm: MatchupModel, n: int = N_SIMS, see
     champion = _simulate_bracket(seeds, ids, mm, playoff_mps, rng)
 
     out = {}
-    for tid in ids:
-        c = col[tid]
+    reg = ctx.s.settings.regular_season_matchups
+    for t in ctx.s.teams:
+        c = col[t.id]
         made = (seeds == c).any(axis=1)
         seed_pos = np.where(seeds == c, np.arange(1, k + 1), 0).sum(axis=1)
-        out[tid] = {
-            "proj_wins": float(wins[:, c].mean()),
-            "proj_losses": float(_games_total(ctx, tid, reg_games_left[tid]) - wins[:, c].mean()),
+        games = t.wins + t.losses + t.ties + left[t.id]
+        exp_wins = t.wins + float(won[:, c].mean())
+        out[t.id] = {
+            "proj_wins": exp_wins,
+            "proj_losses": games - t.ties - exp_wins,
+            "proj_ties": t.ties,
+            "proj_games": games,
+            "byes": max(0, reg - games),
             "playoff_odds": float(made.mean()),
             "title_odds": float((champion == c).mean()),
             "avg_seed": float(seed_pos[made].mean()) if made.any() else 0.0,
         }
     return out
-
-
-def _games_total(ctx: AnalysisContext, tid: int, left: int) -> int:
-    t = ctx.s.team(tid)
-    return t.wins + t.losses + t.ties + left
 
 
 def _bracket_order(k: int) -> list[int]:

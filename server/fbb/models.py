@@ -199,6 +199,7 @@ class LeagueSnapshot(BaseModel):
     source: str = "manual"
     fetched_at: datetime | None = None
     warnings: list[str] = Field(default_factory=list)
+    data_version: int = 0  # what the sync that built it collected (app.services.sync.DATA_VERSION)
 
     def team(self, team_id: int) -> FantasyTeam:
         for t in self.teams:
