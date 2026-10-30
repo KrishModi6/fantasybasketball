@@ -74,7 +74,14 @@ export default function RankingsPage() {
   );
 }
 
-/** Every team's projected points (or win odds) in each remaining week. */
+const RESULT = { W: "Won", L: "Lost", T: "Tied" } as const;
+
+/** A played week's result: W, L or T, in a fixed-width slot so the scores above and below line up. */
+function Result({ r }: { r?: "W" | "L" | "T" | null }) {
+  return <span className={`result tiny strong ${r === "W" ? "up" : r === "L" ? "down" : "muted"}`}>{r}</span>;
+}
+
+/** Every team's final score (and W/L) in the weeks played, then its projected points (or win odds) in each week left. */
 function WeeklyGrid({ order }: { order: number[] }) {
   const { league, myTeamId, teamName } = useLeagueCtx();
   const { data, error, isLoading } = useWeekly(league.id);
@@ -86,10 +93,13 @@ function WeeklyGrid({ order }: { order: number[] }) {
   const rank = new Map(order.map((id, i) => [id, i]));
   const teams = [...data.teams].sort((a, b) => (rank.get(a.team_id) ?? 99) - (rank.get(b.team_id) ?? 99));
   const abbrev = new Map(data.teams.map((t) => [t.team_id, t.abbrev || t.name]));
-  // Best and worst projection each week, for colouring.
+  // Best and worst projection each week left, for colouring (a played week shows W or L instead).
   const hi = data.weeks.map((_, i) => Math.max(...teams.map((t) => t.weeks[i]?.proj ?? -Infinity)));
   const lo = data.weeks.map((_, i) => Math.min(...teams.map((t) => t.weeks[i]?.proj ?? Infinity)));
-  const avg = data.weeks.map((_, i) => teams.reduce((s, t) => s + (t.weeks[i]?.proj ?? 0), 0) / Math.max(1, teams.length));
+  const avg = data.weeks.map((w, i) => {
+    const scores = teams.map((t) => (w.final ? t.weeks[i]?.final : t.weeks[i]?.proj)).filter((v): v is number => v != null);
+    return scores.length ? scores.reduce((s, v) => s + v, 0) / scores.length : null;
+  });
   return (
     <Panel
       title={shown === "points" ? "Projected points by week" : "Win odds by week"}
@@ -99,8 +109,8 @@ function WeeklyGrid({ order }: { order: number[] }) {
           options={[{ value: "points", label: "Points" }, { value: "odds", label: "Win odds" }]} />
       )}
       foot={shown === "points"
-        ? "Each team's expected total with optimal daily lineups. This week adds the points already scored to the days left; two-week weeks and playoff rounds show the combined total. Green is the week's highest, red the lowest. Hover a cell for the opponent, range and win odds."
-        : "Chance of beating the scheduled opponent that week. Playoff opponents depend on the bracket, so those weeks are blank until they're set."}
+        ? "Weeks already played show the final score, with W or L. The rest are each team's expected total with optimal daily lineups: this week adds the points already scored to the days left; two-week weeks and playoff rounds show the combined total. Green is the week's highest, red the lowest. Hover a cell for the opponent, range and win odds."
+        : "Weeks already played show who won. The rest are the chance of beating the scheduled opponent that week. Playoff opponents depend on the bracket, so those weeks are blank until they're set."}
     >
       <div className="table-wrap">
         <table className="data">
@@ -108,8 +118,8 @@ function WeeklyGrid({ order }: { order: number[] }) {
             <tr>
               <th className="pin">Team</th>
               {data.weeks.map((w) => (
-                <th key={w.matchup_period} className="n" title={`${shortDate(w.start)} – ${shortDate(w.end)}, ${w.days} days`}>
-                  <div>{w.playoffs ? "Playoffs" : `Wk ${w.matchup_period}`}{w.current ? " · now" : ""}</div>
+                <th key={w.matchup_period} className="n" title={`${shortDate(w.start)} – ${shortDate(w.end)}, ${w.days} days${w.final ? ", final" : ""}`}>
+                  <div>{w.playoffs ? "Playoffs" : `Wk ${w.matchup_period}`}{w.current ? " · now" : w.final ? " · final" : ""}</div>
                   <div className="tiny faint">{shortDate(w.start)}</div>
                 </th>
               ))}
@@ -121,6 +131,20 @@ function WeeklyGrid({ order }: { order: number[] }) {
                 <td className="pin"><Link to={`../team/${t.team_id}`} relative="path" style={{ color: "var(--text)" }}>{t.name}</Link></td>
                 {t.weeks.map((c, i) => {
                   const opp = c.opponent_id != null ? teamName(c.opponent_id) : null;
+                  if (data.weeks[i]!.final) {
+                    const title = [
+                      `${t.name}${opp ? ` vs ${opp}` : ""}`,
+                      c.final != null ? `Final ${fmt0(c.final)}${c.opp_final != null ? `–${fmt0(c.opp_final)}` : ""}` : null,
+                      c.result ? RESULT[c.result] : null,
+                    ].filter(Boolean).join(" · ");
+                    return (
+                      <td key={c.matchup_period} className="n" title={title}>
+                        {shown === "odds"
+                          ? (c.result ? <><span className="tiny faint">{abbrev.get(c.opponent_id!)}</span> <Result r={c.result} /></> : <span className="faint">–</span>)
+                          : (c.final == null ? <span className="faint">–</span> : <>{fmt0(c.final)}<Result r={c.result} /></>)}
+                      </td>
+                    );
+                  }
                   const title = [
                     `${t.name}${opp ? ` vs ${opp}` : ""}`,
                     `${fmt0(c.proj)} ± ${fmt0(c.sd)} points`,
@@ -145,7 +169,7 @@ function WeeklyGrid({ order }: { order: number[] }) {
             {shown === "points" && (
               <tr>
                 <td className="pin muted">League average</td>
-                {avg.map((v, i) => <td key={data.weeks[i]!.matchup_period} className="n muted">{fmt0(v)}</td>)}
+                {avg.map((v, i) => <td key={data.weeks[i]!.matchup_period} className="n muted">{fmt0(v)}{data.weeks[i]!.final && <Result />}</td>)}
               </tr>
             )}
           </tbody>
