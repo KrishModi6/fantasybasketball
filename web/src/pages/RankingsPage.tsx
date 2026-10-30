@@ -2,7 +2,7 @@ import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, Diverging } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented } from "../components/ui";
+import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented, Term } from "../components/ui";
 import { fmt0, fmt1, pct, powerMix, record, shortDate, signed } from "../lib/format";
 import { useRankings, useWeekly } from "../lib/queries";
 import type { TeamStrength } from "../lib/types";
@@ -30,14 +30,14 @@ export default function RankingsPage() {
                   <th className="n">#</th>
                   <th>Team</th>
                   <th className="hide-sm">Manager</th>
-                  <th className="n" title="Power score: this season's record for the share played, projected all-play for the rest">Power</th>
+                  <th className="n"><Term t="power">Power</Term></th>
                   <th className="hide-sm" style={{ width: 120 }} />
-                  {isPoints && <th className="n">Pts/wk</th>}
-                  {isPoints && <th className="n">vs avg</th>}
+                  {isPoints && <th className="n"><Term t="pts_wk_team" /></th>}
+                  {isPoints && <th className="n"><Term t="vs_avg" /></th>}
                   <th className="n">Record</th>
-                  <th className="n hide-sm">Proj.</th>
-                  <th className="n">Playoffs</th>
-                  <th className="n">Title</th>
+                  <th className="n hide-sm"><Term t="proj_record" /></th>
+                  <th className="n"><Term t="playoffs" /></th>
+                  <th className="n"><Term t="title" /></th>
                 </tr>
               </thead>
               <tbody>
@@ -165,9 +165,9 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
       <p className="small">{ex.summary}</p>
       <div className="grid cols-3" style={{ alignItems: "start" }}>
         {isPoints ? (
-          <div className="table-wrap" style={{ border: "1px solid var(--border)" }}>
+          <div className="table-wrap boxed">
             <table className="data">
-              <thead><tr><th>Stat</th><th className="n">Pts/wk</th><th className="n">League</th><th className="n">Diff</th><th /></tr></thead>
+              <thead><tr><th>Stat</th><th className="n"><Term t="pts_wk_team" /></th><th className="n">League</th><th className="n"><Term t="stat_diff" /></th><th /></tr></thead>
               <tbody>
                 {sb.map((s) => (
                   <tr key={s.stat}>
@@ -182,7 +182,7 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
             </table>
           </div>
         ) : (
-          <div className="table-wrap" style={{ border: "1px solid var(--border)" }}>
+          <div className="table-wrap boxed">
             <table className="data">
               <thead><tr><th>Category</th><th className="n">Win vs avg team</th></tr></thead>
               <tbody>
@@ -193,9 +193,9 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
             </table>
           </div>
         )}
-        <div className="table-wrap" style={{ border: "1px solid var(--border)" }}>
+        <div className="table-wrap boxed">
           <table className="data">
-            <thead><tr><th>Player</th><th className="n">Pts/wk</th><th className="n">Share</th><th className="n">Starts</th></tr></thead>
+            <thead><tr><th>Player</th><th className="n"><Term t="pts_wk_player" /></th><th className="n"><Term t="share" /></th><th className="n"><Term t="starts_ros" /></th></tr></thead>
             <tbody>
               {ex.players.slice(0, 10).map((p) => (
                 <tr key={p.player_id}>
@@ -210,15 +210,15 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
         </div>
         <div className="stack" style={{ gap: 8 }}>
           <dl className="kv">
-            <dt>Power score</dt><dd>{pct(t.power_score)} <span className="faint">{powerMix(t)}</span></dd>
-            <dt>Player-games per week</dt><dd>{fmt1(ex.schedule.player_games_per_week)} <span className="faint">avg {fmt1(ex.schedule.league_avg)}</span></dd>
-            <dt>Empty starting slots per week</dt><dd>{fmt1(ex.depth.empty_slots_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_empty)}</span></dd>
-            <dt>Playable games on bench per week</dt><dd>{fmt1(ex.depth.bench_games_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_bench)}</span></dd>
+            <dt><Term t="power" /></dt><dd>{pct(t.power_score)} <span className="faint">{powerMix(t)}</span></dd>
+            <dt><Term t="player_games_wk" /></dt><dd>{fmt1(ex.schedule.player_games_per_week)} <span className="faint">avg {fmt1(ex.schedule.league_avg)}</span></dd>
+            <dt><Term t="empty_slots">Empty starting slots per week</Term></dt><dd>{fmt1(ex.depth.empty_slots_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_empty)}</span></dd>
+            <dt><Term t="bench_games">Playable games on bench per week</Term></dt><dd>{fmt1(ex.depth.bench_games_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_bench)}</span></dd>
           </dl>
           {ex.injuries.length > 0 && (
-            <div className="table-wrap" style={{ border: "1px solid var(--border)" }}>
+            <div className="table-wrap boxed">
               <table className="data">
-                <thead><tr><th>Injured</th><th className="n">Games</th><th className="n">Pts lost</th></tr></thead>
+                <thead><tr><th>Injured</th><th className="n">Games</th><th className="n"><Term t="pts_lost" /></th></tr></thead>
                 <tbody>
                   {ex.injuries.map((i) => (
                     <tr key={i.player_id}>

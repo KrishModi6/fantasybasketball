@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Distribution, MarginChart, SERIES_A, SERIES_B } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, PageHead, Panel, PlayerName } from "../components/ui";
+import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, PageHead, Panel, PlayerName, Term } from "../components/ui";
 import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { fmt0, fmt1, pct, shortDate } from "../lib/format";
@@ -112,7 +112,7 @@ export default function MatchupsPage() {
               note="Quick estimates from the season model. Select a row to simulate it.">
               <div className="table-wrap">
                 <table className="data">
-                  <thead><tr><th>Home</th><th className="n">Proj</th><th className="n">Win</th><th className="hide-sm" style={{ width: 140 }} /><th className="n">Win</th><th className="n">Proj</th><th>Away</th></tr></thead>
+                  <thead><tr><th>Home</th><th className="n"><Term t="pts_wk_team">Proj</Term></th><th className="n"><Term t="win_prob" /></th><th className="hide-sm" style={{ width: 140 }} /><th className="n"><Term t="win_prob" /></th><th className="n"><Term t="pts_wk_team">Proj</Term></th><th>Away</th></tr></thead>
                   <tbody>
                     {week.data.matchups.map((m) => {
                       const active = (m.home_id === a && m.away_id === b) || (m.home_id === b && m.away_id === a);
@@ -150,14 +150,14 @@ function SimView({ r, exclude, onToggle, busy }: { r: SimResult; exclude: string
   return (
     <div className="stack" style={{ opacity: busy ? 0.65 : 1 }} aria-busy={busy}>
       <Kpis label="Simulation result">
-        <Kpi k={<><span className="legend"><i style={{ background: SERIES_A }} /></span> {ta.name}</>} v={pct(ta.win_prob)} tone="accent"
-          s={isPoints ? `${fmt0(ta.mean)} pts, 80%: ${fmt0(ta.p10)}–${fmt0(ta.p90)}` : `${fmt1(r.categories?.a_cats_mean)} categories won on average`} />
-        <Kpi k={<><span className="legend"><i style={{ background: SERIES_B }} /></span> {tb.name}</>} v={<span style={{ color: SERIES_B }}>{pct(tb.win_prob)}</span>}
-          s={isPoints ? `${fmt0(tb.mean)} pts, 80%: ${fmt0(tb.p10)}–${fmt0(tb.p90)}` : `${fmt1(r.categories?.b_cats_mean)} categories won on average`} />
-        {isPoints && <Kpi k="Expected margin" v={<Delta value={r.margin.mean} digits={0} />} s={`80%: ${fmt0(r.margin.p10)} to ${fmt0(r.margin.p90)}`} />}
-        <Kpi k="Player-games left" v={`${fmt1(ta.games)} / ${fmt1(tb.games)}`} s={`${r.days_simulated} day${r.days_simulated === 1 ? "" : "s"}, ${shortDate(r.start)}–${shortDate(r.end)}`} />
+        <Kpi k={<><span className="legend"><i style={{ background: SERIES_A }} /></span> {ta.name} · <Term t="win_prob">win chance</Term></>} v={pct(ta.win_prob)} tone="accent"
+          s={isPoints ? <>{fmt0(ta.mean)} pts, <Term t="range80" /> {fmt0(ta.p10)}–{fmt0(ta.p90)}</> : `${fmt1(r.categories?.a_cats_mean)} categories won on average`} />
+        <Kpi k={<><span className="legend"><i style={{ background: SERIES_B }} /></span> {tb.name} · <Term t="win_prob">win chance</Term></>} v={<span style={{ color: SERIES_B }}>{pct(tb.win_prob)}</span>}
+          s={isPoints ? <>{fmt0(tb.mean)} pts, <Term t="range80" /> {fmt0(tb.p10)}–{fmt0(tb.p90)}</> : `${fmt1(r.categories?.b_cats_mean)} categories won on average`} />
+        {isPoints && <Kpi k={<Term t="margin" />} v={<Delta value={r.margin.mean} digits={0} />} s={<><Term t="range80" /> {fmt0(r.margin.p10)} to {fmt0(r.margin.p90)}</>} />}
+        <Kpi k={<Term t="player_games" />} v={`${fmt1(ta.games)} / ${fmt1(tb.games)}`} s={`${r.days_simulated} day${r.days_simulated === 1 ? "" : "s"}, ${shortDate(r.start)}–${shortDate(r.end)}`} />
         {accrued ? <Kpi k="Already scored" v={`${fmt0(ta.accrued)} – ${fmt0(tb.accrued)}`} /> : null}
-        <Kpi k="Tie" v={pct(r.tie_prob, 1)} s={`${r.sims.toLocaleString()} simulations`} />
+        <Kpi k={<Term t="tie" />} v={pct(r.tie_prob, 1)} s={`${r.sims.toLocaleString()} simulations`} />
       </Kpis>
 
       <div className="grid cols-2" style={{ alignItems: "start" }}>
@@ -252,7 +252,7 @@ function PlayerSimTable({ t, exclude, onToggle, color }: { t: SimTeam; exclude: 
       <div className="table-wrap">
         <table className="data">
           <thead>
-            <tr><th style={{ width: 44 }}>Plays</th><th>Player</th><th className="n">G</th><th className="n">Starts</th><th className="n">Pts</th><th className="n hide-sm">80% range</th><th className="n">Swing</th></tr>
+            <tr><th style={{ width: 44 }}>Plays</th><th>Player</th><th className="n"><Term t="sim_games" /></th><th className="n"><Term t="sim_starts" /></th><th className="n"><Term t="sim_pts" /></th><th className="n hide-sm"><Term t="range80" /></th><th className="n"><Term t="swing" /></th></tr>
           </thead>
           <tbody>
             {t.players.map((p) => {

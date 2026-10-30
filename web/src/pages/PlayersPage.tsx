@@ -1,22 +1,23 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented } from "../components/ui";
+import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented, Term } from "../components/ui";
 import { fmt0, fmt1 } from "../lib/format";
+import type { TermKey } from "../lib/glossary";
 import { usePlayers } from "../lib/queries";
 
 const POSITIONS = ["", "PG", "SG", "SF", "PF", "C"];
 type Status = "all" | "fa" | "rostered";
 
-const COLUMNS: { key: string; label: string; title: string; hideSm?: boolean }[] = [
-  { key: "fp_pg", label: "FP/G", title: "Projected fantasy points per game" },
-  { key: "ros_value", label: "ROS", title: "Rest-of-season value: per-game value × expected games" },
-  { key: "vorp", label: "Over repl.", title: "Rest-of-season value above the best available free agents", hideSm: true },
-  { key: "games_next7", label: "Next 7", title: "Expected games in the next 7 days" },
-  { key: "mpg", label: "MPG", title: "Projected minutes per game", hideSm: true },
-  { key: "season_fp_pg", label: "Season", title: "Fantasy points per game this season", hideSm: true },
-  { key: "recent_fp_pg", label: "Last 10", title: "Average over the last 10 games, reaching back into last season while this one is young", hideSm: true },
-  { key: "ownership_pct", label: "Rostered", title: "Share of ESPN leagues rostering the player", hideSm: true },
+const COLUMNS: { key: string; label: string; term: TermKey; hideSm?: boolean }[] = [
+  { key: "fp_pg", label: "FP/G", term: "fp_pg" },
+  { key: "ros_value", label: "ROS", term: "ros" },
+  { key: "vorp", label: "Over repl.", term: "over_repl", hideSm: true },
+  { key: "games_next7", label: "Next 7", term: "next7" },
+  { key: "mpg", label: "MPG", term: "mpg", hideSm: true },
+  { key: "season_fp_pg", label: "Season", term: "season", hideSm: true },
+  { key: "recent_fp_pg", label: "Last 10", term: "last10", hideSm: true },
+  { key: "ownership_pct", label: "Rostered", term: "rostered", hideSm: true },
 ];
 
 export default function PlayersPage() {
@@ -73,8 +74,8 @@ export default function PlayersPage() {
                   <th className="hide-sm">Pos</th>
                   {status !== "fa" && <th className="hide-sm">Fantasy team</th>}
                   {COLUMNS.map((c) => (
-                    <th key={c.key} className={`n ${c.hideSm ? "hide-sm" : ""}`} aria-sort={sort === c.key ? "descending" : undefined} title={c.title}>
-                      <button onClick={() => setSort(c.key)}>{c.label}{sort === c.key ? " ▾" : ""}</button>
+                    <th key={c.key} className={`n ${c.hideSm ? "hide-sm" : ""}`} aria-sort={sort === c.key ? "descending" : undefined}>
+                      <Term t={c.term} onClick={() => setSort(c.key)}>{c.label}{sort === c.key ? " ▾" : ""}</Term>
                     </th>
                   ))}
                   {!isPoints && cats.map((c) => <th key={c} className="n hide-sm">{c}</th>)}

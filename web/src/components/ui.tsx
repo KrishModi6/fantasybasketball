@@ -1,5 +1,46 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { injuryShort, signed } from "../lib/format";
+import { GLOSSARY, type TermKey } from "../lib/glossary";
+
+const TIP_WIDTH = 280;
+
+/** A label with a dotted underline that shows its plain-English definition (lib/glossary) on hover or focus.
+ *  With onClick it is the button itself (a sortable column header). The tip is portalled so table scrollers can't clip it. */
+export function Term({ t, children, onClick }: { t: TermKey; children?: ReactNode; onClick?: () => void }) {
+  const entry = GLOSSARY[t];
+  const id = useId();
+  const ref = useRef<HTMLElement | null>(null);
+  const [at, setAt] = useState<CSSProperties | null>(null);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - TIP_WIDTH - 8));
+    setAt(r.bottom + 130 > window.innerHeight ? { left, bottom: window.innerHeight - r.top + 6 } : { left, top: r.bottom + 6 });
+  };
+  const hide = () => setAt(null);
+  useEffect(() => {
+    if (!at) return;
+    window.addEventListener("scroll", hide, true);
+    return () => window.removeEventListener("scroll", hide, true);
+  }, [at]);
+  const props = {
+    className: "term", onMouseEnter: show, onMouseLeave: hide, onFocus: show, onBlur: hide,
+    onKeyDown: (e: { key: string }) => e.key === "Escape" && hide(), "aria-describedby": at ? id : undefined,
+  };
+  const label = children ?? entry.term;
+  return (
+    <>
+      {onClick
+        ? <button type="button" ref={(el) => { ref.current = el; }} onClick={onClick} {...props}>{label}</button>
+        : <span ref={(el) => { ref.current = el; }} tabIndex={0} {...props}>{label}</span>}
+      {at && createPortal(
+        <span role="tooltip" id={id} className="term-tip" style={{ ...at, maxWidth: TIP_WIDTH }}><strong>{entry.term}{entry.term.endsWith(".") ? "" : "."}</strong> {entry.def}</span>,
+        document.body,
+      )}
+    </>
+  );
+}
 
 export function PageHead({ title, desc, actions }: { title: ReactNode; desc?: ReactNode; actions?: ReactNode }) {
   return (

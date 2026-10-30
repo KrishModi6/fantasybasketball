@@ -228,7 +228,8 @@ export function LeagueLayout() {
 
       <nav className="tabstrip" aria-label="Sections">
         {tabs.map((t) => <NavLink key={t.to} to={t.to} end={t.end}>{t.label}</NavLink>)}
-        <NavLink to={`${base}/methodology`} className="end">Methodology</NavLink>
+        <NavLink to={`${base}/glossary`} className="end">Glossary</NavLink>
+        <NavLink to={`${base}/methodology`}>Methodology</NavLink>
       </nav>
 
       <div className="workspace">
