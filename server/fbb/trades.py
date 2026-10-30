@@ -75,16 +75,17 @@ class TradeSide:
     verdict: str = "neutral"
 
 
-def roster_capacity(ctx: AnalysisContext, roster: list[str]) -> int:
-    """Active slots plus IR slots that injured players on this roster can occupy.
+def roster_capacity(ctx: AnalysisContext, team_id: int, roster: list[str]) -> int:
+    """Active slots plus IR slots that injured players on this team's roster can occupy.
 
-    A player in an IR slot keeps it whatever his status says now: ESPN leaves a player there after he's
-    upgraded to day-to-day, so counting only OUT players made his team look a player over the limit, and
-    every trade it made dropped someone.
+    A player in the team's IR slot keeps it whatever his status says now: ESPN leaves a player there after
+    he's upgraded to day-to-day, so counting only OUT players made his team look a player over the limit, and
+    every trade it made dropped someone. Only his team keeps that spot: a team that gets him can't put a
+    day-to-day player on IR.
     """
     slots = ctx.s.settings.roster_slots
     active = sum(n for code, n in slots.items() if code != "IR")
-    on_ir = {e.player_id for t in ctx.s.teams for e in t.roster if e.slot == "IR"}
+    on_ir = {e.player_id for e in ctx.s.team(team_id).roster if e.slot == "IR"}
     injured = sum(1 for p in roster if ctx.s.players[p].injury_status in ("OUT", "INJURY_RESERVE") or p in on_ir)
     return active + min(slots.get("IR", 0), injured)
 
@@ -110,7 +111,7 @@ def baseline_roster(ctx: AnalysisContext, team_id: int, pool: list[str] | None =
     """What a trade is compared with: the roster with any open spot filled from free agents, and those pickups."""
     pool = pickup_pool(ctx) if pool is None else pool
     roster = ctx.team_roster(team_id)
-    fills = _pickups(pool, roster, roster_capacity(ctx, roster) - len(roster))
+    fills = _pickups(pool, roster, roster_capacity(ctx, team_id, roster) - len(roster))
     return roster + fills, fills
 
 
@@ -119,25 +120,27 @@ def apply_trade(ctx: AnalysisContext, team_id: int, gives: list[str], receives: 
     """New roster after the trade, from the baseline roster, respecting roster size.
 
     Over the limit, the extra player takes an open spot (that pickup is skipped) before the weakest player
-    is dropped; under it, free agents fill the spots. A trade never raises the limit: getting an injured
-    player could open an IR slot, but counting that spot's pickup made a star for an injured bench player
-    look like a win. Returns the roster, the players dropped and the free agents picked up because of the
-    trade.
+    is dropped; under it, free agents fill the spots. An injured player the team gets goes in an empty IR
+    slot rather than costing a drop, but a trade never adds a pickup for that slot: counting it made a star
+    for an injured bench player look like a win. A team that already carries more players than its slots
+    allow isn't charged a drop for it by the trade. Returns the roster, the players dropped and the free
+    agents picked up because of the trade.
     """
     pool = pickup_pool(ctx) if pool is None else pool
     base, fills = baseline_roster(ctx, team_id, pool)
-    limit = roster_capacity(ctx, base)
-    cap = lambda r: min(roster_capacity(ctx, r), limit)  # noqa: E731
+    capacity = lambda r: roster_capacity(ctx, team_id, r)  # noqa: E731
+    limit = capacity(base)
+    over = max(len(base) - limit, 0)
     roster = [p for p in base if p not in gives] + list(receives)
     drops = []
-    while len(roster) > cap(roster):
+    while len(roster) > capacity(roster) + over:
         unused = [p for p in roster if p in fills]
         cands = unused or [p for p in roster if p not in receives]
         worst = min(cands, key=lambda p: _ros_value(ctx, p))
         roster.remove(worst)
         if not unused:
             drops.append(worst)
-    adds = _pickups(pool, roster, cap(roster) - len(roster))
+    adds = _pickups(pool, roster, min(capacity(roster), limit) - len(roster))
     return roster + adds, drops, adds
 
 
@@ -367,8 +370,8 @@ def _screen_values(ctx: AnalysisContext, ev: TradeEvaluator) -> tuple[dict[str, 
     return vals, {pid: max(v, ev.replacement) for pid, v in vals.items()}, ev.replacement
 
 
-def _open_spots(ctx: AnalysisContext, roster: list[str]) -> int:
-    return max(roster_capacity(ctx, roster) - len(roster), 0)
+def _open_spots(ctx: AnalysisContext, team_id: int, roster: list[str]) -> int:
+    return max(roster_capacity(ctx, team_id, roster) - len(roster), 0)
 
 
 def _spot_adjust(cost: dict[str, float], replacement: float, roster: list[str], outgoing: tuple, n_in: int,
@@ -401,7 +404,7 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     ev = evaluator or TradeEvaluator(ctx)
     vals, cost, replacement = _screen_values(ctx, ev)
     mine = ctx.team_roster(team_id)
-    mine_open = _open_spots(ctx, mine)
+    mine_open = _open_spots(ctx, team_id, mine)
     partners = partners or [t.id for t in ctx.s.teams if t.id != team_id]
     if sizes:
         allowed = set(sizes)
@@ -423,7 +426,7 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     pre: list[tuple[float, int, tuple, tuple]] = []
     for pt in partners:
         theirs = ctx.team_roster(pt)
-        theirs_open = _open_spots(ctx, theirs)
+        theirs_open = _open_spots(ctx, pt, theirs)
         slack = PARTNER_SLACK * -min_partner_pct * ev.base[pt].mean  # raw value they can lose and still accept
         their_pkgs = packages(theirs, {r for _, r in allowed})
         for give, v_out, c_out in my_pkgs:
@@ -619,11 +622,11 @@ def _package_search(ctx: AnalysisContext, ev: TradeEvaluator, team_id: int, part
     """
     vals, cost, replacement = _screen_values(ctx, ev)
     mine = ctx.team_roster(team_id)
-    mine_open = _open_spots(ctx, mine)
+    mine_open = _open_spots(ctx, team_id, mine)
     pre: list[tuple[float, int, tuple, tuple]] = []
     for pt in partners:
         theirs = ctx.team_roster(pt)
-        theirs_open = _open_spots(ctx, theirs)
+        theirs_open = _open_spots(ctx, pt, theirs)
         slack = PARTNER_SLACK * -min_partner_pct * ev.base[pt].mean  # as in find_trades
         for n in sorted(counts):
             for pkg in combinations(theirs if fixed_is_mine else mine, n):

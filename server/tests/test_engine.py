@@ -418,6 +418,47 @@ def test_a_day_to_day_player_in_the_ir_slot_keeps_it():
     r = ev.evaluate(1, 2, [a[0]], [fa.id], with_sim=False)
     me, them = r["sides"]
     assert not me["auto_drops"] and them["auto_drops"]
+    # And the team that gets him can't put a day-to-day player on IR, so two for one costs it a drop.
+    r = ev.evaluate(1, 2, [a[0]], [fa.id, b[0]], with_sim=False)
+    assert len(r["sides"][0]["auto_drops"]) == 1
+
+
+def test_an_injured_player_got_two_for_one_takes_the_empty_ir_slot():
+    snap = make_snapshot(injured={"9": "OUT"})  # team 2's first player; team 1's IR slot is empty
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), [p for p in ctx.team_roster(2) if p != "9"]
+    r = ev.evaluate(1, 2, [a[0]], ["9", b[0]], with_sim=False)
+    me = r["sides"][0]
+    assert not me["auto_drops"] and not me["auto_adds"]  # he goes on IR, as he would in ESPN
+
+
+def test_a_team_already_over_its_limit_isnt_charged_a_drop_by_a_trade():
+    snap = make_snapshot()
+    fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    fa.fantasy_team_id = 2
+    snap.team(2).roster.append(RosterEntry(player_id=fa.id))  # a player more than its slots, on the bench
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), ctx.team_roster(2)
+    r = ev.evaluate(1, 2, [a[0]], [b[0]], with_sim=False)
+    assert not r["sides"][1]["auto_drops"]
+
+
+def test_an_even_trade_drops_nobody_unless_an_ir_spot_leaves():
+    # Every 1-for-1 between every two teams, with OUT players about and a day-to-day one in team 2's IR slot:
+    # only trading him away for a player who can't take that IR slot costs a drop.
+    snap = make_snapshot(injured={"1": "OUT", "20": "OUT"})
+    fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    fa.fantasy_team_id, fa.injury_status = 2, "DAY_TO_DAY"
+    snap.team(2).roster.append(RosterEntry(player_id=fa.id, slot="IR"))
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    pool = pickup_pool(ctx)
+    for t, u in itertools.permutations([t.id for t in snap.teams], 2):
+        for p, q in itertools.product(ctx.team_roster(t), ctx.team_roster(u)):
+            _, drops, adds = apply_trade(ctx, t, [p], [q], pool)
+            spot_leaves = p == fa.id and snap.players[q].injury_status != "OUT"
+            assert not adds and bool(drops) == spot_leaves, (t, p, q, drops)
 
 
 def test_trade_evaluation_shape_and_validation(snapshot):
