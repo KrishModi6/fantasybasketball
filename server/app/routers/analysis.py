@@ -87,7 +87,7 @@ def players(a: LeagueAnalysis = Depends(analysis),
     rows = player_rows(a, ids)
     key = sort.lstrip("-")
     allowed = {"ros_value", "fp_pg", "vorp", "games_next7", "mpg", "season_fp_pg", "recent_fp_pg", "rank",
-               "ownership_pct", "value_pg"}
+               "ownership_pct", "value_pg", "xfp_pg", "luck_pg"}
     if key not in allowed:
         key = "ros_value"
     reverse = key != "rank"

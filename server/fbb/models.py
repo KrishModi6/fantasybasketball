@@ -64,6 +64,16 @@ class GameLog(BaseModel):
     stats: dict[str, float] = Field(default_factory=dict)
 
 
+class TrackingLine(BaseModel):
+    """Season-to-date box score from NBA.com tracking: as it happened, and with the stats xFP prices
+    replaced by what the player's opportunities were worth (fbb/xfp.py)."""
+    season: int
+    gp: float = 0
+    minutes: float = 0
+    actual: dict[str, float] = Field(default_factory=dict)
+    expected: dict[str, float] = Field(default_factory=dict)
+
+
 class ExpertProjection(BaseModel):
     """A published projection (ESPN, or uploaded from another site)."""
     source: str
@@ -87,6 +97,7 @@ class Player(BaseModel):
     history: list[SeasonLine] = Field(default_factory=list)  # completed seasons
     current: SeasonLine | None = None  # season-to-date
     recent_games: list[GameLog] = Field(default_factory=list)
+    tracking: TrackingLine | None = None  # season-to-date xFP inputs, when NBA.com was reachable
     experts: list[ExpertProjection] = Field(default_factory=list)
     ownership_pct: float | None = None
     adp: float | None = None

@@ -48,6 +48,8 @@ def player_rows(a: LeagueAnalysis, ids: list[str] | None = None) -> list[dict]:
             "age": _r(p.age, 1), "ownership_pct": _r(p.ownership_pct, 1),
             "fp_pg": _r(pr.fp_pg), "fp_sd": _r(pr.fp_sd), "preseason_fp_pg": _r(pr.preseason_fp_pg),
             "season_fp_pg": _r(pr.season_fp_pg), "recent_fp_pg": _r(pr.recent_fp_pg),
+            "xfp_pg": _r(pr.xfp_pg),
+            "luck_pg": _r(pr.tracked_fp_pg - pr.xfp_pg) if pr.xfp_pg is not None else None,
             "today_fp": _r(a.engine.fp_scoring.fantasy_points(game.stats), 1) if game else None,
             "today_min": _r(game.minutes, 0) if game else None,
             "games_played": pr.games_played, "mpg": _r(pr.mpg, 1), "availability": _r(pr.availability, 3),
@@ -102,6 +104,7 @@ def player_detail(a: LeagueAnalysis, pid: str, history_rows: list | None = None)
         "carryover_games": pr.carryover_games,
         "carryover_weight": _r(pr.carryover_weight, 3),
         "fp_breakdown": {k: _r(v) for k, v in a.engine.fp_scoring.breakdown(pr.per_game).items()},
+        "xfp": _xfp_detail(p, a.snapshot.settings.season),
         "game_log": games,
         "seasons": seasons,
         "this_season": this_season and {**this_season, "MIN": this_season["mpg"]},
@@ -110,6 +113,16 @@ def player_detail(a: LeagueAnalysis, pid: str, history_rows: list | None = None)
                   for r in (history_rows or [])],
         "modelled_stats": RATE_STATS,
     }
+
+
+def _xfp_detail(p, season: int) -> dict | None:
+    """Season to date per NBA.com, per game: each stat xFP prices, as it happened and as his chances were worth."""
+    xt = p.tracking
+    if xt is None or xt.season != season or not xt.gp:
+        return None
+    return {"games": int(xt.gp), "per_game": {
+        k: {"actual": _r(xt.actual.get(k, 0) / xt.gp), "expected": _r(xt.expected.get(k, 0) / xt.gp)}
+        for k in ("PTS", "FGM", "3PM", "FTM", "AST", "REB", "STL", "BLK")}}
 
 
 def strength_rows(a: LeagueAnalysis) -> list[dict]:

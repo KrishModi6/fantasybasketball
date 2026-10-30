@@ -88,6 +88,35 @@ How quickly old evidence fades is tested, not assumed. `scripts/backtest_recency
 
 Game-to-game volatility of fantasy points is the player's recent standard deviation, shrunk toward the population coefficient of variation (0.51, measured).
 
+### 1.5.1 Expected fantasy points (xFP)
+
+NFL Next Gen Stats, F1 Insights and the NBA's own Inside the Game stats (all built on AWS) follow the same pattern. Tracking data describes each opportunity, a model prices it, and the gap between actual and expected is treated as luck. Courtside applies this to the stats that drive fantasy points, using NBA.com's public tracking dashboards and every shot in its shot log (`fbb/xfp.py`):
+
+| Stat | Opportunity (NBA.com) | Priced at |
+|---|---|---|
+| FGM, 3PM | Every shot: distance, court x/y, shot type (layup, step-back...), zone, period and clock | A LightGBM shot model for a league-average shooter, scaled to this season's league make rate, plus the player's own shot-making above the model |
+| FTM | Free-throw attempts | His FT% |
+| AST | Potential assists (passes that led to a shot) | His assists per potential assist |
+| REB | Rebound chances (within 3.5 ft of the ball) | His rebounds per chance |
+| STL | Deflections | His steals per deflection |
+| BLK | Contested two-pointers | His blocks per contest |
+
+"His" rate means his last two seasons (the older one at half weight), shrunk toward the league rate by a pseudo-count of opportunities (400 shots, 300 threes, 150 free throws, 200 potential assists, 300 rebound chances, 120 deflections, 300 contests), so a rookie converts at the league rate. On each season's unseen shots, the shot model beats league FG% by zone (log loss 0.636 vs 0.658).
+
+During the season, before the update in 1.5, this season's makes, assists, rebounds, steals and blocks move part of the way from what happened toward expected. Attempts, minutes and turnovers stay as they happened. The weights are fitted by `scripts/backtest_xfp.py`: FG 0.70, 3P 1.00, FT 0.90, AST 0.50, REB 0.95, STL 0.75, BLK 0.25. A weight of 1 means only the opportunities count. Threes and rebounds are almost all opportunity; blocks are mostly skill.
+
+The backtest replays 2023‑24, 2024‑25 and 2025‑26 at six points (7 to 91 days after opening night). Every player with 40+ games is projected the way the app would have done it at that date, and the projection is scored on his rest-of-season FP/G. Each season's weights are fitted on the other two seasons, and its shot model is trained on earlier seasons only:
+
+| Season | Without xFP | With xFP | Change | At day 42 |
+|---|---|---|---|---|
+| 2023‑24 | 4.25 FP/G | 4.15 | −2.5% | −4.5% |
+| 2024‑25 | 3.92 | 3.79 | −3.3% | −9.5% |
+| 2025‑26 | 4.41 | 4.27 | −3.2% | −5.0% |
+
+The gain is largest after a player's 15th game, when the preseason prior drops out and this season's sample stands alone. Across 5,033 player-dates, each FP/G a player ran above his xFP so far was followed by 0.83 FP/G less over the rest of the season. Of the players 3+ FP/G above xFP, 69% scored less the rest of the way (40% of all players did). Of those 3+ below, 79% scored more (60% of all players). The player list shows xFP/G and luck (FP/G minus xFP/G), and the AI assistant gets both. `scripts/xfp_report.py` prints this season's luck board.
+
+stats.nba.com does not answer cloud hosts (AWS, Azure, GitHub Actions), so tracking is fetched during a league sync on the desktop app or a home server. Each sync downloads only days not already cached. Where NBA.com can't be reached, projections are what they were without xFP.
+
 ### 1.6 Bounded adjustments (the "news" layer)
 
 Only structured signals change numbers, and each has a cap:
