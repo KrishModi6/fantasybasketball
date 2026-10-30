@@ -1,6 +1,14 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.0
+## What's new in 0.5.1
+
+- **xFP and Luck show up right after updating.** 0.5.0 added them, but until the next hourly refresh Courtside kept showing the league data the old version had saved, which has none. Now Courtside refreshes your league as soon as it starts on a new version. The projections, power rankings and win odds are recalculated with xFP too.
+- **Trades no longer drop a player for no reason.** A team with a day-to-day player still in its IR slot looked one player over the limit, so every trade it made dropped someone (in one 2-for-2, Joel Embiid, about 50 points a week). That player now keeps his IR spot.
+- **Against today's roster.** A trade's **Change per week** compares each team with picking up free agents for any player who projects below one, so the two sides don't add up to zero. Each side now also shows the change against its roster as it is, and the calculation explains the difference. Point at the label for more.
+- **Projected records add up.** The **Proj.** record on **Power rankings**, **Overview** and the team page always adds up to the team's games. In a league with an odd number of teams someone sits out every week, so teams with more bye weeks play fewer games: point at the record to see its games and byes.
+- A week that's over but has no result yet is no longer left out of the projected record and the playoff odds.
+
+## In 0.5.0
 
 Advanced stats, powered by AWS.
 
