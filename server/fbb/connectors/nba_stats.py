@@ -171,7 +171,7 @@ def name_key(name: str) -> str:
     """Accents, punctuation and suffixes dropped: 'A.J. Lawson' and 'AJ Lawson', 'Gary Payton II' and
     'Gary Payton' compare equal."""
     s = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
-    s = re.sub(r"[^a-z ]", "", s.replace("-", " "))
+    s = re.sub(r"[^a-z0-9 ]", "", s.replace("-", " "))
     return " ".join(p for p in s.split() if p not in _SUFFIXES)
 
 

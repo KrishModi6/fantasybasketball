@@ -13,6 +13,7 @@ from fbb.connectors.espn import EspnConnector
 from fbb.connectors.fileimport import FileConnector
 from fbb.connectors.flaim import FlaimConnector
 from fbb.enrich import enrich_players, fetch_missing_bios
+from fbb.xfp import attach_tracking
 from fbb.models import LeagueSnapshot
 from fbb.projections import ProjectionEngine
 
@@ -89,6 +90,10 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
             fetch_missing_bios([pid for pid in snap.players], max_fetch=60)
         except Exception:  # noqa: BLE001 - bios are optional
             pass
+        try:
+            attach_tracking(snap.players, snap.settings.season)
+        except Exception as exc:  # noqa: BLE001 - xFP is optional, and NBA.com does not answer cloud servers
+            log.info("xFP tracking unavailable for %s: %s", league_id, exc)
         db.add(Snapshot(league_id=league_id, source=snap.source, data=pack_snapshot(snap)))
         _prune(db, league_id)
 
