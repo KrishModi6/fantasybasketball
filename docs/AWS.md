@@ -127,21 +127,24 @@ kept 90 days, a few cents at most.
 budget) to protect a cached static file; the budget email is the tripwire instead. CloudFront's
 flat-rate Free plan bundles WAF at $0 if you want it later (console only).
 
-**The daily task** (installed 2026-10-30 on the home PC):
+**The daily task** (installed 2026-10-30 on the home PC), all in `C:\Users\Krish\.courtside-publisher`:
 
 | Piece | Where |
 |---|---|
-| Scheduled task | `Courtside tracking publisher`, daily 08:00, runs late if the PC was off (StartWhenAvailable), only while you're signed in to Windows |
-| Wrapper | `%LOCALAPPDATA%\Courtside\publish-tracking.cmd`: updates the checkout to `origin/main`, then runs the publisher |
-| Checkout | `%LOCALAPPDATA%\Courtside\publisher`, a detached `git worktree` of this repo pinned to `origin/main` |
+| Scheduled task | `Courtside tracking publisher`, daily 08:00, runs late if the PC was off (StartWhenAvailable), only while you're signed in to Windows. It starts `publish-tracking.pyw` with the main checkout's `server\.venv\Scripts\pythonw.exe`, so no console window opens |
+| Wrapper | `publish-tracking.cmd`: updates the checkout to `origin/main`, then runs the publisher. Run it by hand to publish now |
+| Checkout | `publisher\`, a detached `git worktree` of this repo pinned to `origin/main` |
 | Python | the main checkout's `server\.venv` (has `requirements-dev.txt`) |
-| Cache | `%LOCALAPPDATA%\Courtside\publisher-cache` (`FBB_CACHE_DIR`) |
-| Log | `%LOCALAPPDATA%\Courtside\publish.log` |
+| Cache | `publisher-cache\` (`FBB_CACHE_DIR`) |
+| Log | `publish.log` |
+
+Not under `%LOCALAPPDATA%`: the Claude desktop app is a packaged app, so files its sessions create
+there are redirected into its private storage, where Task Scheduler can't see them.
 
 It signs in with the `aws login` session, which renews itself for 90 days; after that, or if the log
 says to sign in again, run `aws login --profile courtside`. If it stops, apps notice nothing for a day
 and then fetch from NBA.com themselves, as before 0.5.0. To stop it: `schtasks /Delete /TN "Courtside
-tracking publisher" /F` and `git worktree remove "%LOCALAPPDATA%\Courtside\publisher"`.
+tracking publisher" /F` and `git worktree remove C:\Users\Krish\.courtside-publisher\publisher`.
 
 **What exists in AWS** (tagged `project=courtside`; Regional resources in `us-east-2`)
 
