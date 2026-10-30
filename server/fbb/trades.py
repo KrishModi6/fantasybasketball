@@ -62,6 +62,9 @@ class TradeSide:
     delta_ros: float = 0.0
     delta_pct: float = 0.0
     delta_per_week: float = 0.0
+    # Against the roster as it is, without swapping players below a pickup for free agents first: the number
+    # that's near the other side's, since the headline also counts what waivers could do instead.
+    delta_vs_roster_per_week: float = 0.0
     delta_this_week: float = 0.0
     delta_playoffs: float = 0.0
     raw_value_delta: float = 0.0
@@ -73,10 +76,16 @@ class TradeSide:
 
 
 def roster_capacity(ctx: AnalysisContext, roster: list[str]) -> int:
-    """Active slots plus IR slots that injured players on this roster can occupy."""
+    """Active slots plus IR slots that injured players on this roster can occupy.
+
+    A player in an IR slot keeps it whatever his status says now: ESPN leaves a player there after he's
+    upgraded to day-to-day, so counting only OUT players made his team look a player over the limit, and
+    every trade it made dropped someone.
+    """
     slots = ctx.s.settings.roster_slots
     active = sum(n for code, n in slots.items() if code != "IR")
-    injured = sum(1 for p in roster if ctx.s.players[p].injury_status in ("OUT", "INJURY_RESERVE"))
+    on_ir = {e.player_id for t in ctx.s.teams for e in t.roster if e.slot == "IR"}
+    injured = sum(1 for p in roster if ctx.s.players[p].injury_status in ("OUT", "INJURY_RESERVE") or p in on_ir)
     return active + min(slots.get("IR", 0), injured)
 
 
@@ -191,6 +200,7 @@ class TradeEvaluator:
         roster, drops, adds = apply_trade(ctx, team_id, gives, receives, self.pool)
         after = ctx.project_window(roster)
         base_roster, fills, before = self.baseline(team_id)
+        as_is = before
         # A player who projects below a pickup is worth no more than one: the team could swap him on waivers
         # without trading. So the trade is compared with that swap made, not credited for it.
         weak = [p for p in gives + drops if _ros_value(ctx, p) < self.replacement]
@@ -209,6 +219,7 @@ class TradeEvaluator:
         side.delta_ros = after.mean - before.mean
         side.delta_pct = side.delta_ros / before.mean if before.mean else 0.0
         side.delta_per_week = side.delta_ros / _weeks(ctx)
+        side.delta_vs_roster_per_week = (after.mean - as_is.mean) / _weeks(ctx)
         side.delta_playoffs = sum(after.by_mp.get(mp, [0, 0])[0] - before.by_mp.get(mp, [0, 0])[0]
                                   for mp in self.playoff_mps)
         if self.this_week:
@@ -319,6 +330,9 @@ class TradeEvaluator:
                 f"{s.after_ros:,.0f} points ({s.delta_ros:+,.0f}, {s.delta_pct:+.1%}). The gap between the raw "
                 f"and lineup-adjusted numbers is positional fit, schedule overlap and bench depth."
             )
+            if s.counted_as_pickups:
+                lines.append(f"Against the roster as it is, without those waiver swaps: {s.delta_vs_roster_per_week:+,.1f} "
+                             "pts/week. Each team scores with its own lineup, so one side's loss isn't the other's gain.")
             if self.playoff_mps:
                 lines.append(f"Fantasy-playoff weeks only: {s.delta_playoffs:+,.0f} points.")
             if s.before_playoff_odds is not None:

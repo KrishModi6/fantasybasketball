@@ -251,6 +251,7 @@ export interface TradeSide {
   delta_ros: number;
   delta_pct: number;
   delta_per_week: number;
+  delta_vs_roster_per_week: number; // against the roster as it is, without the waiver swaps counted_as_pickups makes
   delta_this_week: number;
   delta_playoffs: number;
   raw_value_delta: number;

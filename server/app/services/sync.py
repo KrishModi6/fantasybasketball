@@ -27,6 +27,10 @@ from .board import MOVE_SOURCES, describe_move, refresh_board, roster_moves
 
 log = logging.getLogger(__name__)
 KEEP_SNAPSHOTS = 20
+# Raised when a sync starts collecting something older snapshots lack, so an updated app re-syncs those
+# leagues when it starts instead of waiting for the hourly refresh. 1: xFP tracking (0.5.0 added it, but the
+# snapshot an update found was the old one, so xFP, Luck and the projections built on them stayed missing).
+DATA_VERSION = 1
 
 
 def build_connector(league: League) -> LeagueConnector:
@@ -94,6 +98,7 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
             attach_tracking(snap.players, snap.settings.season)
         except Exception as exc:  # noqa: BLE001 - xFP is optional, and NBA.com does not answer cloud servers
             log.info("xFP tracking unavailable for %s: %s", league_id, exc)
+        snap.data_version = DATA_VERSION
         db.add(Snapshot(league_id=league_id, source=snap.source, data=pack_snapshot(snap)))
         _prune(db, league_id)
 
@@ -194,7 +199,9 @@ def _record_projection_history(db, league_id: str, snap: LeagueSnapshot) -> None
                                  injury_status=snap.players[pid].injury_status or "ACTIVE"))
 
 
-def due_leagues(now: datetime | None = None) -> list[str]:
+def due_leagues(now: datetime | None = None, outdated: bool = False) -> list[str]:
+    """Leagues to refresh: those whose sync interval has passed, and with ``outdated`` (the first check
+    after the app starts) those whose latest snapshot is older than DATA_VERSION."""
     now = now or datetime.now(timezone.utc)
     db = SessionLocal()
     try:
@@ -208,6 +215,10 @@ def due_leagues(now: datetime | None = None) -> list[str]:
                 last = last.replace(tzinfo=timezone.utc)
             if last is None or now - last >= interval:
                 out.append(lg.id)
+            elif outdated:
+                row = latest_snapshot_row(db, lg.id)
+                if row is not None and unpack_snapshot(row.data).data_version < DATA_VERSION:
+                    out.append(lg.id)
         return out
     finally:
         db.close()

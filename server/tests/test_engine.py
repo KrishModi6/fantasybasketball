@@ -13,7 +13,7 @@ from fbb.connectors.fileimport import normalize_name, parse_upload
 from fbb.context import AnalysisContext
 from fbb.enrich import enrich_players
 from fbb.lineup import SlotModel, solve_day
-from fbb.models import GameLog, Player, ScoringSettings, SeasonLine
+from fbb.models import GameLog, Player, RosterEntry, ScoringSettings, SeasonLine
 from fbb.projections import MANUAL_LIMIT, SEASON_ONLY_AFTER_GAMES, ProjectionEngine, games_from_injury_note
 from fbb.strength import MatchupModel, TeamStrength, league_strength, round_robin, team_windows
 from fbb.trades import TradeEvaluator, TradeSide, _fairness, _verdict, apply_trade, find_trades, pickup_pool
@@ -383,6 +383,11 @@ def test_a_player_below_a_pickup_counts_as_one(snapshot):
     assert me["counted_as_pickups"] == [[weak, fa]]  # trading him is compared with swapping him for a pickup
     assert me["raw_value_delta"] == pytest.approx(ev.values[b[0]]["ros_value"] - ev.values[fa]["ros_value"])
     assert any("counts as that pickup" in line for line in r["math"][0]["lines"])
+    # The calculation also says what the trade does against the roster as it is.
+    as_is = ev.baseline(1)[2]
+    weeks = max(1.0, len(ctx.days) / 7)
+    assert me["delta_vs_roster_per_week"] == pytest.approx((me["after_ros"] - as_is.mean) / weeks)
+    assert any("Against the roster as it is" in line for line in r["math"][0]["lines"])
 
 
 def test_getting_an_injured_player_opens_no_spot():
@@ -394,6 +399,25 @@ def test_getting_an_injured_player_opens_no_spot():
     me, them = r["sides"]
     assert not me["auto_adds"] and not me["auto_drops"]  # his IR slot isn't a free pickup
     assert them["open_spot_adds"] and not them["auto_adds"]  # team 2's open spot was there either way
+
+
+def test_a_day_to_day_player_in_the_ir_slot_keeps_it():
+    # ESPN leaves a player in the IR slot after he's upgraded to day-to-day: his team isn't over the limit,
+    # so a trade mustn't drop someone for it (this cost a 2-for-2 50 points a week).
+    snap = make_snapshot()
+    fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    fa.fantasy_team_id, fa.injury_status = 2, "DAY_TO_DAY"
+    snap.team(2).roster.append(RosterEntry(player_id=fa.id, slot="IR"))
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), ctx.team_roster(2)
+    r = ev.evaluate(1, 2, [a[0], a[1]], [b[0], b[1]], with_sim=False)
+    them = r["sides"][1]
+    assert not them["auto_drops"] and not them["auto_adds"] and not them["open_spot_adds"]
+    # Trading him away takes the spot with him, though: then his old team has to drop a player.
+    r = ev.evaluate(1, 2, [a[0]], [fa.id], with_sim=False)
+    me, them = r["sides"]
+    assert not me["auto_drops"] and them["auto_drops"]
 
 
 def test_trade_evaluation_shape_and_validation(snapshot):

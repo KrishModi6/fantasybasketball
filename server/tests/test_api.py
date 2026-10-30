@@ -266,6 +266,30 @@ def test_espn_login_claims_its_own_team(client):
         db.rollback()
         db.close()
 
+def test_an_update_resyncs_leagues_an_older_app_synced(client):
+    """After an update the first scheduled check refreshes leagues whose snapshot predates DATA_VERSION, so
+    what the update adds (0.5.0's xFP) shows without waiting for the hourly refresh."""
+    from app.db import SessionLocal
+    from app.orm import Snapshot
+    from app.services.analysis import latest_snapshot_row, pack_snapshot, unpack_snapshot
+    from app.services.sync import DATA_VERSION, due_leagues
+
+    owner = _auth(client, "update-owner@example.com", "Update Owner")
+    lid = client.post("/api/leagues", json={"source": "demo", "name": "Update League"}, headers=owner).json()["id"]
+    db = SessionLocal()
+    try:
+        snap = unpack_snapshot(latest_snapshot_row(db, lid).data)
+        assert snap.data_version == DATA_VERSION
+        assert lid not in due_leagues(outdated=True)  # just synced by this version
+        snap.data_version = 0  # as an older app saved it
+        db.add(Snapshot(league_id=lid, source=snap.source, data=pack_snapshot(snap)))
+        db.commit()
+    finally:
+        db.close()
+    assert lid not in due_leagues()  # the hourly check still waits
+    assert lid in due_leagues(outdated=True)
+
+
 def test_board_follows_the_league(client):
     """Board posts are re-scored after each refresh and flagged once a roster move makes them impossible."""
     from app.db import SessionLocal
