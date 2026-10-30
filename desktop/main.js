@@ -262,9 +262,15 @@ function publishUpdate(next) {
   }
 }
 
+// Writes each line at once, so the last lines before Courtside quits (installing an update) are kept.
 function fileLogger(file) {
-  const write = (level) => (...parts) =>
-    fs.appendFile(file, `${new Date().toISOString()} ${level} ${parts.join(" ")}\n`, () => undefined);
+  const write = (level) => (...parts) => {
+    try {
+      fs.appendFileSync(file, `${new Date().toISOString()} ${level} ${parts.join(" ")}\n`);
+    } catch {
+      /* logging must never break updating */
+    }
+  };
   return { info: write("INFO"), warn: write("WARN"), error: write("ERROR"), debug: () => undefined };
 }
 

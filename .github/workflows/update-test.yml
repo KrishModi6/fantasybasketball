@@ -135,7 +135,8 @@ jobs:
           if ($installed -ne $env:FROM) { throw "Installed $installed, not $env:FROM" }
       - name: Open it and wait for it to download ${{ needs.versions.outputs.to }}
         run: |
-          Start-Process "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe"
+          $app = Start-Process "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe" -PassThru
+          $app.Id | Set-Content "$env:RUNNER_TEMP\courtside.pid"
           $log = "$env:APPDATA\Courtside\logs\updates.log"
           foreach ($i in 1..120) {
             if ((Test-Path $log) -and (Select-String -Path $log -SimpleMatch "New version $env:TO has been downloaded" -Quiet)) { break }
@@ -146,13 +147,19 @@ jobs:
           }
       - name: Close it, and check it installed ${{ needs.versions.outputs.to }}
         run: |
-          $win = Get-Process Courtside | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1
-          if (-not $win) { throw "Courtside has no window to close" }
-          $null = $win.CloseMainWindow()
+          $app = Get-Process -Id (Get-Content "$env:RUNNER_TEMP\courtside.pid")
+          "Window: '$($app.MainWindowTitle)' (handle $($app.MainWindowHandle))"
+          if (-not $app.CloseMainWindow()) { throw "Courtside has no window to close" }
+          if ($app.WaitForExit(60000)) {
+            "Courtside quit with exit code $($app.ExitCode)"
+          } else {
+            "Courtside is still running a minute after its window was closed"
+          }
           $exe = "$env:LOCALAPPDATA\Programs\Courtside\Courtside.exe"
           foreach ($i in 1..90) {
-            $busy = Get-Process Courtside, Courtside-Setup-* -ErrorAction SilentlyContinue
+            $busy = Get-Process Courtside, Courtside-Setup-*, courtside-engine -ErrorAction SilentlyContinue
             if (-not $busy -and (Get-Item $exe).VersionInfo.FileVersion -eq $env:TO) { break }
+            if ($i % 10 -eq 1) { "Running: $(($busy | ForEach-Object { "$($_.ProcessName) $($_.Id)" }) -join ', ')" }
             Start-Sleep 2
           }
           $installed = (Get-Item $exe).VersionInfo.FileVersion
