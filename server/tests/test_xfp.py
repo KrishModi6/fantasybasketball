@@ -75,6 +75,21 @@ def test_tracking_line_prices_opportunities_and_keeps_attempts():
     assert line.actual["PTS"] == 2 * 40 + 3 * 20 + 25
 
 
+def test_calibrated_lines_add_up_to_what_happened_league_wide():
+    # Last season's skills expect 40% more rebounds and free throws than the league got: that drift is nobody's luck.
+    big = X.tracking_line(2027, {**ROW, "REB": 60, "REB_CHANCES": 100, "FTM": 20}, None, {**X.skills([], LEAGUE), "REB": 1.0})
+    guard = X.tracking_line(2027, {**ROW, "REB": 10, "REB_CHANCES": 40, "FTM": 20}, None, {**X.skills([], LEAGUE), "REB": 1.0})
+    before = big.expected["REB"] / guard.expected["REB"]
+    lines = X.calibrate_lines({1: big, 2: guard})
+    for stat in X.COMPONENTS:
+        assert sum(x.expected[stat] for x in lines.values()) == pytest.approx(sum(x.actual[stat] for x in lines.values()))
+    assert big.expected["REB"] / guard.expected["REB"] == pytest.approx(before)  # who got more chances still counts
+    # The league got 70 rebounds from 140 chances: his 100 were worth 50, and he got 60.
+    assert big.actual["REB"] - big.expected["REB"] == pytest.approx(10)
+    e = big.expected
+    assert e["PTS"] == pytest.approx(2 * (e["FGM"] - e["3PM"]) + 3 * e["3PM"] + e["FTM"])
+
+
 def test_calibrate_matches_this_seasons_makes():
     shots = _shots(400)
     probs = np.full(len(shots), 0.3)
@@ -138,11 +153,14 @@ def test_attach_tracking_links_players_offline(monkeypatch):
     shots = [[20261101, 77, "g", 1, 300, "Layup Shot", 0, "Restricted Area", 1, 0, 10, 1]] * 4
     model = X.XfpModel({"shot_model": X.ShotModel().fit(_shots(3000)).to_dict(), "beta": {}, "league": LEAGUE})
     monkeypatch.setattr(X.XfpModel, "load", classmethod(lambda cls, path=None: model))
+    # Another NBA player, in nobody's league, still counts toward the league's assists per potential assist.
+    other = {**ROW, "AST": 10, "POTENTIAL_AST": 40, "name": "Nobody Here", "team": "ZZZ"}
     monkeypatch.setattr(X, "refresh_live", lambda season: {
-        "dash": {"77": {**ROW, "name": p.name, "team": p.pro_team}}, "shots": shots})
+        "dash": {"77": {**ROW, "name": p.name, "team": p.pro_team}, "78": other}, "shots": shots})
     monkeypatch.setattr(X, "NBA_IDS_PATH", X.CACHE_DIR / "no-such-file.json")
     assert X.attach_tracking(snap.players, 2027) == 1
-    assert p.tracking is not None and p.tracking.gp == ROW["GP"] and p.tracking.expected["AST"] == pytest.approx(33)
+    # 50 assists from 100 potential assists league-wide: his 60 were worth 30.
+    assert p.tracking is not None and p.tracking.gp == ROW["GP"] and p.tracking.expected["AST"] == pytest.approx(30)
 
 
 # ---- live file: the published copy first, then NBA.com ----------------------

@@ -3,6 +3,8 @@ Courtside runs on your computer: projections, power rankings, matchup simulation
 ## What's new in 0.5.2
 
 - **xFP/G and Luck on your roster.** The team page's **Roster** tab now has the **xFP/G** and **Luck** columns from **Players**, next to **Last 10**, so you can see at a glance which of your players are running hot (sell-high) or cold (buy-low). Point at either label for what it means. On a narrow window they hide, like the other extra columns.
+- **Team luck on Power rankings.** A new **Luck** column: how many points a week each team's players have been scoring above or below what their chances were worth, counted as often as its best lineups will start them. A team well above zero is likelier to cool off. Select a team for who it comes from, like "hottest Fred VanVleet +22, coldest Caleb Wilson −24".
+- **Fairer xFP for rebounds.** NBA.com's rebound counts changed during last season, so xFP expected about 27% more rebounds than anyone was getting. Almost every player looked unlucky, and rebound projections ran high. Expected rebounds, assists, steals, blocks and free throws are now scaled to this season's league totals, the way shots already were. Projections come down a little, about 15–25 points a week per team, and Luck now averages out across the league. Courtside refreshes your league when it starts on 0.5.2, so this applies right away.
 
 ## In 0.5.1
 

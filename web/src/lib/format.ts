@@ -23,6 +23,15 @@ export const projRecord = (t: Projected) => {
 /** What a projected record is made of: the expected wins, out of the team's games and bye weeks. */
 export const projRecordNote = (t: Projected) =>
   `${fmt1(t.proj_wins)} expected wins in ${count(t.proj_games, "game")}${t.byes ? ` (${count(t.byes, "bye week")})` : ""}`;
+/** Who a team's luck comes from: the player running hottest and the one running coldest, in points a week. */
+export const luckNote = (players: { name: string; per_week: number }[]) => {
+  const byWeek = [...players].sort((a, b) => b.per_week - a.per_week);
+  const hot = byWeek[0], cold = byWeek[byWeek.length - 1];
+  return [
+    hot && hot.per_week >= 0.5 ? `hottest ${hot.name} ${signed(hot.per_week, 0)}` : "",
+    cold && cold.per_week <= -0.5 ? `coldest ${cold.name} ${signed(cold.per_week, 0)}` : "",
+  ].filter(Boolean).join(", ");
+};
 /** How a power score is made up: this season's record for the share played, the projection for the rest. */
 export const powerMix = (t: { wins: number; losses: number; ties: number; record_weight: number; projected_allplay: number }) =>
   t.record_weight > 0

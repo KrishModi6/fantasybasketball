@@ -22,7 +22,7 @@ Courtside reopens where you left off. The back arrow (or your mouse's back butto
 - the best add/drop right now;
 - the live league feed (trades shared, injuries, joins) and NBA news.
 
-**Rankings.** Every team ranked by *power score*. This season's record counts for the share of the regular season already played; for the rest, it's the projected *all-play win rate*: how often the team would beat every other team, every remaining week. In week 1 it's all projection, halfway it's half each. Hover a power score to see the mix. Select a team's row to see **why**:
+**Rankings.** Every team ranked by *power score*. This season's record counts for the share of the regular season already played; for the rest, it's the projected *all-play win rate*: how often the team would beat every other team, every remaining week. In week 1 it's all projection, halfway it's half each. Hover a power score to see the mix. **Luck** (points leagues) is how many points a week the team's players have been scoring above or below what their chances were worth, counted as often as its best lineups will start them; a team well above zero is likelier to cool off. Select a team's row to see **why**:
 - fantasy points per week from each stat vs league average;
 - who produces them;
 - empty lineup slots, games stuck on the bench and schedule volume;
