@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LogOut } from "lucide-react";
-import { BackButton, BrandMark, FetchLine, ThemeToggle } from "../components/Layout";
+import { AppMenuButton, BackButton, BrandMark, FetchLine, ThemeToggle } from "../components/Layout";
 import { Empty, ErrorBox, LoadingBlock, Panel, SubTabs, Tag } from "../components/ui";
 import { VersionBadge } from "../components/VersionBadge";
 import { api, isLocalApp, serverUrl } from "../lib/api";
@@ -25,6 +25,7 @@ export function LeaguesPage() {
     <div className="standalone">
       <FetchLine />
       <header className="topbar">
+        <AppMenuButton />
         {canGoBack() && <BackButton />}
         <span className="brand"><BrandMark /> Courtside</span>
         <span className="small muted">Leagues</span>

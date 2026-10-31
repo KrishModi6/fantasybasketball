@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useIsFetching, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, LogOut, Moon, RefreshCw, Sun } from "lucide-react";
+import { ArrowLeft, LogOut, Menu, Moon, RefreshCw, Sun } from "lucide-react";
 import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { openAppMenu, openWhatsNew } from "../lib/desktop";
 import { count, pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
 import { canGoBack, rememberPath } from "../lib/nav";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
@@ -40,6 +41,18 @@ export function ThemeToggle() {
   return (
     <button className="btn ghost icon" onClick={flip} aria-label={`Switch to ${light ? "dark" : "light"} theme`} title="Theme">
       {light ? <Moon /> : <Sun />}
+    </button>
+  );
+}
+
+/** Desktop app on Windows and Linux: the app menu (File, Edit, View, Window, Help), which has no menu bar there. */
+export function AppMenuButton() {
+  const desktop = window.courtside;
+  if (!desktop?.openMenu || desktop.platform === "darwin") return null;
+  return (
+    <button className="btn ghost icon" onClick={(e) => openAppMenu(e.currentTarget)} aria-label="Menu" title="Menu"
+      aria-haspopup="menu">
+      <Menu />
     </button>
   );
 }
@@ -209,6 +222,7 @@ export function LeagueLayout() {
       <a className="skip-link" href="#main">Skip to content</a>
       <FetchLine />
       <header className="topbar">
+        <AppMenuButton />
         <BackButton fallback={base} />
         <Link to={base} className="brand" aria-label="League home" title="League home"><BrandMark /> <span className="hide-sm">Courtside</span></Link>
         <LeagueSwitch current={league} />
@@ -264,7 +278,13 @@ export function LeagueLayout() {
         {league && <span>{sourceLabel[league.source]} data, synced {relTime(league.sync.last_synced_at)}</span>}
         {model?.trained && <span>Model trained through {model.trained_through ? `${model.trained_through - 1}–${String(model.trained_through).slice(2)}` : "–"}</span>}
         <span>{league?.me?.role === "owner" ? "League owner" : "Member"}</span>
-        {window.courtside?.version && <span>Courtside {window.courtside.version}</span>}
+        {window.courtside?.version && (
+          <span>
+            <button type="button" className="status-link" onClick={openWhatsNew} title="What's new in each version">
+              Courtside {window.courtside.version} · What's new
+            </button>
+          </span>
+        )}
       </footer>
     </div>
   );

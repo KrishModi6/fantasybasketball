@@ -3,6 +3,7 @@ import { BrowserRouter, HashRouter, Navigate, Route, Routes, useLocation } from 
 import { LeagueLayout } from "./components/Layout";
 import { LoadingBlock } from "./components/ui";
 import { UpdatePopup } from "./components/UpdatePopup";
+import { WhatsNew } from "./components/WhatsNew";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { rememberedPath } from "./lib/nav";
 import { useLeagues } from "./lib/queries";
@@ -72,6 +73,7 @@ export function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <UpdatePopup />
+          <WhatsNew />
         </AuthProvider>
       </ToastProvider>
     </Router>

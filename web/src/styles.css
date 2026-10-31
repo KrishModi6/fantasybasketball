@@ -220,6 +220,25 @@ th.n {
 .topbar .spacer {
   flex: 1;
 }
+/* Desktop app: the top bar is the window's title bar (the window has no system one). Drag it to move the
+   window, double-click it to maximize; its controls stay clickable. */
+:root[data-platform] .topbar {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+:root[data-platform] .topbar :is(a, button, select, input, label) {
+  -webkit-app-region: no-drag;
+}
+/* Windows and Linux draw the minimize, maximize and close buttons over the right end of the bar (the
+   titlebar-area insets say where; 138px is Windows' usual width when they don't). */
+:root[data-platform="win32"] .topbar,
+:root[data-platform="linux"] .topbar {
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)) + 8px);
+}
+/* A Mac keeps its traffic lights at the left end. */
+:root[data-platform="darwin"] .topbar {
+  padding-left: 80px;
+}
 .topbar .label {
   color: var(--muted);
 }
@@ -370,6 +389,18 @@ th.n {
   border-right: 0;
   margin-left: auto;
   border-left: 1px solid var(--border);
+}
+.status-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.status-link:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 /* ---------- page header & toolbars ---------- */
@@ -1276,6 +1307,24 @@ table.data th button.term {
 }
 .dialog h2 {
   font-size: 14px;
+}
+.dialog.whats-new {
+  width: min(620px, calc(100vw - 24px));
+}
+.whats-new-body {
+  display: grid;
+  gap: 14px;
+  max-height: min(62vh, 600px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.whats-new-since {
+  margin: 0;
+}
+.whats-new-version {
+  font-size: 13px;
+  color: var(--accent-text);
+  margin: 0 0 6px;
 }
 .toasts {
   position: fixed;

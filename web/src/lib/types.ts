@@ -227,7 +227,7 @@ export interface TeamDetail {
 export interface TeamReport {
   weaknesses: { kind: string; severity: number; title: string; detail: string; player_id?: string }[];
   moves: { add: string; add_name: string; drop: string; drop_name: string; delta_ros: number; delta_per_week: number; delta_this_week: number; reasons: string[]; on_waivers: boolean }[];
-  streaming: { days_left: number; acquisition_limit?: number | null; moves: { add: string; add_name: string; drop: string; drop_name: string; games_this_week: number; delta_this_week: number; ros_cost: number }[] };
+  streaming: { days_left: number; acquisition_limit?: number | null; moves: { add: string; add_name: string; drop: string; drop_name: string; games_this_week: number; delta_this_week: number; ros_cost: number; on_waivers: boolean }[] };
 }
 
 export interface LineupDay {
@@ -248,6 +248,7 @@ export interface TradeSide {
   auto_adds: string[];
   open_spot_adds: string[]; // free agents the team's open spots get, with or without the trade
   counted_as_pickups: [string, string][]; // [player, free agent]: traded away or dropped, valued as that pickup
+  return_drops: [string, string, string][]; // [dropped, returning IR player or "", ISO date]: when he's back the roster is over its limit
   before_ros: number;
   after_ros: number;
   delta_ros: number;

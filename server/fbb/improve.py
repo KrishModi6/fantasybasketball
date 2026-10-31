@@ -82,31 +82,47 @@ def diagnose(ctx: AnalysisContext, team_id: int, base: WindowResult, league: dic
     return issues
 
 
+def _droppable(ctx: AnalysisContext, team_id: int, roster: list[str]) -> list[str]:
+    """Players a pickup can replace. Not the one in the IR slot: dropping him frees only that slot, and a
+    healthy free agent can't go there (it suggested dropping an injured starter for a pickup ESPN won't allow)."""
+    on_ir = {e.player_id for e in ctx.s.team(team_id).roster if e.slot == "IR"}
+    return [p for p in roster if p not in on_ir and ctx.s.players[p].injury_status != "INJURY_RESERVE"]
+
+
+def _swap(ctx: AnalysisContext, roster: list[str], add: str, drop: str) -> tuple[list[str], dict[str, int] | None]:
+    """Roster and leaving days (for project_window) after adding ``add`` for ``drop``. A waiver claim drops
+    him only when it clears, so he plays until then."""
+    new = [p for p in roster if p != drop] + [add]
+    if not ctx.s.players[add].on_waivers:
+        return new, None
+    return new + [drop], {drop: ctx.first_day(add)}
+
+
 def add_drop_moves(ctx: AnalysisContext, team_id: int, base: WindowResult, limit: int = 8) -> list[dict]:
     roster = ctx.team_roster(team_id)
     values = player_values(ctx)
     fas = [p.id for p in ctx.s.free_agents() if p.id in ctx.proj and ctx.proj[p.id].games_out < 6]
     fas.sort(key=lambda pid: -values[pid]["ros_value"])
     fas = fas[:TOP_FREE_AGENTS]
-    droppable = sorted((pid for pid in roster if ctx.s.players[pid].injury_status not in ("INJURY_RESERVE",)),
-                       key=lambda pid: values[pid]["ros_value"])[:DROP_CANDIDATES]
+    droppable = sorted(_droppable(ctx, team_id, roster), key=lambda pid: values[pid]["ros_value"])[:DROP_CANDIDATES]
     weeks = _weeks(ctx, ctx.days)
     cur = ctx.s.current_matchup_period
     week_days = ctx.matchup_days(cur)
-    base_week = ctx.project_window(roster, week_days).mean if week_days else 0.0
+    base_week = ctx.project_window(roster, week_days, team_id=team_id).mean if week_days else 0.0
     out = []
     for fa in fas:
         best = None
         for drop in droppable:
-            new_roster = [p for p in roster if p != drop] + [fa]
-            after = ctx.project_window(new_roster)
+            new_roster, leaves = _swap(ctx, roster, fa, drop)
+            after = ctx.project_window(new_roster, team_id=team_id, leaves=leaves)
             delta = after.mean - base.mean
             if best is None or delta > best[0]:
-                best = (delta, drop, new_roster)
+                best = (delta, drop, new_roster, leaves)
         if not best or best[0] <= 0:
             continue
-        delta, drop, new_roster = best
-        week_delta = (ctx.project_window(new_roster, week_days).mean - base_week) if week_days else 0.0
+        delta, drop, new_roster, leaves = best
+        week_delta = (ctx.project_window(new_roster, week_days, team_id=team_id, leaves=leaves).mean - base_week
+                      if week_days else 0.0)
         fa_pr, dr_pr = ctx.proj[fa], ctx.proj[drop]
         reasons = []
         if fa_pr.fp_pg > dr_pr.fp_pg:
@@ -133,20 +149,27 @@ def streaming_moves(ctx: AnalysisContext, team_id: int, limit: int = 6) -> dict:
         return {"days_left": 0, "moves": []}
     roster = ctx.team_roster(team_id)
     values = player_values(ctx)
-    base = ctx.project_window(roster, days).mean
-    drop = min((p for p in roster if ctx.proj[p].games_out < 50), key=lambda p: values[p]["vorp"], default=None)
+    base = ctx.project_window(roster, days, team_id=team_id).mean
+    drop = min((p for p in _droppable(ctx, team_id, roster) if ctx.proj[p].games_out < 50),
+               key=lambda p: values[p]["vorp"], default=None)
     if drop is None:
         return {"days_left": len(days), "moves": []}
+
+    def games(pid: str) -> float:
+        # A pickup plays only once his waiver claim clears, and not in a game that has already started.
+        return ctx.expected_games(pid, [d for d in days if d >= ctx.first_day(pid)])
+
     fas = [p.id for p in ctx.s.free_agents() if p.id in ctx.proj and ctx.proj[p.id].games_out == 0]
-    fas.sort(key=lambda pid: -ctx.value_pg[pid] * ctx.expected_games(pid, days))
+    fas.sort(key=lambda pid: -ctx.value_pg[pid] * games(pid))
     moves = []
     for fa in fas[:25]:
-        new = [p for p in roster if p != drop] + [fa]
-        delta = ctx.project_window(new, days).mean - base
+        new, leaves = _swap(ctx, roster, fa, drop)
+        delta = ctx.project_window(new, days, team_id=team_id, leaves=leaves).mean - base
         if delta > 0:
             moves.append({"add": fa, "add_name": ctx.proj[fa].name, "drop": drop, "drop_name": ctx.proj[drop].name,
-                          "games_this_week": ctx.expected_games(fa, days), "delta_this_week": delta,
-                          "ros_cost": values[drop]["ros_value"] - values[fa]["ros_value"]})
+                          "games_this_week": games(fa), "delta_this_week": delta,
+                          "ros_cost": values[drop]["ros_value"] - values[fa]["ros_value"],
+                          "on_waivers": ctx.s.players[fa].on_waivers})
     moves.sort(key=lambda x: -x["delta_this_week"])
     return {"days_left": len(days), "acquisition_limit": ctx.s.settings.acquisition_limit_per_matchup,
             "moves": moves[:limit]}
@@ -156,10 +179,12 @@ def lineup_plan(ctx: AnalysisContext, team_id: int, n_days: int = 7) -> list[dic
     """Optimal lineups for the next days with a confidence for every start."""
     roster = ctx.team_roster(team_id)
     days = [d for d in ctx.days[:n_days]]
-    res = ctx.project_window(roster, days, collect_days=True)
+    res = ctx.project_window(roster, days, collect_days=True, team_id=team_id)
     out = []
     for day in res.days:
         d = day["period"]
+        gone = {pid for pid, (cut, _) in res.cuts.items() if cut <= d}  # dropped when an injured teammate returned
+        roster = [pid for pid in roster if pid not in gone]
         playing = {pid for pid in roster if ctx.p_play(pid).get(d, 0) > 0}
         starters = []
         bench = [pid for pid in day["bench"]]
