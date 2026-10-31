@@ -13,7 +13,7 @@ from fbb.connectors.fileimport import normalize_name, parse_upload
 from fbb.context import AnalysisContext
 from fbb.enrich import enrich_players
 from fbb.lineup import SlotModel, solve_day
-from fbb.models import GameLog, Player, RosterEntry, ScoringSettings, SeasonLine
+from fbb.models import GameLog, Player, RosterEntry, ScoringSettings, SeasonLine, TrackingLine
 from fbb.projections import MANUAL_LIMIT, SEASON_ONLY_AFTER_GAMES, ProjectionEngine, games_from_injury_note
 from fbb.strength import MatchupModel, TeamStrength, league_strength, round_robin, team_windows
 from fbb.trades import TradeEvaluator, TradeSide, _fairness, _verdict, apply_trade, find_trades, pickup_pool
@@ -284,6 +284,23 @@ def _start_week(snap, mp: int) -> None:
 
 def _strength(snap):
     return {ts.team_id: ts for ts in league_strength(AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all()))}
+
+
+def test_team_luck_is_its_players_luck_at_the_rate_they_start():
+    snap = make_snapshot()
+    actual = {"PTS": 160.0, "REB": 48.0, "AST": 72.0, "STL": 8.0, "BLK": 8.0, "TO": 16.0, "FGM": 64.0, "FGA": 128.0,
+              "FTM": 24.0, "FTA": 32.0, "3PM": 8.0, "3PA": 32.0}
+    # Team 1's first player: 32 assists more than his chances were worth over 8 games, 2 points each.
+    snap.players["1"].tracking = TrackingLine(season=snap.settings.season, gp=8, minutes=240, actual=actual,
+                                              expected={**actual, "AST": 40.0})
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    teams = {ts.team_id: ts for ts in league_strength(ctx, with_sim=False)}
+    starts = next(p["starts"] for p in teams[1].explanation["players"] if p["player_id"] == "1")
+    weeks = max(1, len(ctx.days)) / 7
+    assert starts > 0
+    assert teams[1].luck_ppw == pytest.approx(2 * 32 / 8 * starts / weeks)
+    assert [p["player_id"] for p in teams[1].explanation["luck"]["players"]] == ["1"]
+    assert teams[2].luck_ppw is None  # nobody on team 2 has tracking: no luck to show, not zero
 
 
 def test_projected_records_add_up_to_each_teams_games():

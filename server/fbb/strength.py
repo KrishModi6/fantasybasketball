@@ -48,6 +48,7 @@ class TeamStrength:
     record_weight: float = 0.0  # share of the regular season already played
     ppw: float = 0.0
     ppw_vs_avg: float = 0.0
+    luck_ppw: float | None = None  # pts/week its players ran above (+) or below (-) their xFP; None without tracking
     wins: int = 0
     losses: int = 0
     ties: int = 0
@@ -359,6 +360,7 @@ def league_strength(ctx: AnalysisContext, results: dict[int, WindowResult] | Non
             ts.current = {"matchup_period": cur, "opponent_id": opp, "proj_score": my, "opp_proj_score": th,
                           "win_prob": mm.p_win(t.id, opp, cur)}
         ts.explanation = explain_team(ctx, t.id, results, ppw, league_avg, mm, future_reg)
+        ts.luck_ppw = ts.explanation.get("luck", {}).get("per_week")
         out.append(ts)
     out.sort(key=lambda x: (-x.power_score, -x.projected_allplay))
     for i, ts in enumerate(out, 1):
@@ -403,7 +405,18 @@ def explain_team(ctx: AnalysisContext, team_id: int, results: dict[int, WindowRe
          "starts": res.starts.get(pid, 0.0), "games": res.games.get(pid, 0.0)}
         for pid, v in top
     ]
-    all_empty = [r.empty_slot_games / weeks for r in results.values()]
+    # Luck (points leagues): how far each player's points this season ran above or below what his chances were
+    # worth (xFP), at the rate the optimal lineups will start him, so it reads in points per week like the rest.
+    if ctx.is_points:
+        luck = []
+        for pid, starts in res.starts.items():
+            pr = ctx.proj[pid]
+            if pr.xfp_pg is not None and starts > 0:
+                luck_pg = pr.tracked_fp_pg - pr.xfp_pg
+                luck.append({"player_id": pid, "name": pr.name, "luck_pg": luck_pg, "per_week": luck_pg * starts / weeks})
+        ex["luck"] = {"per_week": sum(x["per_week"] for x in luck) if luck else None,
+                      "players": sorted(luck, key=lambda x: -abs(x["per_week"]))}
+    all_empty =[r.empty_slot_games / weeks for r in results.values()]
     all_bench = [r.bench_games / weeks for r in results.values()]
     ex["depth"] = {
         "empty_slots_per_week": res.empty_slot_games / weeks,

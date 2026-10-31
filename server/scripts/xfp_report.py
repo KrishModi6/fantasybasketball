@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from fbb.models import ScoringSettings  # noqa: E402
-from fbb.xfp import XfpModel, calibrate, refresh_live, shot_totals, tracking_line  # noqa: E402
+from fbb.xfp import XfpModel, calibrate, calibrate_lines, refresh_live, shot_totals, tracking_line  # noqa: E402
 
 SOURCES = {"shooting": ("PTS", "FGM", "3PM", "FTM"), "AST": ("AST",), "REB": ("REB",), "STL": ("STL",),
            "BLK": ("BLK",)}
@@ -38,10 +38,12 @@ def main() -> None:
     totals = shot_totals(shots, calibrate(shots, model.shot_model.predict(shots)))
     scoring = ScoringSettings()
     rows = []
+    lines = calibrate_lines({int(nid): tracking_line(args.season, row, totals.get(int(nid)), model.skill(int(nid), args.season))
+                             for nid, row in live["dash"].items() if row["MIN"]})
     for nid, row in live["dash"].items():
-        if row["MIN"] < args.min_minutes:
+        if row["MIN"] < args.min_minutes or int(nid) not in lines:
             continue
-        line = tracking_line(args.season, row, totals.get(int(nid)), model.skill(int(nid), args.season))
+        line = lines[int(nid)]
         diff = {k: line.actual.get(k, 0) - line.expected.get(k, 0) for k in line.actual}
         split = {s: scoring.fantasy_points({k: diff[k] for k in keys}) / line.gp for s, keys in SOURCES.items()}
         fp, xfp = scoring.fantasy_points(line.actual) / line.gp, scoring.fantasy_points(line.expected) / line.gp

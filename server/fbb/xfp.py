@@ -199,6 +199,24 @@ def tracking_line(season: int, row: dict, shots: dict[str, float] | None, skill:
     return TrackingLine(season=season, gp=row["GP"], minutes=row["MIN"], actual=actual, expected=exp)
 
 
+def calibrate_lines(lines: dict[int, TrackingLine]) -> dict[int, TrackingLine]:
+    """Scale every line's expected free throws, assists, rebounds, steals and blocks so the league's add up to
+    what happened this season, as calibrate() does for shots. Skills come mostly from last season, and NBA.com's
+    counts drift between seasons: rebounds per rebound chance held near 0.58 for years, climbed to 0.70 during
+    2025-26 and are back near 0.53, which made everyone's rebounds look 27% unlucky. That drift is not any one
+    player's luck. Pass every NBA player's line, not just a league's."""
+    for stat in COMPONENTS:
+        expected = sum(line.expected.get(stat, 0.0) for line in lines.values())
+        if expected > 0:
+            scale = sum(line.actual.get(stat, 0.0) for line in lines.values()) / expected
+            for line in lines.values():
+                line.expected[stat] = line.expected.get(stat, 0.0) * scale
+    for line in lines.values():
+        e = line.expected
+        e["PTS"] = 2 * (e["FGM"] - e["3PM"]) + 3 * e["3PM"] + e["FTM"]
+    return lines
+
+
 def xfp_per_game(line: TrackingLine, scoring: ScoringSettings) -> tuple[float, float]:
     """(actual, expected) fantasy points per game over the games the line covers."""
     if not line.gp:
@@ -374,11 +392,13 @@ def attach_tracking(players: dict[str, Player], season: int) -> int:
     ids = {int(k): v for k, v in json.loads(NBA_IDS_PATH.read_text()).items()} if NBA_IDS_PATH.exists() else {}
     unknown = {n: (r["name"], r["team"]) for n, r in dash.items() if ids.get(n) not in players}
     ids.update(match_ids(unknown, {pid: (p.name, p.pro_team) for pid, p in players.items()}))
+    lines = calibrate_lines({nid: tracking_line(season, row, totals.get(nid), model.skill(nid, season))
+                             for nid, row in dash.items() if row.get("MIN")})
     n = 0
-    for nid, row in dash.items():
+    for nid, line in lines.items():
         p = players.get(ids.get(nid, ""))
-        if p is None or not row.get("MIN"):
+        if p is None:
             continue
-        p.tracking = tracking_line(season, row, totals.get(nid), model.skill(nid, season))
+        p.tracking = line
         n += 1
     return n
