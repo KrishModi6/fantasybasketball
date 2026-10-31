@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./styles.css";
 import { App } from "./App";
 import { ApiError } from "./lib/api";
+import { setupDesktopChrome } from "./lib/desktop";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,6 +15,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+setupDesktopChrome();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

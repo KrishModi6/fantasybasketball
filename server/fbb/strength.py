@@ -150,7 +150,7 @@ def team_windows(ctx: AnalysisContext, rosters: dict[int, list[str]] | None = No
     out = {}
     for t in ctx.s.teams:
         roster = rosters[t.id] if rosters and t.id in rosters else ctx.team_roster(t.id)
-        out[t.id] = ctx.project_window(roster)
+        out[t.id] = ctx.project_window(roster, team_id=t.id)
     return out
 
 
@@ -227,11 +227,16 @@ def simulate_season(ctx: AnalysisContext, mm: MatchupModel, n: int = N_SIMS, see
         left[a] += 1
         left[b] += 1
     wins = won + np.array([t.wins + 0.5 * t.ties for t in ctx.s.teams])  # standings: a tie is half a win
+    # Standings go by win percentage: with an odd number of teams some play a game fewer (a bye), and
+    # counting wins gave each extra game about 8 points of playoff odds. With equal games it's the same order.
+    games = np.array([t.wins + t.losses + t.ties + left[t.id] for t in ctx.s.teams], dtype=float)
+    pct = wins / np.maximum(games, 1.0)
 
-    # Seeding: wins, then a tiebreak that favours stronger teams (proxy for H2H/points).
+    # Seeding: win percentage, then a tiebreak that favours stronger teams (proxy for H2H/points). The tiebreak
+    # stays below the smallest gap between two different percentages, so it only orders exact ties.
     strength = np.array([ppw.get(tid, 0.0) if ppw else 0.0 for tid in ids])
     tiebreak = strength / (strength.std() + 1e-9) * 0.01 + rng.random((n, T)) * 0.02
-    order = np.argsort(-(wins + tiebreak), axis=1)
+    order = np.argsort(-(pct + tiebreak * 1e-3), axis=1)
     k = min(ctx.s.settings.playoff_teams, T)
     seeds = order[:, :k]  # (n, k) team columns by seed
     playoff_mps = sorted(mp for mp in ctx.s.settings.matchup_periods if mp > ctx.s.settings.regular_season_matchups)

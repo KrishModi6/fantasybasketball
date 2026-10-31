@@ -18,6 +18,24 @@ def live_window(sched: ProSchedule, period: int) -> tuple[datetime, datetime] | 
     return (tips[0], tips[1] + GAME_LENGTH) if tips else None
 
 
+def game_state(sched: ProSchedule, period: int, team: str, at: datetime | None) -> str | None:
+    """"upcoming", "live" or "final" for a team's game that day as of ``at``; None when it can't be told.
+
+    Uses the team's own tip-off when the schedule has it. Older snapshots only have the day's first and last
+    tip-offs, which still tell that every game is over (or none has started)."""
+    if at is None:
+        return None
+    tip = sched.team_tips.get(period, {}).get(team)
+    if tip is not None:
+        return "upcoming" if at < tip else "final" if at >= tip + GAME_LENGTH else "live"
+    window = live_window(sched, period)
+    if window is None:
+        return None
+    if at < window[0]:
+        return "upcoming"
+    return "final" if at >= window[1] else None
+
+
 def week_units(sched: ProSchedule, light_share: float = LIGHT_WEEK_SHARE) -> list[list[int]]:
     """Group scoring periods (days) into fantasy weeks the way ESPN builds its calendar.
 

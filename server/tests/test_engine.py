@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import itertools
 import random
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
 from fbb.baseline import FALLBACK_LEAGUE_RATES, RATE_STATS, aging_factor, per_game_from_rates, sps_projection
-from fbb.connectors.espn import parse_settings
+from fbb.connectors.espn import EASTERN, parse_settings
 from fbb.connectors.fileimport import normalize_name, parse_upload
 from fbb.context import AnalysisContext
 from fbb.enrich import enrich_players
+from fbb.improve import add_drop_moves, streaming_moves
 from fbb.lineup import SlotModel, solve_day
 from fbb.models import GameLog, Player, RosterEntry, ScoringSettings, SeasonLine, TrackingLine
 from fbb.projections import MANUAL_LIMIT, SEASON_ONLY_AFTER_GAMES, ProjectionEngine, games_from_injury_note
+from fbb.schedule import GAME_LENGTH
 from fbb.strength import MatchupModel, TeamStrength, league_strength, round_robin, team_windows
 from fbb.trades import TradeEvaluator, TradeSide, _fairness, _verdict, apply_trade, find_trades, pickup_pool
+from fbb.valuation import player_values
 
 from factories import make_line, make_snapshot
 
@@ -198,6 +202,65 @@ def test_only_the_unplayed_part_of_todays_game_is_left():
     assert AnalysisContext(snap).p_play("1")[today] == pytest.approx(before / 2)
 
 
+def _tip_today(snap, team: str | None = None) -> datetime:
+    """Today's tip-off at 7 p.m. Eastern, for ``team`` or every team playing."""
+    today = snap.current_period
+    tip = datetime.combine(snap.schedule.period_dates[today], time(19), tzinfo=EASTERN)
+    snap.schedule.team_tips = {today: {t: tip for t in snap.schedule.games[today] if team in (None, t)}}
+    return tip
+
+
+def test_a_finished_game_today_counts_for_nothing():
+    # He sat, or what he scored is already in the matchup totals: either way none of it is still to come.
+    snap = make_snapshot()
+    p = snap.players["1"]
+    snap.current_period = next(d for d in range(1, 30) if p.pro_team in snap.schedule.games[d])
+    tip = _tip_today(snap, p.pro_team)
+    snap.fetched_at = tip + timedelta(hours=1)
+    assert AnalysisContext(snap).p_play("1")[snap.current_period] > 0
+    snap.fetched_at = tip + GAME_LENGTH
+    assert AnalysisContext(snap).p_play("1")[snap.current_period] == 0
+    # Older snapshots have only the day's first and last tip-off: once the last game is over, so is his.
+    snap.schedule.team_tips = {}
+    snap.schedule.tipoffs = {snap.current_period: (tip - timedelta(hours=1), tip)}
+    assert AnalysisContext(snap).p_play("1")[snap.current_period] == 0
+    snap.fetched_at = tip + timedelta(hours=1)  # the late game is still on, so his may be too
+    assert AnalysisContext(snap).p_play("1")[snap.current_period] > 0
+
+
+def test_a_free_agent_cant_join_a_game_that_has_tipped_off():
+    snap = make_snapshot()
+    fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    snap.current_period = next(d for d in range(1, 30) if fa.pro_team in snap.schedule.games[d])
+    tip = _tip_today(snap)
+    snap.fetched_at = tip - timedelta(hours=1)
+    assert AnalysisContext(snap).first_day(fa.id) == snap.current_period
+    snap.fetched_at = tip + timedelta(minutes=30)
+    ctx = AnalysisContext(snap)
+    assert ctx.first_day(fa.id) == snap.current_period + 1
+    assert ctx.first_day(ctx.team_roster(1)[0]) == snap.current_period  # a rostered player is in already
+
+
+def test_a_waiver_pickup_plays_once_his_claim_clears():
+    snap = make_snapshot()
+    snap.current_period = 3  # a Wednesday: week 1 has days 3 to 7 left
+    fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    _star(snap, fa.id)  # worth streaming
+    fa.on_waivers = True
+    assert AnalysisContext(snap).first_day(fa.id) == 5  # the league's 48-hour waiver period
+    fa.waiver_clears = datetime.combine(snap.schedule.period_dates[6], time(3), tzinfo=EASTERN)
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    assert ctx.first_day(fa.id) == 6
+    res = ctx.project_window([fa.id], [3, 4, 5, 6, 7])
+    assert res.games[fa.id] == pytest.approx(ctx.expected_games(fa.id, [6, 7]))
+    move = next(m for m in streaming_moves(ctx, 1)["moves"] if m["add"] == fa.id)
+    assert move["on_waivers"] and move["games_this_week"] == pytest.approx(ctx.expected_games(fa.id, [6, 7]))
+    # The player he replaces is dropped when the claim clears, so he plays until then.
+    roster, days = ctx.team_roster(1), [3, 4, 5, 6, 7]
+    dropped_now = ctx.project_window([p for p in roster if p != move["drop"]] + [fa.id], days, team_id=1).mean
+    assert move["delta_this_week"] > dropped_now - ctx.project_window(roster, days, team_id=1).mean
+
+
 def test_live_window_runs_from_first_tip_until_the_last_game_ends():
     from datetime import datetime, timezone
 
@@ -336,6 +399,25 @@ def test_projected_record_rounds_wins_and_derives_losses():
     assert ts.proj_record() == (10, 5, 1)
 
 
+def test_playoff_seeds_go_by_win_percentage():
+    # Five teams over 12 weeks: two have an extra bye. A 6-2-1 team (.722) is seeded ahead of two 7-3 teams
+    # (.700) though it has fewer wins; counting wins gave every extra game away a playoff spot.
+    snap = make_snapshot(n_teams=5)
+    scheduled = {t.id: 0 for t in snap.teams}
+    for m in snap.matchups:
+        scheduled[m.home_team_id] += 1
+        scheduled[m.away_team_id] += 1
+    nine = [tid for tid, n in scheduled.items() if n == 9]
+    ten = [tid for tid, n in scheduled.items() if n == 10]
+    _start_week(snap, 13)  # the regular season is over
+    records = {nine[0]: (6, 2, 1), nine[1]: (2, 6, 1), ten[0]: (7, 3, 0), ten[1]: (7, 3, 0), ten[2]: (1, 9, 0)}
+    for t in snap.teams:
+        t.wins, t.losses, t.ties = records[t.id]
+    st = _strength(snap)
+    assert st[nine[0]].playoff_odds == 1.0
+    assert st[ten[0]].playoff_odds + st[ten[1]].playoff_odds == pytest.approx(1.0)
+
+
 def test_a_played_week_without_a_result_still_counts():
     # A demo league (and ESPN until a week's results post): week 1 is over with no result, every record 0-0.
     snap = make_snapshot()
@@ -450,6 +532,62 @@ def test_an_injured_player_got_two_for_one_takes_the_empty_ir_slot():
     assert not me["auto_drops"] and not me["auto_adds"]  # he goes on IR, as he would in ESPN
 
 
+def _star(snap, pid: str) -> None:
+    p = snap.players[pid]
+    p.history = [make_line(s, 75, 34, 1.5, p.pro_team) for s in (2024, 2025, 2026)]
+
+
+def test_an_injured_player_got_two_for_one_costs_a_drop_when_he_returns():
+    # He holds the empty IR slot only while he's out: the day he's back team 1 is a player over and drops its
+    # weakest. This was a 50-point-a-week phantom in a real league's trade suggestions.
+    snap = make_snapshot(injured={"9": "OUT"})
+    _star(snap, "9")
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    b = [p for p in ctx.team_roster(2) if p != "9"]
+    r = TradeEvaluator(ctx).evaluate(1, 2, [ctx.team_roster(1)[0]], ["9", b[0]], with_sim=False)
+    back = min(d for d, v in ctx.p_play("9").items() if v > 0)
+    [(dropped, returning, day)] = r["sides"][0]["return_drops"]
+    assert returning == "9" and day == snap.schedule.period_dates[back].isoformat()
+    assert dropped != "9"  # the star stays, the weakest goes (here the other player team 1 got)
+    assert any(f"When Player 9 comes back on {day}" in line for line in r["math"][0]["lines"])
+
+
+def test_a_returning_ir_player_costs_his_team_its_weakest_player():
+    # Team 2 is full with an injured player in its IR slot. The day he's back it's a player over the limit, so
+    # from then on it plays without its weakest player; it used to play all nine the rest of the season.
+    snap = make_snapshot()
+    hurt = next(p for p in snap.players.values() if p.fantasy_team_id is None)
+    hurt.fantasy_team_id, hurt.injury_status = 2, "OUT"
+    snap.team(2).roster.append(RosterEntry(player_id=hurt.id, slot="IR"))
+    _star(snap, hurt.id)
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    roster = ctx.team_roster(2)
+    back = min(d for d, v in ctx.p_play(hurt.id).items() if v > 0)
+    later = [d for d in ctx.days if d >= back]
+    weakest = min((p for p in roster if p != hurt.id),
+                  key=lambda p: ctx.value_pg[p] * ctx.expected_games(p, later))
+    assert ctx.roster_cuts(2, roster) == {weakest: (back, hurt.id)}
+    res = ctx.project_window(roster, team_id=2)
+    assert res.games.get(weakest, 0) == pytest.approx(ctx.expected_games(weakest, [d for d in ctx.days if d < back]))
+    assert res.mean < ctx.project_window(roster).mean
+    assert ctx.roster_cuts(1, ctx.team_roster(1)) == {}  # a team within its limit keeps everyone
+
+
+def test_pickups_never_drop_the_player_in_the_ir_slot():
+    # Dropping him frees only the IR slot, which a healthy pickup can't take.
+    snap = make_snapshot()
+    fa, pickup = [p for p in snap.players.values() if p.fantasy_team_id is None][:2]
+    fa.fantasy_team_id, fa.injury_status = 2, "DAY_TO_DAY"
+    snap.team(2).roster.append(RosterEntry(player_id=fa.id, slot="IR"))
+    _star(snap, pickup.id)  # a free agent worth adding
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    values = player_values(ctx)
+    assert fa.id == min(ctx.team_roster(2), key=lambda p: values[p]["ros_value"])  # otherwise the obvious drop
+    moves = add_drop_moves(ctx, 2, ctx.project_window(ctx.team_roster(2), team_id=2))
+    moves += streaming_moves(ctx, 2)["moves"]
+    assert moves and all(m["drop"] != fa.id for m in moves)
+
+
 def test_a_team_already_over_its_limit_isnt_charged_a_drop_by_a_trade():
     snap = make_snapshot()
     fa = next(p for p in snap.players.values() if p.fantasy_team_id is None)
@@ -552,13 +690,13 @@ def test_parse_espn_settings():
         "rosterSettings": {"lineupSlotCounts": {"0": 1, "4": 1, "11": 3, "12": 3, "13": 1, "14": 0}},
         "scheduleSettings": {"matchupPeriodCount": 19, "playoffTeamCount": 4, "playoffMatchupPeriodLength": 2,
                              "matchupPeriods": {"1": [1, 2, 3]}},
-        "acquisitionSettings": {"matchupAcquisitionLimit": 7},
+        "acquisitionSettings": {"matchupAcquisitionLimit": 7, "waiverHours": 24},
         "tradeSettings": {"deadlineDate": 1803052800000},
     }}
     s = parse_settings(payload, 2027)
     assert s.scoring.points == {"FGM": 2, "FGA": -1, "STL": 4, "TO": -2}
     assert s.roster_slots == {"PG": 1, "C": 1, "UT": 3, "BE": 3, "IR": 1}
-    assert s.playoff_round_weeks == [2, 2] and s.acquisition_limit_per_matchup == 7
+    assert s.playoff_round_weeks == [2, 2] and s.acquisition_limit_per_matchup == 7 and s.waiver_hours == 24
     assert s.trade_deadline is not None and s.trade_deadline.year == 2027
 
 
@@ -567,6 +705,26 @@ def test_parse_category_league():
         {"statId": 19}, {"statId": 20}, {"statId": 17}, {"statId": 6}, {"statId": 11, "isReverseItem": True}]}}}
     s = parse_settings(payload, 2027)
     assert s.scoring.kind == "categories" and s.scoring.categories == ["FG%", "FT%", "3PM", "REB", "TO"]
+    assert s.waiver_hours == 48  # ESPN's default when the league doesn't say
+
+
+def test_parse_espn_tipoffs_and_waiver_dates():
+    from fbb.connectors.espn import ESPN_PRO_TEAMS, parse_player, parse_pro_schedule
+
+    def ms(dt: datetime) -> int:
+        return int(dt.timestamp() * 1000)
+
+    early = datetime(2026, 10, 23, 23, tzinfo=timezone.utc)
+    late = early + timedelta(hours=3)
+    sched = parse_pro_schedule({"settings": {"proTeams": [
+        {"id": 1, "proGamesByScoringPeriod": {"4": [{"date": ms(early)}]}},
+        {"id": 2, "proGamesByScoringPeriod": {"4": [{"date": ms(late)}]}}]}}, 2027)
+    assert sched.team_tips[4] == {ESPN_PRO_TEAMS[1]: early, ESPN_PRO_TEAMS[2]: late}
+    assert sched.tipoffs[4] == (early, late)
+    clears = datetime(2026, 10, 25, 7, tzinfo=timezone.utc)  # 3 a.m. Eastern
+    p = parse_player({"player": {"id": 5}, "status": "WAIVERS", "waiverProcessDate": ms(clears)}, 2027)
+    assert p.on_waivers and p.waiver_clears == clears and p.waiver_clears.date().day == 25
+    assert parse_player({"player": {"id": 6}, "status": "FREEAGENT"}, 2027).waiver_clears is None
 
 
 def test_csv_import_and_name_matching():

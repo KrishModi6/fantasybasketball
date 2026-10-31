@@ -124,15 +124,19 @@ class MatchupSimulator:
             v = 0.15
         return _Player(pid=pid, lam=lam, shape=1.0 / v)
 
-    def _plan(self, roster: list[str], days: list[int], exclude: set[str]) -> tuple[list[_Player], list[_Day]]:
+    def _plan(self, roster: list[str], days: list[int], exclude: set[str],
+              team_id: int | None = None) -> tuple[list[_Player], list[_Day]]:
         ctx = self.ctx
         players = [self._player(pid) for pid in roster if pid in ctx.proj]
+        # As in project_window: a player dropped when an injured teammate returns stops playing that day.
+        cuts = ctx.roster_cuts(team_id, roster) if team_id is not None else {}
         plans = []
         n_slots = ctx.slots.n
         for d in days:
             cands, probs, items = [], [], []
             for i, pl in enumerate(players):
-                prob = 0.0 if pl.pid in exclude else ctx.p_play(pl.pid).get(d, 0.0)
+                gone = pl.pid in exclude or d >= cuts.get(pl.pid, (float("inf"),))[0] or d < ctx.first_day(pl.pid)
+                prob = 0.0 if gone else ctx.p_play(pl.pid).get(d, 0.0)
                 if prob > 0:
                     items.append((len(cands), ctx.value_pg[pl.pid] * prob, ctx.mask[pl.pid]))
                     cands.append(i)
@@ -214,7 +218,7 @@ class MatchupSimulator:
         sides = []
         for tid in (team_a, team_b):
             roster = ctx.team_roster(tid)
-            players, plans = self._plan(roster, days, exclude)
+            players, plans = self._plan(roster, days, exclude, tid)
             totals, contrib, starts, games, by_day = self._simulate_team(players, plans, n)
             acc_pts, acc_stats = self._accrued(tid, mp)
             sides.append({"team_id": tid, "players": players, "totals": totals, "contrib": contrib,

@@ -170,13 +170,14 @@ Using them would leak in-season information into training and flatter ESPN, so t
 ## 3. Team strength
 
 1. **Daily lineups.** For every remaining day, the optimal legal lineup is solved exactly. A player's value doesn't depend on which slot he fills, so the startable sets form a transversal matroid. Greedy-by-value with Kuhn augmenting paths [7] is optimal, equivalent to the Hungarian method on the assignment problem but faster.
-2. **Weights.** Each player's lineup weight is expected fantasy points × probability of playing that day (availability, or 0 during an injury window).
+2. **Weights.** Each player's lineup weight is expected fantasy points × probability of playing that day (availability, or 0 during an injury window). Today, a game in progress counts only the minutes he hasn't played yet, and a finished game counts nothing: what he scored is already in the matchup total. Each NBA team's own tip-off time tells which games are over; older data with only the day's first and last tip-off can tell only once every game is.
 3. **Depth.** When a starter sits, the best playing bench player fills the expected vacancy, so depth has value.
-4. **Weekly distribution.** Mean = sum of expected starts × FP/G. Variance = sum of `q·σ² + q(1−q)·μ²` over starts (game volatility plus play/no-play). A sum of ~35 player-games is close to Normal.
-5. **Matchups.** `P(A beats B) = Φ((μA − μB) / √(σA² + σB²))`. The current week adds points already scored. Category leagues use Normal per-category totals (percentages via the delta method) and a Poisson-binomial count of categories won.
-6. **Power score.** `played/season × record win% + (1 − played/season) × projected all-play win%`, where *played* is games played so far, *season* the regular-season length, ties count as half a win, and the projected all-play win rate is every team against every other team in every remaining regular-season week. It is each team's projected final win rate with an average opponent in every remaining week: week 1 is all projection, halfway is half each, and the last week is almost all record. The future part removes schedule luck; the record part is what actually happened, luck included.
-7. **Season simulation.** 5,000 runs of the real remaining schedule, then seeding (wins, tiebreak by strength) and your bracket, including two-week rounds and byes. The outputs are projected record, playoff odds, title odds and average seed.
-8. **Explanation.** Each rank is explained by:
+4. **Roster limits and pickups.** A team holds its active slots plus one IR slot per injured player it can put there (OUT or IR, or already in its IR slot), and only while he's out. The day an IR player is back, a full team is a player over the limit, and its lowest-value player from then on is dropped. Without this, the returning player and everyone else played the rest of the season: a phantom extra player worth 35–50 points a week. A pickup plays from the day his waiver claim clears (ESPN's processing date, else the league's waiver period) and never in a game that has already tipped off. The player dropped for a waiver claim plays until it clears.
+5. **Weekly distribution.** Mean = sum of expected starts × FP/G. Variance = sum of `q·σ² + q(1−q)·μ²` over starts (game volatility plus play/no-play). A sum of ~35 player-games is close to Normal.
+6. **Matchups.** `P(A beats B) = Φ((μA − μB) / √(σA² + σB²))`. The current week adds points already scored. Category leagues use Normal per-category totals (percentages via the delta method) and a Poisson-binomial count of categories won.
+7. **Power score.** `played/season × record win% + (1 − played/season) × projected all-play win%`, where *played* is games played so far, *season* the regular-season length, ties count as half a win, and the projected all-play win rate is every team against every other team in every remaining regular-season week. It is each team's projected final win rate with an average opponent in every remaining week: week 1 is all projection, halfway is half each, and the last week is almost all record. The future part removes schedule luck; the record part is what actually happened, luck included.
+8. **Season simulation.** 5,000 runs of the real remaining schedule, then seeding (win percentage, tiebreak by strength) and your bracket, including two-week rounds and byes. Seeding goes by win percentage because with an odd number of teams some play a game fewer: counting wins gave each extra game about 8 points of playoff odds. The outputs are projected record, playoff odds, title odds and average seed.
+9. **Explanation.** Each rank is explained by:
    - fantasy points per week from each scoring stat vs the league average;
    - each player's expected contribution;
    - empty starting slots and bench-stuck games;
@@ -198,8 +199,8 @@ The simulator's team means land within ~1% of the analytic weekly projection. Th
 
 ## 5. Improvement suggestions
 
-- **Add/drop.** The top 30 free agents (by rest-of-season value, healthy) are each simulated in place of each of your 4 lowest-value players. Only lineup-adjusted gains are shown, as per week, this week, and rest of season.
-- **Streaming.** For the current matchup's remaining days, the expected gain from each healthy free agent, with the rest-of-season cost of the drop shown.
+- **Add/drop.** The top 30 free agents (by rest-of-season value, healthy) are each simulated in place of each of your 4 lowest-value players. The player in your IR slot is never one of them: dropping him frees only the IR slot, which a healthy pickup can't take. Only lineup-adjusted gains are shown, as per week, this week, and rest of season.
+- **Streaming.** For the current matchup's remaining days, the expected gain from each healthy free agent, with the rest-of-season cost of the drop shown. A player on waivers counts only the games after his claim clears.
 - **Weak spots**, ranked by points at stake:
   - unfilled starting slots vs league average
   - bench overflow, which suggests consolidation trades
@@ -212,7 +213,7 @@ The simulator's team means land within ~1% of the analytic weekly projection. Th
 
 - **Evaluation.**
   - Both rosters are re-simulated over the rest of the season with the trade applied.
-  - Roster size is enforced: a team over the limit drops its lowest-value player (never one it just received), and an open spot is filled by the best healthy free agent. IR slots hold OUT players, plus whoever is already in a team's IR slot: ESPN leaves a player there after he's upgraded to day-to-day, but the team that gets him in a trade can't put him on IR. An injured player a team gets goes in an empty IR slot instead of costing a drop, but never opens a spot for a pickup. A team already over its limit isn't charged a drop for that by a trade.
+  - Roster size is enforced: a team over the limit drops its lowest-value player (never one it just received), and an open spot is filled by the best healthy free agent. IR slots hold OUT players, plus whoever is already in a team's IR slot: ESPN leaves a player there after he's upgraded to day-to-day, but the team that gets him in a trade can't put him on IR. An injured player a team gets goes in an empty IR slot instead of costing a drop, but never opens a spot for a pickup, and holds the slot only until he's back: then the team drops its lowest-value player from that day (step 4 of Team strength), and the calculation names him and the date. A team already over its limit isn't charged a drop for that by a trade.
   - Outputs per team: change in rest-of-season points, per week, this week and in playoff weeks, plus playoff and title odds before and after (3,000-run simulation).
   - Verdict: **advantageous** at ≥ +1% of rest-of-season output, **disadvantageous** at ≤ −1%, otherwise **neutral**.
   - Fairness label: **win-win** if every team gains, **lose-lose** if every team loses, **balanced** if every verdict is neutral, otherwise **favors** the team(s) that gain. Partner acceptance likelihood is a logistic curve in their % change.
@@ -234,7 +235,8 @@ The simulator's team means land within ~1% of the analytic weekly projection. Th
 - Category-league support is complete but less battle-tested than points.
 - Accrued category totals for percentage categories are only added when ESPN reports the underlying makes and attempts.
 - Simulated player-games are independent apart from each player's own role shock: no shared pace or blowout effects.
-- Seeding tiebreaks approximate H2H record with team strength.
+- Seeding tiebreaks approximate H2H record with team strength. Seeding by win percentage in leagues with byes is assumed, not confirmed against ESPN.
+- When ESPN doesn't give a player's waiver processing date, his claim is assumed to clear after the league's waiver period (48 hours unless the league says otherwise).
 - Trade acceptance is a model of the partner's *projected* interest, not of human psychology.
 
 ## References

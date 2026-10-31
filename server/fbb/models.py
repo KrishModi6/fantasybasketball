@@ -103,6 +103,7 @@ class Player(BaseModel):
     adp: float | None = None
     fantasy_team_id: int | None = None  # None -> free agent
     on_waivers: bool = False
+    waiver_clears: datetime | None = None  # when a claim on him processes (ESPN's waiverProcessDate)
 
 
 class RosterEntry(BaseModel):
@@ -143,6 +144,7 @@ class ProSchedule(BaseModel):
     period_dates: dict[int, date] = Field(default_factory=dict)
     games: dict[int, list[str]] = Field(default_factory=dict)  # period -> teams playing
     tipoffs: dict[int, tuple[datetime, datetime]] = Field(default_factory=dict)  # period -> first and last tip-off
+    team_tips: dict[int, dict[str, datetime]] = Field(default_factory=dict)  # period -> team -> its tip-off
 
     def teams_playing(self, period: int) -> list[str]:
         return self.games.get(period, [])
@@ -163,6 +165,7 @@ class LeagueSettings(BaseModel):
     # matchup period -> scoring periods (days) it spans
     matchup_periods: dict[int, list[int]] = Field(default_factory=dict)
     acquisition_limit_per_matchup: int | None = 7
+    waiver_hours: int = 48  # how long a dropped player stays on waivers
     trade_deadline: datetime | None = None
     lineup_lock: Literal["daily", "weekly"] = "daily"
     playoff_seeding_tiebreaker: str = "H2H_RECORD"

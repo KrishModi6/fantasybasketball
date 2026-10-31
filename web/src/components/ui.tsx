@@ -211,7 +211,9 @@ export function Tag({ children, tone }: { children: ReactNode; tone?: "up" | "do
 }
 
 /** Modal dialog with Escape to close and focus restore. */
-export function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Dialog({ title, onClose, children, className = "" }: {
+  title: string; onClose: () => void; children: ReactNode; className?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -226,7 +228,7 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div className="dialog" role="dialog" aria-modal="true" aria-label={title} ref={ref}>
+      <div className={`dialog ${className}`} role="dialog" aria-modal="true" aria-label={title} ref={ref}>
         <h2>{title}</h2>
         {children}
       </div>
