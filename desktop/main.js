@@ -9,6 +9,8 @@
 //
 // Installed builds keep themselves up to date from the GitHub releases (see setupUpdates, and
 // mac-update.js for how a Mac installs them).
+//
+// The window has no system title bar: each page's top bar is the title bar (see createWindow).
 
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, powerMonitor, protocol, shell } = require("electron");
 const { spawn } = require("node:child_process");
@@ -34,6 +36,13 @@ const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 // and installs them instead, so nobody has to clear a browser download's flag in Terminal.
 const UPDATER_INSTALLS = process.platform === "win32";
 const MAC_SELF_UPDATE = process.platform === "darwin";
+// Each page's top bar (--topbar in web/src/styles.css) stands in for the title bar. Windows and Linux draw
+// the minimize, maximize and close buttons over its right end in these colors, which follow the app's theme.
+const TOPBAR_HEIGHT = 40;
+const THEMES = {
+  dark: { background: "#0F1115", bar: "#151920", text: "#D7DCE2", muted: "#8B949E", track: "#1B2028" },
+  light: { background: "#F3F4F6", bar: "#FFFFFF", text: "#1F2328", muted: "#59636E", track: "#E8EBEF" },
+};
 
 protocol.registerSchemesAsPrivileged([
   { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -50,6 +59,17 @@ let installing = false; // Update now was clicked: later clicks (popup, version 
 let installWhenReady = false; // a newer release turned up at Update now: install it once it's downloaded
 // What the app shows: idle | checking | current | downloading | ready (to install) | available (to download) | error
 let update = { status: "idle" };
+let theme = "dark"; // the app's last theme (savedTheme), so a new window opens in the right colors
+
+// The theme is the web app's to choose (it keeps it in localStorage); the shell remembers the last one.
+const themeFile = () => path.join(app.getPath("userData"), "window-theme");
+function savedTheme() {
+  try {
+    return fs.readFileSync(themeFile(), "utf8").trim() === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
 
 // Where a Mac update is downloaded to and waits until Courtside quits.
 const macUpdateDir = () => path.join(app.getPath("cache"), "courtside-mac-update");
@@ -186,13 +206,15 @@ function serveApp() {
   });
 }
 
-const SPLASH = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8">
-<style>html,body{height:100%;margin:0;background:#0f1115;color:#8b949e;font:13px "Segoe UI",-apple-system,sans-serif}
-body{display:grid;place-items:center}div{display:grid;gap:10px;justify-items:center}
-b{color:#d7dce2;font-weight:600;font-size:15px}i{width:160px;height:2px;background:#1b2028;overflow:hidden;position:relative}
+function splashPage({ background, text, muted, track }) {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{height:100%;margin:0;background:${background};color:${muted};font:13px "Segoe UI",-apple-system,sans-serif}
+body{display:grid;place-items:center;-webkit-app-region:drag;user-select:none}div{display:grid;gap:10px;justify-items:center}
+b{color:${text};font-weight:600;font-size:15px}i{width:160px;height:2px;background:${track};overflow:hidden;position:relative}
 i::after{content:"";position:absolute;inset:0;width:40%;background:#3b82f6;animation:s 1.1s ease-in-out infinite}
 @keyframes s{from{transform:translateX(-100%)}to{transform:translateX(250%)}}</style></head>
 <body><div><b>Courtside</b><span>Starting the projection engine…</span><i></i></div></body></html>`)}`;
+}
 
 // Back/forward through the app's own pages (the React router pushes real history entries).
 function stepHistory(win, delta) {
@@ -202,15 +224,25 @@ function stepHistory(win, delta) {
   else if (delta > 0 && history.canGoForward()) history.goForward();
 }
 
-function createWindow(server, local) {
+// The window buttons' colors: over the top bar, or over the plain background of the splash.
+function titleBarOverlay(splash = false) {
+  const colors = THEMES[theme];
+  // One pixel short of the bar, so its bottom border runs under the buttons too.
+  return { color: splash ? colors.background : colors.bar, symbolColor: colors.text, height: TOPBAR_HEIGHT - 1 };
+}
+
+function createWindow(server, local, splash = false) {
   const win = new BrowserWindow({
     width: 1360,
     height: 900,
     minWidth: 960,
     minHeight: 640,
     title: "Courtside",
-    backgroundColor: "#0F1115",
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    backgroundColor: THEMES[theme].background,
+    // No system title bar (white on Windows, whatever the theme). A Mac keeps its traffic lights, inset at the
+    // left of the top bar; Windows and Linux draw their window buttons over its right end.
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    ...(process.platform === "darwin" ? {} : { titleBarOverlay: titleBarOverlay(splash) }),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -508,8 +540,37 @@ function checkForUpdatesNow() {
     message: "Updates are checked in installed copies of Courtside.", detail: `Downloads: ${RELEASES_URL}` });
 }
 
+// The page switched themes (or loaded): recolor its window's buttons and the background behind the page.
+function applyTheme(win, next) {
+  theme = next === "light" ? "light" : "dark";
+  try {
+    fs.writeFileSync(themeFile(), theme);
+  } catch {
+    /* the next window just opens dark */
+  }
+  win.setBackgroundColor(THEMES[theme].background);
+  if (process.platform !== "darwin") win.setTitleBarOverlay(titleBarOverlay());
+}
+
+// The release notes the What's new dialog shows: desktop/release-notes.md, bundled with the app.
+function releaseNotes() {
+  try {
+    return fs.readFileSync(path.join(__dirname, "release-notes.md"), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+// Opens the app menu under the menu button (Windows and Linux, where there's no menu bar).
+function popupMenu(win, x, y) {
+  const zoom = win.webContents.getZoomFactor(); // the page measures in CSS pixels
+  Menu.getApplicationMenu()?.popup({ window: win, x: Math.round(x * zoom), y: Math.round(y * zoom) });
+}
+
+const showWhatsNew = (win) => (win ?? BrowserWindow.getAllWindows()[0])?.webContents.send("courtside:whats-new");
+
 function setupIpc() {
-  // Only Courtside's own pages may drive updates.
+  // Only Courtside's own pages may drive updates, recolor the window or open the menu.
   const fromApp = (event) => {
     const url = event.senderFrame?.url ?? "";
     return url.startsWith(`${SCHEME}://${HOST}/`)
@@ -519,6 +580,15 @@ function setupIpc() {
   ipcMain.handle("courtside:update-install", (event) => (fromApp(event) ? updater?.install() : undefined));
   ipcMain.handle("courtside:update-download", (event) => (fromApp(event) ? shell.openExternal(RELEASES_URL) : undefined));
   ipcMain.handle("courtside:update-check", (event) => (fromApp(event) ? checkForUpdatesNow() : undefined));
+  ipcMain.handle("courtside:release-notes", (event) => (fromApp(event) ? releaseNotes() : ""));
+  ipcMain.handle("courtside:theme", (event, next) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (fromApp(event) && win) applyTheme(win, next);
+  });
+  ipcMain.handle("courtside:menu", (event, x, y) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (fromApp(event) && win && Number.isFinite(x) && Number.isFinite(y)) popupMenu(win, x, y);
+  });
 }
 
 function buildMenu() {
@@ -540,6 +610,7 @@ function buildMenu() {
     {
       role: "help",
       submenu: [
+        { label: "What's new in Courtside", click: (_item, win) => showWhatsNew(win) },
         { label: "Check for updates…", click: checkForUpdatesNow },
         { label: "Download page", click: () => shell.openExternal(RELEASES_URL) },
         { type: "separator" },
@@ -552,6 +623,7 @@ function buildMenu() {
 }
 
 async function boot() {
+  theme = savedTheme();
   serveApp();
   setupIpc();
   buildMenu();
@@ -562,8 +634,8 @@ async function boot() {
     return;
   }
   // The app window needs the engine's address at creation, so a splash covers the start-up.
-  const splash = createWindow("", true);
-  splash.loadURL(SPLASH);
+  const splash = createWindow("", true, true);
+  splash.loadURL(splashPage(THEMES[theme]));
   try {
     const url = await startEngine(exe);
     const win = createWindow(url, true);

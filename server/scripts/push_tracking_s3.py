@@ -13,7 +13,9 @@ versions only grow when the data really changed.
 NBA.com and uploads it gzipped to public/live_<season>.json.gz. CloudFront serves that folder, and every
 Courtside app reads it before asking NBA.com itself (fbb.xfp.refresh_live).
 
-Credentials come from `aws login --profile courtside` (needs boto3[crt], in requirements-dev.txt).
+Credentials come from `aws login --profile courtside` (needs boto3[crt], in requirements-dev.txt). The
+scheduled task can't sign in every 12 hours, so it uses the courtside-publisher profile instead: an IAM
+user's access key that may only write public/live_*.json.gz.
 The bucket defaults to courtside-<account id>-<region>-an, the name created in docs/AWS.md.
 
 Usage: python -m scripts.push_tracking_s3 [--live [--season 2027]] [--dry-run] [--bucket NAME]
@@ -31,6 +33,7 @@ import sys
 from pathlib import Path
 
 import boto3
+import botocore.session
 from botocore.exceptions import BotoCoreError, ClientError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +43,8 @@ from fbb.history import CACHE_DIR  # noqa: E402
 from fbb.xfp import MODEL_PATH, current_season, live_key, live_through, refresh_live  # noqa: E402
 
 CONTENT_TYPES = {".gz": "application/gzip", ".json": "application/json"}
-EXPIRED = ("ExpiredToken", "ExpiredTokenException", "InvalidClientTokenId", "InvalidToken")
+BAD_CREDENTIALS = ("ExpiredToken", "ExpiredTokenException", "InvalidClientTokenId", "InvalidToken",
+                   "InvalidAccessKeyId", "SignatureDoesNotMatch")
 PUBLIC_MAX_AGE = 600  # seconds CloudFront and apps may reuse the published file before checking again
 
 
@@ -103,6 +107,18 @@ def publish_live(s3, bucket: str, live: dict, dry_run: bool = False) -> str:
     return key
 
 
+def credentials_hint(profile: str) -> str:
+    """What to do when profile's credentials are missing or rejected. Running `aws login` on an
+    access-key profile would turn it into a sign-in profile, so only sign-in profiles are told to."""
+    try:
+        signs_in = "login_session" in botocore.session.Session(profile=profile).get_scoped_config()
+    except BotoCoreError:  # no such profile
+        signs_in = False
+    if signs_in:
+        return f"Sign in again with: aws login --profile {profile}"
+    return f"Profile {profile} has no working access key; replace it as docs/AWS.md (1b) describes"
+
+
 def default_bucket(session: boto3.Session) -> str:
     account = session.client("sts").get_caller_identity()["Account"]
     return f"courtside-{account}-{session.region_name}-an"
@@ -143,9 +159,9 @@ def main() -> int:
         sent, same = push(session.client("s3"), bucket, files, dry_run=args.dry_run)
     except (BotoCoreError, ClientError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        # Credential problems surface as BotoCoreError (no or unreadable login) or an expired-token code.
-        if isinstance(exc, BotoCoreError) or exc.response.get("Error", {}).get("Code") in EXPIRED:
-            print(f"Sign in again with: aws login --profile {args.profile}", file=sys.stderr)
+        # Credential problems surface as BotoCoreError (no or unreadable login) or a rejected-key code.
+        if isinstance(exc, BotoCoreError) or exc.response.get("Error", {}).get("Code") in BAD_CREDENTIALS:
+            print(credentials_hint(args.profile), file=sys.stderr)
         return 1
     print(f"{len(sent)} {'to upload' if args.dry_run else 'uploaded'}, {same} unchanged")
     return 0

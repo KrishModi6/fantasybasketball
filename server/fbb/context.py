@@ -16,11 +16,12 @@ import numpy as np
 from .lineup import SlotModel, solve_day
 from .models import LeagueSnapshot
 from .projections import PlayerProjection, ProjectionEngine
-from .schedule import period_to_matchup, remaining_days
+from .schedule import game_state, period_for_date, period_to_matchup, remaining_days
 from .valuation import CategoryValuer
 
 CATEGORY_STATS = ["PTS", "REB", "AST", "STL", "BLK", "TO", "3PM", "FGM", "FGA", "FTM", "FTA", "3PA", "DD", "TD",
                   "OREB", "DREB", "PF"]
+IR_STATUSES = ("OUT", "INJURY_RESERVE")  # statuses ESPN lets a team put in an IR slot
 
 # Uncertainty beyond each game's own spread, for points leagues (scripts/backtest_sims.py measures these
 # against real seasons). A player's level over one matchup week moves together across his games (role,
@@ -54,6 +55,7 @@ class WindowResult:
     empty_slot_games: float = 0.0
     bench_games: float = 0.0
     days: list[dict] = field(default_factory=list)
+    cuts: dict[str, tuple[int, str | None]] = field(default_factory=dict)  # roster_cuts: dropped -> (day, who returned)
 
 
 class AnalysisContext:
@@ -81,6 +83,8 @@ class AnalysisContext:
             self.mask[pid] = self.slots.mask_for(p.eligible_slots, p.positions)
             self.value_pg[pid] = pr.fp_pg if self.is_points else self.cat_valuer.value_pg(pid)
         self._pplay: dict[str, dict[int, float]] = {}
+        self._rostered = {e.player_id for t in snapshot.teams for e in t.roster}
+        self._first_day: dict[str, int] = {}
 
     # -- availability ----------------------------------------------------------
 
@@ -104,13 +108,80 @@ class AnalysisContext:
             avail = 1 - (miss - (miss - near) * math.exp(-k / MISS_RAMP_GAMES) if g_out == 0 else miss)
             out[d] = avail * (1 - frac) if k == full_out and frac > 0 else avail
         # Once today's game has started, what he has scored is already in the matchup totals, so only the
-        # part of the game he hasn't played yet is left.
+        # part of the game he hasn't played yet is left, and nothing once it's over: a player who sat or played
+        # less than usual doesn't get the rest of a finished game.
         today = self.s.current_period
-        played = sum(g.minutes for g in p.recent_games if g.season == self.s.settings.season and g.period == today)
-        if played and out.get(today):
-            out[today] *= max(0.0, 1 - played / max(pr.mpg, 1.0))
+        if out.get(today):
+            if self.today_state(p.pro_team) == "final":
+                out[today] = 0.0
+            else:
+                played = sum(g.minutes for g in p.recent_games
+                             if g.season == self.s.settings.season and g.period == today)
+                if played:
+                    out[today] *= max(0.0, 1 - played / max(pr.mpg, 1.0))
         self._pplay[pid] = out
         return out
+
+    def today_state(self, team: str) -> str | None:
+        """"upcoming", "live" or "final" for an NBA team's game today, as of the snapshot (None: can't tell)."""
+        return game_state(self.s.schedule, self.s.current_period, team, self.s.fetched_at)
+
+    def first_day(self, pid: str) -> int:
+        """First day a player can play for a fantasy team: today if he's on one. A pickup waits for his waiver
+        claim to clear (when ESPN says it processes, else the league's whole waiver period), and can't join a
+        game that has already tipped off."""
+        if pid in self._first_day:
+            return self._first_day[pid]
+        today = self.s.current_period
+        p = self.s.players[pid]
+        day = today
+        if pid not in self._rostered:
+            if p.on_waivers:
+                clears = period_for_date(self.s.schedule, p.waiver_clears.date()) if p.waiver_clears else None
+                day = max(today, clears if clears is not None else today + math.ceil(self.s.settings.waiver_hours / 24))
+            if day == today and (self.today_state(p.pro_team) in ("live", "final") or any(
+                    g.period == today and g.season == self.s.settings.season for g in p.recent_games)):
+                day = today + 1
+        self._first_day[pid] = day
+        return day
+
+    # -- roster limits ---------------------------------------------------------------
+
+    def roster_cuts(self, team_id: int, roster: list[str]) -> dict[str, tuple[int, str | None]]:
+        """Players a team has to drop when an injured player comes back: player -> (first day gone, who came back).
+
+        A team holds its active slots plus one IR slot per injured player it can stash there (OUT or IR, or
+        already in its IR slot, where ESPN leaves him whatever his status), and only until his first game back.
+        From that day it's a player over the limit, so its weakest player from then on goes. Without this a
+        returning IR player and everyone else played all season: a phantom extra player, worth 35-50 points a
+        week in a real league, and a trade for an injured player looked 50 points a week better than it was.
+        """
+        slots = self.s.settings.roster_slots
+        active = sum(n for code, n in slots.items() if code != "IR")
+        ir = slots.get("IR", 0)
+        roster = [p for p in dict.fromkeys(roster) if p in self.proj]
+        if len(roster) <= active:
+            return {}
+        on_ir = {e.player_id for e in self.s.team(team_id).roster if e.slot == "IR"}
+        back: dict[str, float] = {}  # IR-eligible player -> first day he can play again
+        for pid in roster:
+            if self.s.players[pid].injury_status in IR_STATUSES or pid in on_ir:
+                back[pid] = min((d for d, v in self.p_play(pid).items() if v > 0), default=math.inf)
+
+        def value_from(pid: str, day: int) -> float:
+            return self.value_pg[pid] * sum(v for d, v in self.p_play(pid).items() if d >= day)
+
+        cuts: dict[str, tuple[int, str | None]] = {}
+        kept = list(roster)
+        for day in sorted({self.s.current_period, *(b for b in back.values() if b != math.inf)}):
+            stashed = sum(1 for p in kept if back.get(p, -1) > day)
+            returning = next((p for p in kept if back.get(p) == day), None)  # may be the one dropped
+            while len(kept) > active + min(ir, stashed):
+                cands = [p for p in kept if back.get(p, -1) <= day] or kept
+                worst = min(cands, key=lambda p: value_from(p, day))
+                kept.remove(worst)
+                cuts[worst] = (day, returning)
+        return cuts
 
     def expected_games(self, pid: str, days: list[int] | None = None) -> float:
         pp = self.p_play(pid)
@@ -121,18 +192,30 @@ class AnalysisContext:
     # -- the core simulation ------------------------------------------------------
 
     def project_window(self, roster: list[str], days: list[int] | None = None, collect_days: bool = False,
-                       track_stats: bool | None = None) -> WindowResult:
+                       track_stats: bool | None = None, team_id: int | None = None,
+                       leaves: dict[str, int] | None = None) -> WindowResult:
         """Expected fantasy output of ``roster`` over ``days`` with an optimal daily lineup.
 
         Starters are chosen by expected value. When a starter sits (injury,
         rest), the best playing bench player fills the vacancy; that depth value
-        is credited in expectation.
+        is credited in expectation. With ``team_id``, the roster keeps to that
+        team's limits: when an injured player comes back with no room, its
+        weakest player is dropped from then on (roster_cuts). Pickups play from
+        their first_day. ``leaves`` are players who stay only until a day: the
+        one dropped for a waiver claim plays until the claim clears.
         """
         days = self.days if days is None else days
         track_stats = (not self.is_points) if track_stats is None else track_stats
         res = WindowResult()
+        leaves = leaves or {}
         roster = [pid for pid in roster if pid in self.proj]
-        pp = {pid: self.p_play(pid) for pid in roster}
+        cuts = self.roster_cuts(team_id, [p for p in roster if p not in leaves]) if team_id is not None else {}
+        res.cuts = cuts
+        gone_on = {**{p: day for p, (day, _) in cuts.items()}, **leaves}
+        pp = {}
+        for pid in roster:
+            start, gone = self.first_day(pid), gone_on.get(pid, math.inf)
+            pp[pid] = {d: v for d, v in self.p_play(pid).items() if start <= d < gone}
         val = {pid: self.value_pg[pid] for pid in roster}
         fp = {pid: self.proj[pid].fp_pg for pid in roster}
         sd = {pid: self.proj[pid].fp_sd for pid in roster}

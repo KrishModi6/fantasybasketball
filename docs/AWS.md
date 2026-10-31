@@ -49,8 +49,9 @@ Settings, in the order they're applied:
 8. **Access logging**: option A below with no KMS key, and no S3 Tables copy.
 
 **Uploader**: `server/scripts/push_tracking_s3.py`, run at home right after `fetch_tracking.py`.
-stats.nba.com blocks cloud IPs, so ingest stays on the home machine. The uploader uses the
-`courtside` profile from `aws login`: short-lived credentials, with no access keys on disk. It
+stats.nba.com blocks cloud IPs, so ingest stays on the home machine. Run by hand, the uploader uses
+the `courtside` profile from `aws login`: short-lived credentials, with no access keys on disk (the
+daily task in 1b has its own key, which can only write the public file). It
 compares each file's SHA-256 with the copy in S3 and uploads only the files that changed, so new
 versions appear only when the data really changed.
 
@@ -132,20 +133,47 @@ flat-rate Free plan bundles WAF at $0 if you want it later (console only).
 | Piece | Where |
 |---|---|
 | Scheduled task | `Courtside tracking publisher`, daily 08:00, runs late if the PC was off (StartWhenAvailable), only while you're signed in to Windows. It starts `publish-tracking.pyw` with the main checkout's `server\.venv\Scripts\pythonw.exe`, so no console window opens |
-| Wrapper | `publish-tracking.cmd`: updates the checkout to `origin/main`, then runs the publisher. Run it by hand to publish now |
+| Wrapper | `publish-tracking.cmd`: updates the checkout to `origin/main`, then runs the publisher with the `courtside-publisher` profile (below). Run it by hand to publish now |
 | Checkout | `publisher\`, a detached `git worktree` of this repo pinned to `origin/main` |
 | Python | the main checkout's `server\.venv` (has `requirements-dev.txt`) |
 | Cache | `publisher-cache\` (`FBB_CACHE_DIR`) |
 | Log | `publish.log` |
+| Key rotation reminder | Scheduled task `Courtside publisher key rotation reminder`: once, 2027-01-29 09:00 (late if the PC was off), deletes itself after 2027-04-30 |
 
 Not under `%LOCALAPPDATA%`: the Claude desktop app is a packaged app, so files its sessions create
 there are redirected into its private storage, where Task Scheduler can't see them.
 
-It signs in with the `aws login` session. That session lasts at most 12 hours (the CLI refreshes the
-credentials every 15 minutes within it, then needs a new `aws login`), so a run more than 12 hours
-after the last sign-in fails until you run `aws login --profile courtside`. If it stops, apps notice nothing for a day
-and then fetch from NBA.com themselves, as before 0.5.0. To stop it: `schtasks /Delete /TN "Courtside
-tracking publisher" /F` and `git worktree remove C:\Users\Krish\.courtside-publisher\publisher`.
+**Credentials** (since 2026-10-31). The task first used the `aws login` session, but AWS caps that at
+12 hours, so every run more than 12 hours after a sign-in failed (first on 2026-10-31). The wrapper
+now sets `AWS_PROFILE=courtside-publisher`, the access key of an IAM user that exists only for this
+task:
+
+- IAM user `courtside-publisher`, tagged `project=courtside`, with no console password. Its one inline
+  policy, `publish-live-tracking`, allows `s3:PutObject` on
+  `arn:aws:s3:::courtside-<account-id>-us-east-2-an/public/live_*.json.gz` and nothing else, so it
+  can't list or read the bucket or write anywhere else. `sts:GetCallerIdentity`, which finds the
+  bucket name, needs no permission.
+- The key is in `%USERPROFILE%\.aws\credentials` under `[courtside-publisher]`, and its region is in
+  `.aws\config`. Anything running as you can read it. If it leaked, the worst case is a wrong
+  `live_<season>.json.gz` until the next daily run replaces it, plus a few cents of storage.
+- Not available on this free-plan project without activating advanced features: IAM Identity Center
+  (unsupported in the new AWS experience) and IAM Roles Anywhere (short-lived credentials from a
+  certificate, AWS's preferred pattern for machines outside AWS; the free plan's SCP doesn't allow
+  `rolesanywhere`).
+- **Rotate the key every 90 days.** Next: 2027-01-29, when the one-time task `Courtside publisher key
+  rotation reminder` pops up a message. Signed in as `courtside`, run `aws iam create-access-key
+  --user-name courtside-publisher --profile courtside`, put the new ID and secret in the credentials
+  file, run `publish-tracking.cmd` and check that `publish.log` ends in `exit 0`, then
+  `aws iam delete-access-key --user-name courtside-publisher --access-key-id <old ID> --profile
+  courtside`. A user can hold two keys, so the old one keeps working until the new one is tested.
+
+If the log says the profile has no working access key, the key was deleted, deactivated or mistyped:
+make a new one as above. If it stops, apps notice nothing for a day and then fetch from NBA.com
+themselves, as before 0.5.0. To stop it: `schtasks /Delete /TN "Courtside tracking publisher" /F`
+and `git worktree remove C:\Users\Krish\.courtside-publisher\publisher`; then retire the key with
+`aws iam delete-access-key`, `aws iam delete-user-policy --policy-name publish-live-tracking` and
+`aws iam delete-user` (each with `--user-name courtside-publisher --profile courtside`), and delete
+the reminder task.
 
 **What exists in AWS** (tagged `project=courtside`; Regional resources in `us-east-2`)
 
@@ -160,8 +188,9 @@ tracking publisher" /F` and `git worktree remove C:\Users\Krish\.courtside-publi
 | CloudWatch log group (us-east-1) | `/aws/vendedlogs/cloudfront/courtside-public` (90-day retention) |
 | Log delivery source / destination / delivery (us-east-1) | `cf-courtside-public` → `cf-dest-courtside` |
 | Budget (global) | `courtside-monthly` |
+| IAM user (global) | `courtside-publisher`: one access key, inline policy `publish-live-tracking` (1b) |
 
-To remove it all: delete the scheduled task first. Then CloudFront: delete the `cf-` delivery,
+To remove it all: delete the scheduled tasks and the `courtside-publisher` user (1b) first. Then CloudFront: delete the `cf-` delivery,
 destination, source and log group in us-east-1, disable the distribution, wait for it to deploy,
 delete it, then delete the origin access control and the `AllowCloudFrontReadPublic` statement. Then
 the S3 logging: delete the delivery, then the delivery destination, the delivery source and the log

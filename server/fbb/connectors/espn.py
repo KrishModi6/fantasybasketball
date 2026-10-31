@@ -261,6 +261,7 @@ def parse_player(entry: dict, season: int, period_to_season: dict[int, int] | No
     games.sort(key=lambda g: (g.season, g.period))
     ownership = raw.get("ownership") or {}
     injury_status = raw.get("injuryStatus") or ("OUT" if raw.get("injured") else "ACTIVE")
+    waiver_ms = entry.get("waiverProcessDate") if isinstance(entry, dict) else None
     return Player(
         id=pid,
         name=raw.get("fullName", pid),
@@ -276,6 +277,8 @@ def parse_player(entry: dict, season: int, period_to_season: dict[int, int] | No
         adp=ownership.get("averageDraftPosition"),
         fantasy_team_id=(entry.get("onTeamId") or None) if isinstance(entry, dict) else None,
         on_waivers=entry.get("status") == "WAIVERS",
+        waiver_clears=(datetime.fromtimestamp(waiver_ms / 1000, tz=timezone.utc).astimezone(EASTERN)
+                       if isinstance(waiver_ms, (int, float)) and waiver_ms > 0 else None),
     )
 
 
@@ -283,6 +286,7 @@ def parse_pro_schedule(data: dict, season: int) -> ProSchedule:
     games: dict[int, set[str]] = {}
     first_game: dict[int, datetime] = {}
     last_game: dict[int, datetime] = {}
+    team_tips: dict[int, dict[str, datetime]] = {}
     for team in data.get("settings", {}).get("proTeams", []):
         abbrev = ESPN_PRO_TEAMS.get(team.get("id"), team.get("abbrev", ""))
         for period, glist in (team.get("proGamesByScoringPeriod") or {}).items():
@@ -294,6 +298,9 @@ def parse_pro_schedule(data: dict, season: int) -> ProSchedule:
                     first_game[p] = ts
                 if p not in last_game or ts > last_game[p]:
                     last_game[p] = ts
+                tips = team_tips.setdefault(p, {})
+                if abbrev not in tips or ts < tips[abbrev]:
+                    tips[abbrev] = ts
     period_dates: dict[int, date] = {}
     if first_game:
         # Anchor on any known period, then every scoring period is one calendar day.
@@ -307,6 +314,7 @@ def parse_pro_schedule(data: dict, season: int) -> ProSchedule:
         period_dates=period_dates,
         games={p: sorted(t) for p, t in sorted(games.items())},
         tipoffs={p: (first_game[p], last_game[p]) for p in sorted(first_game)},
+        team_tips={p: team_tips[p] for p in sorted(team_tips)},
     )
 
 
@@ -381,7 +389,9 @@ def parse_settings(data: dict, season: int) -> LeagueSettings:
     playoff_len = int(sched.get("playoffMatchupPeriodLength", 1))
     playoff_teams = int(sched.get("playoffTeamCount", 4))
     rounds = max(1, (playoff_teams - 1).bit_length())
-    acq = (s.get("acquisitionSettings") or {}).get("matchupAcquisitionLimit")
+    acq_settings = s.get("acquisitionSettings") or {}
+    acq = acq_settings.get("matchupAcquisitionLimit")
+    waiver_hours = acq_settings.get("waiverHours")
     deadline = (s.get("tradeSettings") or {}).get("deadlineDate")
     return LeagueSettings(
         name=s.get("name", "ESPN League"),
@@ -394,6 +404,7 @@ def parse_settings(data: dict, season: int) -> LeagueSettings:
         playoff_round_weeks=[playoff_len] * rounds,
         matchup_periods=matchup_periods,
         acquisition_limit_per_matchup=int(acq) if acq not in (None, -1) else None,
+        waiver_hours=int(waiver_hours) if isinstance(waiver_hours, (int, float)) and waiver_hours >= 0 else 48,
         trade_deadline=datetime.fromtimestamp(deadline / 1000, tz=timezone.utc) if deadline else None,
         lineup_lock="daily",
     )
