@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.4
+## What's new in 0.5.5
+
+- **Opening-week projections match players' first games.** Players start a season below their usual level: over the last three seasons they scored about 9% below it in their first game, 7% in games 2 and 3 and 3% through game 8, then settled. Courtside projected those games at the full season level, so opening-week projections ran 6–11% above what players really scored. Each player's first few games of the season are now projected lower, and opening-week projections land within about 2% of what players scored. The Matchups page's 80% range for week 1 now holds the real score 80% of the time, where before it held 65%.
+- **A slow first week doesn't drag a player down.** The fewer minutes players get in their first games count as part of that opening dip, not as a smaller role, so his projection for the weeks after isn't marked down for it. Rest-of-season projections come out a little more accurate.
+- This season is already under way, so most players are past most of the games this changes. It mostly shows for players who haven't played yet, such as those coming back from an injury, and from next October in full.
+
+## In 0.5.4
 
 - **xFP data on time every morning.** The daily file of NBA.com tracking data behind xFP and Luck was published with an AWS sign-in that runs out after 12 hours, so on October 31 it went out at 11:12 a.m. instead of 8:00. It now has its own AWS key that doesn't run out. When the file is late, Courtside fetches the missing day from NBA.com itself, so nothing was lost.
 - **Healthy players are expected to play their next few games.** Each player's chance of sitting out used to be his miss rate for the whole season, about 24% for rotation players. But most injuries that would keep a player out in the next few days are already on the injury report: over the last three seasons, healthy rotation players missed only 8% of their next two games. A healthy player's chance of missing his next game is now 30% of his season rate, rising back to the full rate over about 9 games. Players coming back from an injury keep the season rate. Weekly projections no longer shave games off healthy starters, so projected team scores rise about 9%: they ran about 6% below real scores and now land about 2% above.
