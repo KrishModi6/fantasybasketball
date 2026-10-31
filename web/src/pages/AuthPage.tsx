@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { BrandMark, ThemeToggle } from "../components/Layout";
+import { AppMenuButton, BrandMark, ThemeToggle } from "../components/Layout";
 import { Segmented } from "../components/ui";
 import { isDesktop, serverUrl, setServerUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -77,6 +77,7 @@ function ServerSetting() {
 export function StandaloneTop() {
   return (
     <header className="topbar">
+      <AppMenuButton />
       <Link to="/" className="brand"><BrandMark /> Courtside</Link>
       <span className="spacer" />
       <ThemeToggle />

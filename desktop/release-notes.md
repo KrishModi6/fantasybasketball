@@ -2,6 +2,8 @@ Courtside runs on your computer: projections, power rankings, matchup simulation
 
 ## What's new in 0.5.3
 
+- **A title bar that matches Courtside.** On Windows, the white title bar and the File, Edit, View, Window, Help menu bar are gone. Courtside's own top bar is now the title bar, in the dark or light theme, with the minimize, maximize and close buttons at its right end. Drag it to move the window and double-click it to maximize. The menus open from the **☰** button at the left. On a Mac, the top bar leaves room for the window buttons and moves the window when you drag it.
+- **What's new.** The first time Courtside opens on a new version, it shows what changed since the version you had, like this list. To see it again, or any earlier version, click **What's new** at the bottom right or choose **Help > What's new in Courtside**.
 - **An injured player's IR spot ends when he comes back.** A team with a player on IR was projected to play him and everyone else for the rest of the season, a player more than ESPN allows. Now, the day he's back, a full team drops its weakest player from then on. This mostly shows in trades for injured players: one that looked 64 points a week better comes out at about 10. The trade's calculation names the player dropped and the date.
 - **Add/drop never suggests dropping your IR player.** Dropping him frees only the IR slot, which a healthy pickup can't take, so ESPN wouldn't allow the move.
 - **Finished games stop counting.** Once a player's game tonight is over, nothing more is expected from it: a player who sat or played short minutes no longer gets the rest of a game that already ended.

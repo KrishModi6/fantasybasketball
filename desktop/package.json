@@ -39,6 +39,7 @@
       "main.js",
       "preload.js",
       "mac-update.js",
+      "release-notes.md",
       "web-dist/**/*",
       "package.json",
       "ai-config.json"

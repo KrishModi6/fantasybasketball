@@ -23,6 +23,10 @@ declare global {
       platform?: string;
       version?: string;
       local?: boolean;
+      setTheme?: (theme: "dark" | "light") => Promise<void>;
+      openMenu?: (x: number, y: number) => Promise<void>;
+      releaseNotes?: () => Promise<string>;
+      onWhatsNew?: (callback: () => void) => () => void;
       updates?: {
         state: () => Promise<UpdateState>;
         install: () => Promise<void>;
