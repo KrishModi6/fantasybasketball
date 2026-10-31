@@ -1,6 +1,10 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.3
+## What's new in 0.5.4
+
+- **xFP data on time every morning.** The daily file of NBA.com tracking data behind xFP and Luck was published with an AWS sign-in that runs out after 12 hours, so on October 31 it went out at 11:12 a.m. instead of 8:00. It now has its own AWS key that doesn't run out. When the file is late, Courtside fetches the missing day from NBA.com itself, so nothing was lost.
+
+## In 0.5.3
 
 - **A title bar that matches Courtside.** On Windows, the white title bar and the File, Edit, View, Window, Help menu bar are gone. Courtside's own top bar is now the title bar, in the dark or light theme, with the minimize, maximize and close buttons at its right end. Drag it to move the window and double-click it to maximize. The menus open from the **☰** button at the left. On a Mac, the top bar leaves room for the window buttons and moves the window when you drag it.
 - **What's new.** The first time Courtside opens on a new version, it shows what changed since the version you had, like this list. To see it again, or any earlier version, click **What's new** at the bottom right or choose **Help > What's new in Courtside**.
