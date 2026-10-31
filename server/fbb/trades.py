@@ -22,7 +22,8 @@ from collections.abc import Collection
 from dataclasses import asdict, dataclass, field
 from itertools import combinations, permutations
 
-from .context import AnalysisContext, WindowResult
+from .context import IR_STATUSES, AnalysisContext, WindowResult
+from .schedule import date_of
 from .strength import MatchupModel, simulate_season, team_windows
 from .valuation import player_values
 
@@ -57,6 +58,9 @@ class TradeSide:
     open_spot_adds: list[str] = field(default_factory=list)  # free agents the open spots get, with or without the trade
     # [player, free agent]: players traded away or dropped who project below a pickup, compared as that pickup
     counted_as_pickups: list[list[str]] = field(default_factory=list)
+    # [player, injured player, ISO date]: dropped when the injured player comes back with no room for him, a
+    # drop the trade causes (one the team faced anyway isn't listed)
+    return_drops: list[list[str]] = field(default_factory=list)
     before_ros: float = 0.0
     after_ros: float = 0.0
     delta_ros: float = 0.0
@@ -81,12 +85,13 @@ def roster_capacity(ctx: AnalysisContext, team_id: int, roster: list[str]) -> in
     A player in the team's IR slot keeps it whatever his status says now: ESPN leaves a player there after
     he's upgraded to day-to-day, so counting only OUT players made his team look a player over the limit, and
     every trade it made dropped someone. Only his team keeps that spot: a team that gets him can't put a
-    day-to-day player on IR.
+    day-to-day player on IR. This is the limit today; the lineup projection drops a player when an injured one
+    comes back with no room for him (AnalysisContext.roster_cuts).
     """
     slots = ctx.s.settings.roster_slots
     active = sum(n for code, n in slots.items() if code != "IR")
     on_ir = {e.player_id for e in ctx.s.team(team_id).roster if e.slot == "IR"}
-    injured = sum(1 for p in roster if ctx.s.players[p].injury_status in ("OUT", "INJURY_RESERVE") or p in on_ir)
+    injured = sum(1 for p in roster if ctx.s.players[p].injury_status in IR_STATUSES or p in on_ir)
     return active + min(slots.get("IR", 0), injured)
 
 
@@ -148,6 +153,11 @@ def _weeks(ctx: AnalysisContext) -> float:
     return max(1.0, len(ctx.days) / 7)
 
 
+def _iso(ctx: AnalysisContext, day: int) -> str:
+    d = date_of(ctx.s, day)
+    return d.isoformat() if d else ""
+
+
 def _verdict(pct: float) -> str:
     if pct >= ADVANTAGE_PCT:
         return "advantageous"
@@ -166,7 +176,7 @@ class TradeEvaluator:
         self.pool = pickup_pool(ctx)
         self.replacement = _ros_value(ctx, self.pool[0]) if self.pool else 0.0  # what a pickup is worth
         self._baselines: dict[int, tuple[list[str], list[str], WindowResult]] = {}
-        self._windows: OrderedDict[frozenset, WindowResult] = OrderedDict()
+        self._windows: OrderedDict[tuple[int, frozenset], WindowResult] = OrderedDict()
         self._base_sim: dict | None = None
         cur = ctx.s.current_matchup_period
         self.this_week = ctx.matchup_days(cur)
@@ -177,15 +187,16 @@ class TradeEvaluator:
         """A team's comparison roster (open spots filled from free agents), those pickups, and its lineup window."""
         if team_id not in self._baselines:
             roster, fills = baseline_roster(self.ctx, team_id, self.pool)
-            self._baselines[team_id] = (roster, fills, self._window(roster) if fills else self.base[team_id])
+            self._baselines[team_id] = (roster, fills, self._window(team_id, roster) if fills else self.base[team_id])
         return self._baselines[team_id]
 
-    def _window(self, roster: list[str]) -> WindowResult:
-        key = frozenset(roster)
+    def _window(self, team_id: int, roster: list[str]) -> WindowResult:
+        # Keyed by team too: who can stay in an IR slot depends on whose slot he's in.
+        key = (team_id, frozenset(roster))
         if key in self._windows:
             self._windows.move_to_end(key)
         else:
-            self._windows[key] = self.ctx.project_window(roster)
+            self._windows[key] = self.ctx.project_window(roster, team_id=team_id)
             if len(self._windows) > self.WINDOW_CACHE:
                 self._windows.popitem(last=False)
         return self._windows[key]
@@ -201,7 +212,7 @@ class TradeEvaluator:
     def _side(self, team_id: int, gives: list[str], receives: list[str]) -> tuple[TradeSide, WindowResult, WindowResult]:
         ctx = self.ctx
         roster, drops, adds = apply_trade(ctx, team_id, gives, receives, self.pool)
-        after = ctx.project_window(roster)
+        after = ctx.project_window(roster, team_id=team_id)
         base_roster, fills, before = self.baseline(team_id)
         as_is = before
         # A player who projects below a pickup is worth no more than one: the team could swap him on waivers
@@ -211,12 +222,16 @@ class TradeEvaluator:
         if swaps:
             out = {p for p, _ in swaps}
             before_roster = [p for p in base_roster if p not in out] + [fa for _, fa in swaps]
-            before = self._window(before_roster)
+            before = self._window(team_id, before_roster)
         else:
             before_roster = base_roster
+        # Drops when an injured player comes back that the trade causes: one the team faced anyway isn't news.
+        return_drops = [[p, back or "", _iso(ctx, day)]
+                        for p, (day, back) in sorted(after.cuts.items(), key=lambda x: x[1][0])
+                        if before.cuts.get(p, (None,))[0] != day]
         side = TradeSide(team_id=team_id, team_name=ctx.s.team(team_id).name, gives=list(gives),
                          receives=list(receives), auto_drops=drops, auto_adds=adds, open_spot_adds=fills,
-                         counted_as_pickups=[[p, fa] for p, fa in swaps])
+                         counted_as_pickups=[[p, fa] for p, fa in swaps], return_drops=return_drops)
         side.before_ros = before.mean
         side.after_ros = after.mean
         side.delta_ros = after.mean - before.mean
@@ -328,6 +343,11 @@ class TradeEvaluator:
             if s.auto_adds:
                 lines.append(f"A roster spot opens and is filled from free agents (the best after the top {FA_SKIP}, who go "
                              f"fast on waivers): {named(s.auto_adds)}.")
+            for p, back, day in s.return_drops:
+                when = f"on {day}" if day else "today"
+                who = f"When {ctx.proj[back].name} comes back {when}" if back else f"From {day or 'today'}"
+                lines.append(f"{who}, the roster is a player over the limit, so the lowest-value player from then on "
+                             f"is dropped: {named([p])}. An injured player holds an IR slot only while he's out.")
             lines.append(
                 f"Optimal daily lineups over the remaining {len(ctx.days)} days: {s.before_ros:,.0f} → "
                 f"{s.after_ros:,.0f} points ({s.delta_ros:+,.0f}, {s.delta_pct:+.1%}). The gap between the raw "

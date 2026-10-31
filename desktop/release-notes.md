@@ -1,6 +1,15 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.2
+## What's new in 0.5.3
+
+- **An injured player's IR spot ends when he comes back.** A team with a player on IR was projected to play him and everyone else for the rest of the season, a player more than ESPN allows. Now, the day he's back, a full team drops its weakest player from then on. This mostly shows in trades for injured players: one that looked 64 points a week better comes out at about 10. The trade's calculation names the player dropped and the date.
+- **Add/drop never suggests dropping your IR player.** Dropping him frees only the IR slot, which a healthy pickup can't take, so ESPN wouldn't allow the move.
+- **Finished games stop counting.** Once a player's game tonight is over, nothing more is expected from it: a player who sat or played short minutes no longer gets the rest of a game that already ended.
+- **Pickups play when they can.** A player on waivers counts only the games after his claim clears (the **Streaming** table marks him **waivers**), and the player you'd drop for him keeps playing until then. A free agent can't join a game that has already tipped off.
+- **Playoff odds by win percentage.** In a league with an odd number of teams, a team with more byes plays fewer games. Seeding now goes by win percentage instead of total wins, so those teams' playoff odds aren't marked down for it.
+- Courtside refreshes your league when it starts on 0.5.3, to read each team's tip-off times and when waiver claims clear.
+
+## In 0.5.2
 
 - **xFP/G and Luck on your roster.** The team page's **Roster** tab now has the **xFP/G** and **Luck** columns from **Players**, next to **Last 10**, so you can see at a glance which of your players are running hot (sell-high) or cold (buy-low). Point at either label for what it means. On a narrow window they hide, like the other extra columns.
 - **Team luck on Power rankings.** A new **Luck** column: how many points a week each team's players have been scoring above or below what their chances were worth, counted as often as its best lineups will start them. A team well above zero is likelier to cool off. Select a team for who it comes from, like "hottest Fred VanVleet +22, coldest Caleb Wilson −24".
