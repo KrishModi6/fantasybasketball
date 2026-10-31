@@ -40,7 +40,7 @@ Courtside reopens where you left off. The back arrow (or your mouse's back butto
 **Players.** Free agents, rostered players, or everyone. Filter by position, search, and sort by projection, rest-of-season value, games next week and more. Click a player to see exactly how the projection was built:
 1. the three sources and their weights;
 2. how much this season's games count so far (from 15 games on, only this season counts);
-3. every adjustment applied (injuries, minutes budget, team change), with its cap;
+3. every adjustment applied (injuries, team change, league overrides), with its cap;
 4. what moved the ML model;
 5. the projection per game next to his actual averages this season.
 

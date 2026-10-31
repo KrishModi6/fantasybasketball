@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from . import context as _context
 from .constants import LOWER_IS_BETTER, RATIO_STATS
 from .context import AnalysisContext
 from .lineup import solve_day
@@ -36,6 +37,7 @@ EVENTS = ["2PM", "2PX", "3PM", "3PX", "FTM", "FTX", "REB", "AST", "STL", "BLK", 
 _E = {e: i for i, e in enumerate(EVENTS)}
 DEFAULT_SIMS = 10_000
 MAX_SIMS = 20_000
+ROLE_SHOCK_SCALE = 1.0  # multiplies the calibrated role-shock variance (scripts/backtest_sims.py tests it)
 
 
 def event_rates(per_game: dict[str, float]) -> np.ndarray:
@@ -122,7 +124,7 @@ class MatchupSimulator:
             v = float(np.clip(v, 0.01, 0.8))
         else:
             v = 0.15
-        return _Player(pid=pid, lam=lam, shape=1.0 / v)
+        return _Player(pid=pid, lam=lam, shape=1.0 / (v * ROLE_SHOCK_SCALE))
 
     def _plan(self, roster: list[str], days: list[int], exclude: set[str],
               team_id: int | None = None) -> tuple[list[_Player], list[_Day]]:
@@ -162,12 +164,24 @@ class MatchupSimulator:
         starts = np.zeros(len(players))
         games = np.zeros(len(players))
         by_day = []
+        # Week-level levels (mean 1) shared by each player's games, and by the whole roster.
+        week = team = None
+        if _context.PLAYER_WEEK_CV > 0:
+            k_w = 1.0 / _context.PLAYER_WEEK_CV ** 2
+            week = self.rng.gamma(k_w, 1.0 / k_w, size=(n, len(players)))
+        if _context.TEAM_WEEK_CV > 0:
+            k_t = 1.0 / _context.TEAM_WEEK_CV ** 2
+            team = self.rng.gamma(k_t, 1.0 / k_t, size=n)
         for day in plans:
             k = len(day.cands)
             lam = np.stack([players[i].lam for i in day.cands])  # (k, E)
             shapes = np.array([players[i].shape for i in day.cands])
             plays = self.rng.random((n, k)) < day.p
             shock = self.rng.gamma(shapes, 1.0 / shapes, size=(n, k))
+            if week is not None:
+                shock *= week[:, day.cands]
+            if team is not None:
+                shock *= team[:, None]
             counts = self.rng.poisson(lam[None, :, :] * shock[:, :, None])  # (n, k, E)
             use = np.zeros((n, k), dtype=bool)
             for pos, _ in day.starters:
