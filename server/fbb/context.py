@@ -23,6 +23,24 @@ CATEGORY_STATS = ["PTS", "REB", "AST", "STL", "BLK", "TO", "3PM", "FGM", "FGA", 
                   "OREB", "DREB", "PF"]
 IR_STATUSES = ("OUT", "INJURY_RESERVE")  # statuses ESPN lets a team put in an IR slot
 
+# Uncertainty beyond each game's own spread, for points leagues. A player's level over one matchup week
+# moves together across his games (role, form, and the projection's own error), and a whole roster can
+# run hot or cold together in a week. Without them weekly win odds were overconfident and 80% ranges held
+# 70% of the time; with them, 80% (scripts/backtest_sims.py: 192 synthetic leagues, 2023-24 to 2025-26).
+PLAYER_WEEK_CV = 0.10
+TEAM_WEEK_CV = 0.06
+
+# A player who isn't hurt rarely misses his next game or two: the injuries that would keep him out are mostly
+# on the report already. Games further off carry more of the season's injury risk. So a healthy player's
+# chance of missing his next game is MISS_NEXT_FLOOR + MISS_NEXT_GAME x his season-level rate (1 - availability),
+# and climbs back to the season rate as exp(-j / MISS_RAMP_GAMES) fades, j = his team's games from now.
+# Fitted on 2023-24 to 2025-26 game logs (scripts/backtest_sims.py): healthy rotation players missed 8% of
+# their next two games against 24% a season. Not after an injury: players back from one miss more than the
+# season rate, not less.
+MISS_NEXT_GAME = 0.30
+MISS_NEXT_FLOOR = 0.0
+MISS_RAMP_GAMES = 9.0
+
 
 @dataclass
 class WindowResult:
@@ -79,16 +97,17 @@ class AnalysisContext:
         pr = self.proj[pid]
         days = sorted(self.team_days.get(p.pro_team, ()))
         out: dict[int, float] = {}
+        miss = 1 - pr.availability
+        near = min(miss, MISS_NEXT_FLOOR + MISS_NEXT_GAME * miss)
         g_out = pr.games_out
         full_out = int(math.floor(g_out))
         frac = g_out - full_out
         for k, d in enumerate(days):
             if k < full_out:
                 out[d] = 0.0
-            elif k == full_out and frac > 0:
-                out[d] = pr.availability * (1 - frac)
-            else:
-                out[d] = pr.availability
+                continue
+            avail = 1 - (miss - (miss - near) * math.exp(-k / MISS_RAMP_GAMES) if g_out == 0 else miss)
+            out[d] = avail * (1 - frac) if k == full_out and frac > 0 else avail
         # Once today's game has started, what he has scored is already in the matchup totals, so only the
         # part of the game he hasn't played yet is left, and nothing once it's over: a player who sat or played
         # less than usual doesn't get the rest of a finished game.
@@ -204,6 +223,7 @@ class AnalysisContext:
         n_slots = self.slots.n
         memo: dict[tuple, dict[int, int]] = {}
         index = {pid: i for i, pid in enumerate(roster)}
+        week_pts: dict[tuple[str, int], float] = {}  # (player, matchup period) -> expected points
 
         for d in days:
             cands = []
@@ -253,6 +273,7 @@ class AnalysisContext:
                 res.var += v
                 bym[0] += m
                 bym[1] += v
+                week_pts[(pid, mp)] = week_pts.get((pid, mp), 0.0) + m
                 res.starts[pid] = res.starts.get(pid, 0.0) + q
                 res.points[pid] = res.points.get(pid, 0.0) + q * (fp[pid] if self.is_points else val[pid])
                 if track_stats:
@@ -276,6 +297,13 @@ class AnalysisContext:
                     "bench": [pid for pid, _ in bench],
                     "expected": day_mean,
                 })
+        # Week-level swings: a player's (and a roster's) level moves together across a week's games.
+        for (pid, mp), m in week_pts.items():
+            res.by_mp[mp][1] += (PLAYER_WEEK_CV * m) ** 2
+            res.var += (PLAYER_WEEK_CV * m) ** 2
+        for bym in res.by_mp.values():
+            res.var += (TEAM_WEEK_CV * bym[0]) ** 2
+            bym[1] += (TEAM_WEEK_CV * bym[0]) ** 2
         if not track_stats:
             # Totals of counting stats from started games (used for explanations).
             for pid, q in res.starts.items():

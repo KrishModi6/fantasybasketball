@@ -11,7 +11,7 @@ import pytest
 from fbb.baseline import FALLBACK_LEAGUE_RATES, RATE_STATS, aging_factor, per_game_from_rates, sps_projection
 from fbb.connectors.espn import EASTERN, parse_settings
 from fbb.connectors.fileimport import normalize_name, parse_upload
-from fbb.context import AnalysisContext
+from fbb.context import MISS_NEXT_FLOOR, MISS_NEXT_GAME, AnalysisContext
 from fbb.enrich import enrich_players
 from fbb.improve import add_drop_moves, streaming_moves
 from fbb.lineup import SlotModel, solve_day
@@ -150,6 +150,30 @@ def test_injury_reduces_games_not_rates():
     assert ctx.expected_games("1") < AnalysisContext(make_snapshot(), healthy).expected_games("1")
 
 
+def test_healthy_player_rarely_misses_his_next_game():
+    """Availability is a season's worth of misses; the injuries behind his next few mostly haven't happened."""
+    ctx = AnalysisContext(make_snapshot())
+    pr = ctx.proj["1"]
+    pp = [v for _, v in sorted(ctx.p_play("1").items())]
+    assert pr.availability < 0.99
+    miss = 1 - pr.availability
+    assert pp[0] == pytest.approx(1 - min(miss, MISS_NEXT_FLOOR + MISS_NEXT_GAME * miss))
+    assert pp[0] > pp[10] > pp[-1]
+    assert pp[-1] == pytest.approx(pr.availability, abs=0.005)
+
+
+def test_teammates_minutes_come_from_their_own_games():
+    """No team-minutes budget: an injured teammate changes nobody else's projected minutes."""
+    def team(injured=None):
+        snap = make_snapshot(injured=injured)
+        for k in "12345678":
+            snap.players[k].pro_team = "BOS"
+        return ProjectionEngine(snap, model=None).project_all()
+
+    healthy, hurt = team(), team({"1": "OUT"})
+    assert all(hurt[k].mpg == pytest.approx(healthy[k].mpg) for k in "2345678")
+
+
 def test_manual_override_is_bounded():
     from fbb.models import PlayerOverride
 
@@ -157,7 +181,7 @@ def test_manual_override_is_bounded():
     snap = make_snapshot()
     snap.overrides = [PlayerOverride(player_id="2", minutes_pct=0.9, note="huge role")]
     pr = ProjectionEngine(snap, model=None).project_all()["2"]
-    assert pr.mpg / base.mpg <= 1 + MANUAL_LIMIT + 0.081  # manual cap plus at most the team-budget cap
+    assert pr.mpg / base.mpg <= 1 + MANUAL_LIMIT + 1e-9
 
 
 # ---- in-season update -------------------------------------------------------------

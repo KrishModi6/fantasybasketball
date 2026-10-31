@@ -33,6 +33,11 @@ def normal_cdf(z: float) -> float:
 
 
 N_SIMS = 5000
+# Points leagues: how far a team's projected level can be off for the whole rest of the season (injuries,
+# trades and form that the weekly spread treats as independent). Each simulated season draws one level
+# per team. Without it playoff odds were far too sure (calibration slope 0.49); at 0.10 the slope is 0.93
+# and the Brier score 9% lower (scripts/backtest_sims.py). Draft-day odds are still a little too sure.
+SEASON_TEAM_CV = 0.10
 
 
 @dataclass
@@ -217,11 +222,15 @@ def simulate_season(ctx: AnalysisContext, mm: MatchupModel, n: int = N_SIMS, see
     won = np.zeros((n, T))  # wins in the games simulated
     left = {tid: 0 for tid in ids}
     pcache: dict[tuple, float] = {}
+    level = 1 + SEASON_TEAM_CV * rng.standard_normal((n, T)) if SEASON_TEAM_CV > 0 and ctx.is_points else None
     for mp, a, b in remaining_schedule(ctx):
-        key = (a, b, mp)
-        if key not in pcache:
-            pcache[key] = mm.p_win(a, b, mp)
-        a_wins = rng.random(n) < pcache[key]
+        if level is not None:
+            a_wins = _margin(mm, a, b, mp, level[:, col[a]], level[:, col[b]], rng) > 0
+        else:
+            key = (a, b, mp)
+            if key not in pcache:
+                pcache[key] = mm.p_win(a, b, mp)
+            a_wins = rng.random(n) < pcache[key]
         won[:, col[a]] += a_wins
         won[:, col[b]] += ~a_wins
         left[a] += 1
@@ -240,7 +249,7 @@ def simulate_season(ctx: AnalysisContext, mm: MatchupModel, n: int = N_SIMS, see
     k = min(ctx.s.settings.playoff_teams, T)
     seeds = order[:, :k]  # (n, k) team columns by seed
     playoff_mps = sorted(mp for mp in ctx.s.settings.matchup_periods if mp > ctx.s.settings.regular_season_matchups)
-    champion = _simulate_bracket(seeds, ids, mm, playoff_mps, rng)
+    champion = _simulate_bracket(seeds, ids, mm, playoff_mps, rng, level)
 
     out = {}
     reg = ctx.s.settings.regular_season_matchups
@@ -272,8 +281,15 @@ def _bracket_order(k: int) -> list[int]:
     return order
 
 
+def _margin(mm: MatchupModel, a: int, b: int, mp: int, level_a, level_b, rng: np.random.Generator):
+    """Simulated points margin of a over b with each team's projection scaled by its season level."""
+    ma, va = mm.dist(a, mp)
+    mb, vb = mm.dist(b, mp)
+    return ma * level_a - mb * level_b + math.sqrt(max(va + vb, 1.0)) * rng.standard_normal(np.shape(level_a))
+
+
 def _simulate_bracket(seeds: np.ndarray, ids: list[int], mm: MatchupModel, playoff_mps: list[int],
-                      rng: np.random.Generator) -> np.ndarray:
+                      rng: np.random.Generator, level: np.ndarray | None = None) -> np.ndarray:
     n, k = seeds.shape
     if k < 2:
         return seeds[:, 0] if k else np.full(n, -1)
@@ -292,6 +308,10 @@ def _simulate_bracket(seeds: np.ndarray, ids: list[int], mm: MatchupModel, playo
         need = winner == -1
         for i, j in zip(*np.nonzero(need)):
             ta, tb = ids[a[i, j]], ids[b[i, j]]
+            if level is not None and mp is not None:
+                a_won = _margin(mm, ta, tb, mp, level[i, a[i, j]], level[i, b[i, j]], rng) > 0
+                winner[i, j] = a[i, j] if a_won else b[i, j]
+                continue
             key = (ta, tb, mp)
             if key not in pc:
                 pc[key] = mm.p_win(ta, tb, mp) if mp is not None else 0.5

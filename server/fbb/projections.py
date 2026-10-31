@@ -16,7 +16,6 @@ Order of operations for every player (each step is recorded for the UI):
   3. Bounded adjustments (news layer). Only structured signals are used and
      each is capped:
        injury status / return date -> games missed (availability only)
-       team minutes budget         -> minutes x [0.92, 1.08]
        new team                    -> wider uncertainty, no rate change
        manual override             -> minutes x [0.85, 1.15]
      Total minutes adjustment is clamped to [-20%, +15%]. Free-text news is
@@ -78,8 +77,6 @@ INJURY_DEFAULT_GAMES = {
     "DOUBTFUL": 0.75, "QUESTIONABLE": 0.4, "DAY_TO_DAY": 0.5,
 }
 MINUTES_ADJ_FLOOR, MINUTES_ADJ_CAP = -0.20, 0.15
-TEAM_MINUTES_BUDGET = 236.0  # 240 minus garbage time spread among end-of-bench players
-TEAM_ADJ_LIMIT = 0.08
 MANUAL_LIMIT = 0.15
 
 
@@ -244,8 +241,9 @@ class ProjectionEngine:
     def project_all(self) -> dict[str, PlayerProjection]:
         players = list(self.s.players.values())
         pre = self._preseason(players)
+        # No team-minutes budget: teammates' recent games already carry an absence, and scaling healthy
+        # players up toward 240 minutes overshot their real output by 7% (scripts/backtest_sims.py).
         out = {p.id: self._in_season(p, pre[p.id]) for p in players}
-        self._reconcile_team_minutes(out)
         overrides = {o.player_id: o for o in self.s.overrides}
         for p in players:
             self._finalize(p, out[p.id], overrides.get(p.id))
@@ -436,41 +434,6 @@ class ProjectionEngine:
         return sorted(({"factor": g, "fp_pg": round(v, 2)} for g, v in groups.items() if abs(v) >= 0.05),
                       key=lambda x: -abs(x["fp_pg"]))
 
-    def _reconcile_team_minutes(self, proj: dict[str, PlayerProjection]) -> None:
-        """Scale each NBA team's projected minutes toward a realistic budget (bounded)."""
-        by_team: dict[str, list[PlayerProjection]] = {}
-        for pr in proj.values():
-            p = self.s.players[pr.player_id]
-            if p.pro_team in ("FA", ""):
-                continue
-            by_team.setdefault(p.pro_team, []).append(pr)
-        for team, prs in by_team.items():
-            # Expected minutes in a typical upcoming game: healthy availability, injured players at 0.
-            def exp_minutes(pr: PlayerProjection) -> float:
-                st = self.s.players[pr.player_id].injury_status
-                if st in ("OUT", "INJURY_RESERVE", "SUSPENSION"):
-                    return 0.0
-                return pr.mpg * pr.availability
-
-            total = sum(exp_minutes(pr) for pr in prs)
-            if total < 120:  # pool doesn't cover this team; don't guess
-                continue
-            raw = TEAM_MINUTES_BUDGET / total - 1.0
-            factor = max(-TEAM_ADJ_LIMIT, min(TEAM_ADJ_LIMIT, raw * 0.5))  # move halfway, capped
-            if abs(factor) < 0.01:
-                continue
-            for pr in prs:
-                if exp_minutes(pr) == 0 or pr.mpg < 8:
-                    continue
-                pr.adjustments.append(Adjustment(
-                    kind="team_minutes",
-                    label=f"{team} minutes budget",
-                    detail=(f"{team}'s healthy players project to {total:.0f} min/game vs a "
-                            f"{TEAM_MINUTES_BUDGET:.0f} budget; minutes scaled {factor:+.1%} (capped at "
-                            f"±{TEAM_ADJ_LIMIT:.0%})."),
-                    minutes_pct=factor,
-                ))
-
     def _finalize(self, p: Player, pr: PlayerProjection, override) -> None:
         games_left = self._team_games_left(p.pro_team)
         # New team since last season: widen uncertainty only.
@@ -483,7 +446,7 @@ class ProjectionEngine:
             pr.adjustments.append(Adjustment(
                 kind="team_change", label=f"New team ({prev} → {p.pro_team})",
                 detail="Role is less certain after a team change: game-to-game uncertainty widened 15%. "
-                       "Rates are unchanged; the team minutes budget handles opportunity.",
+                       "Rates are unchanged; his games with the new team update minutes as they come.",
             ))
 
         if override is not None and override.minutes_pct:

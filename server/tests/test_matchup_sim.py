@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from factories import make_snapshot
+from fbb import context
 from fbb.context import AnalysisContext
 from fbb.matchup_sim import EVENTS, MatchupSimulator, event_rates, events_to_stats, fp_weights, week_options
 from fbb.models import ScoringSettings
@@ -54,6 +55,26 @@ def test_points_matchup_probabilities_and_consistency():
     assert a["mean"] == pytest.approx(analytic, rel=0.05)
     assert sum(a["hist"]) == 6000 and len(r["bins"]) == len(a["hist"]) + 1
     assert a["p10"] <= a["median"] <= a["p90"]
+
+
+def test_week_level_swings_widen_both_weekly_spreads(monkeypatch):
+    """The simulator and the analytic weekly window carry the same week-level swings (fbb.context)."""
+    ctx = _ctx()
+    mp = 2
+    roster, days = ctx.team_roster(1), ctx.matchup_days(mp)
+
+    def spreads():
+        sim = MatchupSimulator(ctx, seed=5)
+        players, plans = sim._plan(roster, days, set())
+        totals = sim._simulate_team(players, plans, 20_000)[0] @ sim.w_fp
+        return totals.std(), np.sqrt(ctx.project_window(roster, days).by_mp[mp][1])
+
+    sim_sd, analytic_sd = spreads()
+    assert sim_sd == pytest.approx(analytic_sd, rel=0.15)
+    monkeypatch.setattr(context, "PLAYER_WEEK_CV", 0.0)
+    monkeypatch.setattr(context, "TEAM_WEEK_CV", 0.0)
+    narrow_sim, narrow_analytic = spreads()
+    assert narrow_sim < 0.95 * sim_sd and narrow_analytic < 0.95 * analytic_sd
 
 
 def test_sitting_a_star_hurts():

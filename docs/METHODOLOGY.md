@@ -125,12 +125,13 @@ Only structured signals change numbers, and each has a cap:
 |---|---|---|
 | ESPN injury status / return date | Games missed only (rates untouched). Defaults: OUT 4 games, IR 12, suspension 3, day-to-day 0.5 | Never more than the team's games left |
 | Return-time phrase in the official injury note ("3-to-4 months", "season-ending") | Games missed only, used if longer than the default | Same |
-| Team minutes budget (healthy players on each NBA team scaled toward 236 min/game) | Minutes, moved halfway toward the budget. This is how injuries and trades reallocate opportunity | ±8% |
 | New team since last season | Game-to-game uncertainty ×1.15; rates unchanged | — |
 | League override by a member (logged to the feed) | Minutes, optional games out | ±15% minutes |
 | **All minutes adjustments combined** | | **−20% / +15%** |
 
 Free-text news headlines are shown for context only and are never parsed into numbers.
+
+There is no team minutes budget. An earlier version scaled each NBA team's healthy players toward 236 minutes a game (±8%) so that injuries would hand out playing time. On 28,526 player-games in 2023‑24 to 2025‑26, projections were unbiased before that step (real/projected 0.99–1.01) and about 7% too high after it for the players it raised the most (real/projected 0.93 at the cap). Teammates' recent games already show who absorbs an absence, so the step counted it twice (`scripts/backtest_sims.py`).
 
 ## 2. Backtest
 
@@ -170,13 +171,13 @@ Using them would leak in-season information into training and flatter ESPN, so t
 ## 3. Team strength
 
 1. **Daily lineups.** For every remaining day, the optimal legal lineup is solved exactly. A player's value doesn't depend on which slot he fills, so the startable sets form a transversal matroid. Greedy-by-value with Kuhn augmenting paths [7] is optimal, equivalent to the Hungarian method on the assignment problem but faster.
-2. **Weights.** Each player's lineup weight is expected fantasy points × probability of playing that day (availability, or 0 during an injury window). Today, a game in progress counts only the minutes he hasn't played yet, and a finished game counts nothing: what he scored is already in the matchup total. Each NBA team's own tip-off time tells which games are over; older data with only the day's first and last tip-off can tell only once every game is.
+2. **Weights.** Each player's lineup weight is expected fantasy points × probability of playing that day: 0 during an injury window, otherwise his availability. A healthy player's next games are more likely than that: the injuries that would keep him out are mostly on the report already. His chance of missing his next game is 30% of his season miss rate, and it climbs back to the season rate over about 9 team games (`exp(−games ahead / 9)`). In 2023‑24 to 2025‑26 game logs, healthy rotation players missed 8% of their next two games and 24% over a season. Players back from an injury keep the season rate. Today, a game in progress counts only the minutes he hasn't played yet, and a finished game counts nothing: what he scored is already in the matchup total. Each NBA team's own tip-off time tells which games are over; older data with only the day's first and last tip-off can tell only once every game is.
 3. **Depth.** When a starter sits, the best playing bench player fills the expected vacancy, so depth has value.
 4. **Roster limits and pickups.** A team holds its active slots plus one IR slot per injured player it can put there (OUT or IR, or already in its IR slot), and only while he's out. The day an IR player is back, a full team is a player over the limit, and its lowest-value player from then on is dropped. Without this, the returning player and everyone else played the rest of the season: a phantom extra player worth 35–50 points a week. A pickup plays from the day his waiver claim clears (ESPN's processing date, else the league's waiver period) and never in a game that has already tipped off. The player dropped for a waiver claim plays until it clears.
-5. **Weekly distribution.** Mean = sum of expected starts × FP/G. Variance = sum of `q·σ² + q(1−q)·μ²` over starts (game volatility plus play/no-play). A sum of ~35 player-games is close to Normal.
+5. **Weekly distribution.** Mean = sum of expected starts × FP/G. Variance = sum of `q·σ² + q(1−q)·μ²` over starts (game volatility plus play/no-play), plus two swings that last a whole week: each player's level (10% of his expected points that week, squared) and the whole roster's (6% of the team's expected total, squared). Games aren't independent within a week: role, form and the projection's own error carry over from one game to the next. Points leagues only. A sum of ~35 player-games is close to Normal.
 6. **Matchups.** `P(A beats B) = Φ((μA − μB) / √(σA² + σB²))`. The current week adds points already scored. Category leagues use Normal per-category totals (percentages via the delta method) and a Poisson-binomial count of categories won.
 7. **Power score.** `played/season × record win% + (1 − played/season) × projected all-play win%`, where *played* is games played so far, *season* the regular-season length, ties count as half a win, and the projected all-play win rate is every team against every other team in every remaining regular-season week. It is each team's projected final win rate with an average opponent in every remaining week: week 1 is all projection, halfway is half each, and the last week is almost all record. The future part removes schedule luck; the record part is what actually happened, luck included.
-8. **Season simulation.** 5,000 runs of the real remaining schedule, then seeding (win percentage, tiebreak by strength) and your bracket, including two-week rounds and byes. Seeding goes by win percentage because with an odd number of teams some play a game fewer: counting wins gave each extra game about 8 points of playoff odds. The outputs are projected record, playoff odds, title odds and average seed.
+8. **Season simulation.** 5,000 runs of the real remaining schedule, then seeding (win percentage, tiebreak by strength) and your bracket, including two-week rounds and byes. Seeding goes by win percentage because with an odd number of teams some play a game fewer: counting wins gave each extra game about 8 points of playoff odds. In points leagues each run also draws every team a level for the rest of the season (mean 1, SD 10%) that scales its projected points every week, for injuries, trades and form that last. Without it the weekly swings average out over a season and the odds come out far too sure. The outputs are projected record, playoff odds, title odds and average seed.
 9. **Explanation.** Each rank is explained by:
    - fantasy points per week from each scoring stat vs the league average;
    - each player's expected contribution;
@@ -189,13 +190,41 @@ Using them would leak in-season information into training and flatter ESPN, so t
 The season-long model uses the Normal approximation above. The **Matchups** page instead plays a single week out 10,000 times (`fbb/matchup_sim.py`).
 
 1. **Each player-game.** The player plays with his availability probability (0 inside an injury window, or if you toggle him to sit). He then gets a role shock `S ~ Gamma(mean 1)` that scales every stat together (minutes, usage, foul trouble). Finally, independent Poisson counts are drawn for 2s made/missed, 3s made/missed, FTs made/missed, rebounds, assists, steals, blocks, turnovers, fouls, double- and triple-doubles, with means `rate × S`. Poisson thinning makes makes and misses independent given `S`, so shooting percentages emerge from simulated attempts.
-2. **Calibration.** For fantasy points (linear in those counts), `Var(FP) = Var_Poisson + μ²·Var(S)` exactly. `Var(S)` is solved per player so the simulated spread equals his projected game-to-game SD. Checked: Jokić 65.1 ± 24.1 projected vs 65.1 ± 24.2 simulated.
+2. **Calibration.** For fantasy points (linear in those counts), `Var(FP) = Var_Poisson + μ²·Var(S)` exactly. `Var(S)` is solved per player so the simulated spread equals his projected game-to-game SD. Checked: Jokić 65.1 ± 24.1 projected vs 65.1 ± 24.2 simulated. In points leagues each player's shocks are also multiplied by a level for the week (`Gamma`, mean 1, SD 10%) and the whole roster's by another (SD 6%), the week-level swings of §3.
 3. **Lineups.** Each day's lineup is set from expected values, as a manager would set it. Because lineups lock at tip-off, a starter who doesn't play is replaced by the best *eligible* bench player who does.
 4. **Scoring.** Points leagues sum fantasy points and add points already scored this week (ESPN's live total). Category leagues compare every category, with percentages from simulated makes/attempts and accrued category totals added where ESPN provides them. Ties count half.
 5. **Outputs.** Win, loss and tie probabilities; score and margin distributions with 80% ranges; per-day expected points and player-games; each player's expected contribution, 80% range and *swing* = P(win | his week in the top quarter) − P(win | bottom quarter).
 6. **What-ifs.** A fixed random seed is used per request, so sitting a player is a clean before/after comparison.
 
 The simulator's team means land within ~1% of the analytic weekly projection. The small gap is because the simulator respects slot eligibility for fill-ins and the analytic shortcut doesn't. Win probabilities agree within ~1 point.
+
+### Calibration against real seasons
+
+`scripts/backtest_sims.py` asks the app's own code the questions it answers in the app and scores the answers against real games. It builds synthetic 10-team leagues on 2023‑24 to 2025‑26 box scores: ESPN default points scoring and roster, daily lineups, 19 matchup weeks and 4-team playoffs. Managers draft and make weekly pickups. Projections at each week's start see only earlier games. The study ran 192 league-seasons (18,240 weekly matchups) on AWS Lambda; settings that tie went to the simpler one.
+
+| Weekly matchups | Before (0.5.3) | Now |
+|---|---|---|
+| Log loss of win odds (lower is better) | 0.578 | **0.561** (−0.017, 95% CI −0.021 to −0.012) |
+| Brier score | 0.197 | **0.191** |
+| Calibration slope (1 = calibrated, below 1 = too sure) | 0.90 | **0.97** |
+| Scores inside the 80% range | 69% | **80%** |
+| Real score vs projected | +6.4% | −2.1% |
+| Player-games started per team-week (real: 39.2) | 34.3 | 39.9 |
+
+| Playoff odds, all checkpoints | Before | Now |
+|---|---|---|
+| Brier score | 0.157 | **0.142** |
+| Calibration slope | 0.49 | **0.93** |
+| Title-odds Brier score | 0.094 | **0.085** |
+
+Each change, tested alone and in combination:
+- **Healthy players' next games (§3).** Without the ramp, teams started 5 fewer player-games a week than they really did. The ramp alone, with the team minutes budget still on, overshot: −9% bias.
+- **Team minutes budget removed (§1.6).** Taken together with the ramp, the bias is −2%.
+- **Week-level swings.** Without them the odds were too sure (slope 0.75) and 80% ranges held 70% of the time. Team swings of 4% were too small; 6% and 8% tied. Adding the 10% player swing made the calibration best. Scaling every game's role shock by 1.4 instead helped less.
+- **Next-game miss rate.** 45% of the season rate instead of 30% was worse (log loss +0.002).
+- **Season level for playoff odds.** 0.10 and 0.15 tied on Brier score; 0.10 is better calibrated (slope 0.93 vs 1.17). Odds before week 4 are still too sure (slope 0.5 at week 1).
+
+The same check runs every morning on this season's finished weeks (`scripts/daily_sims.py`, docs/AWS.md §4).
 
 ## 5. Improvement suggestions
 
