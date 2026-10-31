@@ -138,7 +138,8 @@ function LeagueSwitch({ current }: { current: League | undefined }) {
 }
 
 const AWS_NOTE = "The daily NBA.com tracking data behind xFP and Luck is published on Amazon Web Services (S3 and "
-  + "CloudFront), and Courtside's simulations are tested at scale on AWS Lambda.";
+  + "CloudFront), and Courtside's simulations are tested at scale on AWS Lambda and re-checked there every morning "
+  + "against this season's results.";
 
 function Dock({ league, myTeamId }: { league: League; myTeamId: number | null }) {
   const { data } = useRankings(league.id, Boolean(league.settings));

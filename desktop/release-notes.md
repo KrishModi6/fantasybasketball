@@ -3,7 +3,9 @@ Courtside runs on your computer: projections, power rankings, matchup simulation
 ## What's new in 0.5.4
 
 - **xFP data on time every morning.** The daily file of NBA.com tracking data behind xFP and Luck was published with an AWS sign-in that runs out after 12 hours, so on October 31 it went out at 11:12 a.m. instead of 8:00. It now has its own AWS key that doesn't run out. When the file is late, Courtside fetches the missing day from NBA.com itself, so nothing was lost.
-- **Powered by AWS.** The bottom of the league list says so now. Hover it to see what runs there: the daily NBA.com tracking data is published on Amazon S3 and CloudFront, and the simulations are tested at scale on AWS Lambda.
+- **Healthy players are expected to play their next few games.** Each player's chance of sitting out used to be his miss rate for the whole season, about 24% for rotation players. But most injuries that would keep a player out in the next few days are already on the injury report: over the last three seasons, healthy rotation players missed only 8% of their next two games. A healthy player's chance of missing his next game is now 30% of his season rate, rising back to the full rate over about 9 games. This week's and next week's projections count more of their games. Players coming back from an injury keep the season rate.
+- **No extra minutes for a team's injuries.** Projections used to scale each NBA team's healthy players toward 236 minutes a game, so that an injury handed out playing time. Checked against 28,526 player-games from the last three seasons, projections were on target without that step and about 7% too high with it for the players it raised the most. Teammates' recent games already show who picks up the minutes, so the step counted it twice. It's gone.
+- **Powered by AWS.** The bottom of the league list says so now. Hover it to see what runs there: the daily NBA.com tracking data is published on Amazon S3 and CloudFront, and the simulations are tested at scale on AWS Lambda and re-checked there every morning against this season's results.
 
 ## In 0.5.3
 
