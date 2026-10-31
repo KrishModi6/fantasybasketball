@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT))
 
 from fbb.xfp import EASTERN, current_season  # noqa: E402
 from scripts import backtest_sims as B  # noqa: E402
-from scripts.push_tracking_s3 import EXPIRED, default_bucket  # noqa: E402
+from scripts.push_tracking_s3 import BAD_CREDENTIALS, credentials_hint, default_bucket  # noqa: E402
 
 FUNCTION = "courtside-sims"
 LEAGUES = 32  # they share the same real box scores; more leagues only smooth out drafts and rosters
@@ -87,8 +87,8 @@ def main() -> int:
             return 1
     except (BotoCoreError, ClientError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        if isinstance(exc, BotoCoreError) or exc.response.get("Error", {}).get("Code") in EXPIRED:
-            print(f"Check the credentials of profile {args.profile}", file=sys.stderr)
+        if isinstance(exc, BotoCoreError) or exc.response.get("Error", {}).get("Code") in BAD_CREDENTIALS:
+            print(credentials_hint(args.profile), file=sys.stderr)
         return 1
     print(f"  weeks 1-{out['weeks']}, {out['matchups']} matchups: Brier {out['brier']:.3f}, log loss "
           f"{out['logloss']:.3f}, 80% ranges held {out['range80']:.0%}, scores {out['bias_pct']:+.1%} vs projected; "

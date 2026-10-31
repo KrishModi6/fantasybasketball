@@ -35,8 +35,9 @@ def normal_cdf(z: float) -> float:
 N_SIMS = 5000
 # Points leagues: how far a team's projected level can be off for the whole rest of the season (injuries,
 # trades and form that the weekly spread treats as independent). Each simulated season draws one level
-# per team. scripts/backtest_sims.py tests it against real seasons.
-SEASON_TEAM_CV = 0.0
+# per team. Without it playoff odds were far too sure (calibration slope 0.49); at 0.10 the slope is 0.93
+# and the Brier score 9% lower (scripts/backtest_sims.py). Draft-day odds are still a little too sure.
+SEASON_TEAM_CV = 0.10
 
 
 @dataclass
