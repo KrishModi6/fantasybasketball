@@ -22,14 +22,14 @@ Courtside reopens where you left off. The back arrow (or your mouse's back butto
 - the best add/drop right now;
 - the live league feed (trades shared, injuries, joins) and NBA news.
 
-**Rankings.** Every team ranked by *power score*. This season's record counts for the share of the regular season already played; for the rest, it's the projected *all-play win rate*: how often the team would beat every other team, every remaining week. In week 1 it's all projection, halfway it's half each. Hover a power score to see the mix. Select a team's row to see **why**:
+**Rankings.** Every team ranked by *power score*. This season's record counts for the share of the regular season already played; for the rest, it's the projected *all-play win rate*: how often the team would beat every other team, every remaining week. In week 1 it's all projection, halfway it's half each. Hover a power score to see the mix. **Luck** (points leagues) is how many points a week the team's players have been scoring above or below what their chances were worth, counted as often as its best lineups will start them; a team well above zero is likelier to cool off. Select a team's row to see **why**:
 - fantasy points per week from each stat vs league average;
 - who produces them;
 - empty lineup slots, games stuck on the bench and schedule volume;
 - injuries.
 
 **Team** (any team via the switcher; the league table on the left of wide screens also opens teams)
-- **Roster:** projected FP/G, recent form, games in the next 7 days, expected starts and points per week, value over replacement. On game days, **Today** shows each player's fantasy points so far. **Last 10** needs at least 3 games, counting the end of last season while this one is young, so it stays blank for players who sat out last season's final stretch until they've played 3 games this season.
+- **Roster:** projected FP/G, recent form, **xFP/G** and **Luck** (as on **Players**), games in the next 7 days, expected starts and points per week, value over replacement. On game days, **Today** shows each player's fantasy points so far. **Last 10** needs at least 3 games, counting the end of last season while this one is young, so it stays blank for players who sat out last season's final stretch until they've played 3 games this season.
 - **Daily lineup:** the optimal lineup for each of the next 7 days. *Confidence* is the chance a starter outscores the best bench player who could take that slot. "Locked in" means nobody could replace him.
 - **Improve my team:**
   - weak spots, ranked by points at stake;

@@ -162,6 +162,7 @@ export interface TeamStrength {
   record_weight: number;
   ppw: number;
   ppw_vs_avg: number;
+  luck_ppw: number | null; // pts/week its players ran above (+) or below (−) their xFP; null without tracking
   wins: number;
   losses: number;
   ties: number;
@@ -182,6 +183,7 @@ export interface TeamStrength {
     depth: { empty_slots_per_week: number; league_avg_empty: number; bench_games_per_week: number; league_avg_bench: number };
     injuries: { player_id: string; name: string; status: string; games_out: number; fp_lost: number }[];
     schedule: { player_games_per_week: number; league_avg: number };
+    luck?: { per_week: number | null; players: { player_id: string; name: string; luck_pg: number; per_week: number }[] };
   };
 }
 

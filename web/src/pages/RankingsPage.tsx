@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Bar, Diverging } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented, Term } from "../components/ui";
-import { fmt0, fmt1, pct, powerMix, projRecord, projRecordNote, record, shortDate, signed } from "../lib/format";
+import { fmt0, fmt1, luckNote, pct, powerMix, projRecord, projRecordNote, record, shortDate, signed } from "../lib/format";
 import { useRankings, useWeekly } from "../lib/queries";
 import type { TeamStrength } from "../lib/types";
 
@@ -12,7 +12,7 @@ export default function RankingsPage() {
   const { data, error, isLoading } = useRankings(league.id, Boolean(league.settings));
   const [open, setOpen] = useState<number | null>(myTeamId);
   const isPoints = data?.scoring !== "categories";
-  const cols = isPoints ? 11 : 9;
+  const cols = isPoints ? 12 : 9;
   return (
     <>
       <PageHead
@@ -34,6 +34,7 @@ export default function RankingsPage() {
                   <th className="hide-sm" style={{ width: 120 }} />
                   {isPoints && <th className="n"><Term t="pts_wk_team" /></th>}
                   {isPoints && <th className="n"><Term t="vs_avg" /></th>}
+                  {isPoints && <th className="n hide-sm"><Term t="team_luck">Luck</Term></th>}
                   <th className="n">Record</th>
                   <th className="n hide-sm"><Term t="proj_record" /></th>
                   <th className="n"><Term t="playoffs" /></th>
@@ -52,6 +53,9 @@ export default function RankingsPage() {
                       <td className="hide-sm" title={powerMix(t)}><Bar value={t.power_score} max={1} tick={0.5} label={`${pct(t.power_score)} power score`} /></td>
                       {isPoints && <td className="n">{fmt0(t.ppw)}</td>}
                       {isPoints && <td className="n"><Delta value={t.ppw_vs_avg} digits={0} /></td>}
+                      {isPoints && (
+                        <td className="n hide-sm">{t.luck_ppw != null ? <Delta value={t.luck_ppw} digits={0} /> : <span className="faint">–</span>}</td>
+                      )}
                       <td className="n">{record(t.wins, t.losses, t.ties)}</td>
                       <td className="n hide-sm" title={projRecordNote(t)}>{projRecord(t)}</td>
                       <td className="n">{pct(t.playoff_odds)}</td>
@@ -235,6 +239,9 @@ function Explanation({ t, isPoints }: { t: TeamStrength; isPoints: boolean }) {
         <div className="stack" style={{ gap: 8 }}>
           <dl className="kv">
             <dt><Term t="power" /></dt><dd>{pct(t.power_score)} <span className="faint">{powerMix(t)}</span></dd>
+            {ex.luck?.per_week != null && (
+              <><dt><Term t="team_luck" /></dt><dd><Delta value={ex.luck.per_week} digits={0} /> pts/week <span className="faint">{luckNote(ex.luck.players)}</span></dd></>
+            )}
             <dt><Term t="player_games_wk" /></dt><dd>{fmt1(ex.schedule.player_games_per_week)} <span className="faint">avg {fmt1(ex.schedule.league_avg)}</span></dd>
             <dt><Term t="empty_slots">Empty starting slots per week</Term></dt><dd>{fmt1(ex.depth.empty_slots_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_empty)}</span></dd>
             <dt><Term t="bench_games">Playable games on bench per week</Term></dt><dd>{fmt1(ex.depth.bench_games_per_week)} <span className="faint">avg {fmt1(ex.depth.league_avg_bench)}</span></dd>

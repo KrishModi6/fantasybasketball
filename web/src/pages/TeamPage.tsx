@@ -123,6 +123,7 @@ function Roster({ team, isPoints }: { team: TeamDetail; isPoints: boolean }) {
               <th>Slot</th><th>Player</th><th className="hide-sm">Team</th><th className="hide-sm">Pos</th>
               {today && <th className="n"><Term t="today" /></th>}
               <th className="n">{isPoints ? <Term t="fp_pg" /> : <Term t="value_pg" />}</th><th className="n hide-sm"><Term t="fp_sd" /></th><th className="n hide-sm"><Term t="season" /></th><th className="n hide-sm"><Term t="last10" /></th>
+              <th className="n hide-sm"><Term t="xfp">xFP/G</Term></th><th className="n hide-sm"><Term t="luck" /></th>
               <th className="n"><Term t="mpg" /></th><th className="n"><Term t="next7" /></th><th className="n"><Term t="starts_wk" /></th><th className="n"><Term t="pts_wk_player" /></th><th className="n hide-sm"><Term t="over_repl" /></th>
             </tr>
           </thead>
@@ -142,6 +143,8 @@ function Roster({ team, isPoints }: { team: TeamDetail; isPoints: boolean }) {
                 <td className="n hide-sm muted">{fmt0(p.fp_sd)}</td>
                 <td className="n hide-sm">{fmt1(p.season_fp_pg)}</td>
                 <td className="n hide-sm">{p.recent_fp_pg != null ? <span>{fmt1(p.recent_fp_pg)} <Delta value={p.recent_fp_pg - p.fp_pg} /></span> : <span className="faint">–</span>}</td>
+                <td className="n hide-sm">{fmt1(p.xfp_pg)}</td>
+                <td className="n hide-sm">{p.luck_pg != null ? <Delta value={p.luck_pg} /> : <span className="faint">–</span>}</td>
                 <td className="n">{fmt1(p.mpg)}</td>
                 <td className="n">{fmt1(p.games_next7)}</td>
                 <td className="n">{fmt1((p.exp_starts ?? 0) / weeks)}</td>

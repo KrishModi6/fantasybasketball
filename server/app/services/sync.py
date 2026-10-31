@@ -30,8 +30,9 @@ KEEP_SNAPSHOTS = 20
 # Raised when a sync starts collecting something older snapshots lack, so an updated app re-syncs those
 # leagues when it starts instead of waiting for the hourly refresh. 1: xFP tracking (0.5.0 added it, but the
 # snapshot an update found was the old one, so xFP, Luck and the projections built on them stayed missing).
-# 2: each team's tip-off (a finished game stops counting) and when each waiver claim clears.
-DATA_VERSION = 2
+# 2: expected assists, rebounds, steals, blocks and free throws calibrated to this season (fbb.xfp.calibrate_lines).
+# 3: each team's tip-off (a finished game stops counting) and when each waiver claim clears.
+DATA_VERSION = 3
 
 
 def build_connector(league: League) -> LeagueConnector:

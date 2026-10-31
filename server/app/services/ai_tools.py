@@ -210,6 +210,8 @@ class ToolBox:
                 "rank": t.rank, "team": t.name, "team_id": t.team_id, "manager": t.owner,
                 "is_users_team": t.team_id == self.my_team_id, "record": f"{t.wins}-{t.losses}-{t.ties}",
                 "pts_per_week": _r(t.ppw, 0), "vs_league_avg": _r(t.ppw_vs_avg, 0), "power_score": _r(t.power_score, 3),
+                # Points a week its players ran above (+, likely to cool off) or below (-) what their chances were worth.
+                "luck_pts_per_week": _r(t.luck_ppw, 0),
                 "record_share_of_power_score": _r(t.record_weight, 2), "projected_all_play_win_rate": _r(t.projected_allplay, 3),
                 "projected_record": "-".join(str(x) for x in t.proj_record()), "projected_wins": _r(t.proj_wins, 1),
                 "regular_season_games": t.proj_games, "bye_weeks": t.byes, "playoff_odds": _r(t.playoff_odds, 3),

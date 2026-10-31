@@ -35,8 +35,8 @@ import scripts.backtest_recency as BR  # noqa: E402
 from fbb.history import HISTORY_DIR, load_history  # noqa: E402
 from fbb.models import GameLog, LeagueSettings, LeagueSnapshot, Player, ProSchedule  # noqa: E402
 from fbb.projections import ProjectionEngine  # noqa: E402
-from fbb.xfp import (BETA_GROUPS, ShotModel, calibrate, league_rates, save_bundle, shot_totals,  # noqa: E402
-                     skills, tracking_line, xfp_per_game)
+from fbb.xfp import (BETA_GROUPS, ShotModel, calibrate, calibrate_lines, league_rates, save_bundle,  # noqa: E402
+                     shot_totals, skills, tracking_line, xfp_per_game)
 from scripts.fetch_tracking import CUTOFF_DAYS, dash_path, load_dash, load_shots, opening_day, shots_path  # noqa: E402
 
 SEASONS = (2024, 2025, 2026)
@@ -103,9 +103,14 @@ def season_cases(season: int) -> tuple[list[dict], dict]:
         dash = load_dash(season, f"d{days}")
         through = int((opening + timedelta(days=days - 1)).strftime("%Y%m%d"))
         totals = shot_totals(cur_shots, calibrate(cur_shots, cur_p, through), through)
+        # Every player's line first, so the league's expected stats can be calibrated as the app does.
+        lines = calibrate_lines({
+            nid: tracking_line(season, row, totals.get(nid), skills([(prior[0][0].get(nid), prior[0][1].get(nid)),
+                                                                     (prior[1][0].get(nid), prior[1][1].get(nid))], lg))
+            for nid, row in dash.items() if row.get("MIN")})
         for nid, row in dash.items():
             pid = ids.get(str(nid))
-            if pid not in logs or pid not in pre:
+            if pid not in logs or pid not in pre or nid not in lines:
                 continue
             games = logs[pid]
             seen = [g for g in games if g["period"] <= days]  # ESPN scoring period 1 is opening night
@@ -114,10 +119,8 @@ def season_cases(season: int) -> tuple[list[dict], dict]:
             gp_agree += len(seen) == row["GP"]
             if not seen or len(rest) < BR.MIN_LEFT:
                 continue
-            skill = skills([(prior[0][0].get(nid), prior[0][1].get(nid)),
-                            (prior[1][0].get(nid), prior[1][1].get(nid))], lg)
-            line = tracking_line(season, row, totals.get(nid), skill)
-            player = players[pid].model_copy(update={
+            line = lines[nid]
+            player =players[pid].model_copy(update={
                 "recent_games": [GameLog(**g) for g in closing.get(pid, []) + seen], "tracking": line})
             # FP/G with no xFP, then the change from each stat group at full weight.
             engine.xfp_beta = {}
