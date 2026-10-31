@@ -13,6 +13,9 @@ Order of operations for every player (each step is recorded for the UI):
      season, last season's closing games are added too, behind this season's
      and at a reduced weight. From SEASON_ONLY_AFTER_GAMES games played, the
      prior and last season's games drop out: this season's games alone.
+     A player's first games of a season run below his projection (the opening
+     dip): their minutes count scaled back up, and the weekly windows
+     (fbb/context.py) project his own first games below it.
   3. Bounded adjustments (news layer). Only structured signals are used and
      each is capped:
        injury status / return date -> games missed (availability only)
@@ -70,6 +73,18 @@ CARRYOVER_MINUTES_WEIGHT = 0.25
 # From this many games played this season, a projection is this season's games alone: the preseason prior
 # (built from last season's stats) and last season's closing games stop counting.
 SEASON_ONLY_AFTER_GAMES = 15
+# A player's first games of a season fall short of his projection: in 2023-24 to 2025-26, players who played
+# their team's opener scored 9% below it in game 1, 7% in games 2-3 and 3% in games 4-8, then level. About 3/5
+# of it is minutes, the rest output per minute. His n-th game is projected at (1 - OPENING_DIP_MINUTES x e) x
+# (1 - OPENING_DIP_RATE x e), e = exp(-(n - 1) / OPENING_GAMES), in the weekly windows (fbb/context.py). The
+# update counts his first games' minutes scaled back up by the same dip; their output per minute counts as it
+# happened, which already takes part of the dip into the projection for his next games, hence a short dip.
+# Tuned in scripts/backtest_sims.py's weekly projections: opening-week per-game projections had run 6-11% above
+# what players scored, and this setting left rest-of-season error (scripts/backtest_recency.py) no worse in
+# any season. Scaling per-minute output up too made it worse once the preseason prior drops out.
+OPENING_DIP_MINUTES = 0.07
+OPENING_DIP_RATE = 0.05
+OPENING_GAMES = 2.0
 POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
 
 INJURY_DEFAULT_GAMES = {
@@ -133,6 +148,19 @@ class PlayerProjection:
 
 def _decay(n_back: int, half_life: float) -> float:
     return 0.5 ** (n_back / half_life)
+
+
+def opening_factors(n: float) -> tuple[float, float]:
+    """Minutes and per-minute output in a player's n-th game of the season (1 = his first), relative to
+    his settled level."""
+    e = math.exp(-(max(n, 1.0) - 1.0) / OPENING_GAMES)
+    return 1.0 - OPENING_DIP_MINUTES * e, 1.0 - OPENING_DIP_RATE * e
+
+
+def opening_factor(n: float) -> float:
+    """Fantasy output in a player's n-th game of the season relative to his settled level."""
+    m, r = opening_factors(n)
+    return m * r
 
 
 def _without(line: SeasonLine, games: list[GameLog]) -> SeasonLine:
@@ -308,7 +336,8 @@ class ProjectionEngine:
         obs_min = 0.0
         w_minutes_sum = 0.0
         mins_prior_w = 0.0
-        # Most recent game is index 0 in the decay.
+        seen = max(len(games), int(cur.gp) if cur else 0)
+        # Most recent game is index 0 in the decay. His first games' minutes count scaled up by their opening dip.
         for n_back, g in enumerate(reversed(games)):
             w = _decay(n_back, RATE_HALF_LIFE_GAMES)
             tot = line_rates_from_game(g.stats)
@@ -316,9 +345,9 @@ class ProjectionEngine:
                 obs_tot[k] += w * tot.get(k, 0.0)
             obs_min += w * g.minutes
             wm = _decay(n_back, MINUTES_HALF_LIFE_GAMES)
-            w_minutes_sum += wm * g.minutes
+            w_minutes_sum += wm * g.minutes / opening_factors(seen - n_back)[0]
             mins_prior_w += wm
-        # Season-to-date beyond the logged games, as one older block.
+        # Season-to-date beyond the logged games, as one older block: his first extra_gp games.
         if cur and cur.gp > len(games):
             extra_gp = cur.gp - len(games)
             extra_min = max(0.0, cur.minutes - sum(g.minutes for g in games))
@@ -332,7 +361,8 @@ class ProjectionEngine:
                 obs_tot[k] += w * max(0.0, cur_tot.get(k, 0.0) - logged[k])
             obs_min += w * extra_min
             wm = _decay(len(games) + extra_gp / 2, MINUTES_HALF_LIFE_GAMES)
-            w_minutes_sum += wm * extra_min
+            f_min = float(np.mean([opening_factors(n)[0] for n in range(1, max(1, round(extra_gp)) + 1)]))
+            w_minutes_sum += wm * extra_min / f_min
             mins_prior_w += wm * extra_gp
         # xFP: this season's shooting, passing, rebounding, steals and blocks move part of the way from what
         # happened toward what his opportunities were worth (fbb/xfp.py), by weights learned in
@@ -345,7 +375,6 @@ class ProjectionEngine:
                 obs_tot[k] = max(0.0, obs_tot[k] + beta * (exp[k] - act[k]) / xt.minutes * season_min)
         # Last season's closing games continue the decay behind everything from this season, until he has
         # played SEASON_ONLY_AFTER_GAMES games this season.
-        seen = max(len(games), int(cur.gp) if cur else 0)
         season_only = seen >= SEASON_ONLY_AFTER_GAMES and season_min > 0
         if season_only:
             carry = []

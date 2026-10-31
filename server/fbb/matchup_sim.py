@@ -101,6 +101,7 @@ class _Day:
     period: int
     cands: list[int]  # indices into the team's player list
     p: np.ndarray
+    form: np.ndarray  # expected output relative to each candidate's projection (AnalysisContext.form)
     starters: list[tuple[int, int]]  # (candidate position, slot index)
     fill_order: dict[int, list[int]]  # slot index -> eligible bench candidate positions, best first
 
@@ -137,14 +138,16 @@ class MatchupSimulator:
         plans = []
         n_slots = ctx.slots.n
         for d in days:
-            cands, probs, items = [], [], []
+            cands, probs, forms, items = [], [], [], []
             for i, pl in enumerate(players):
                 gone = pl.pid in exclude or d >= cuts.get(pl.pid, (float("inf"),))[0] or d < ctx.first_day(pl.pid)
                 prob = 0.0 if gone else ctx.p_play(pl.pid).get(d, 0.0)
                 if prob > 0:
-                    items.append((len(cands), ctx.value_pg[pl.pid] * prob, ctx.mask[pl.pid]))
+                    f = ctx.form(pl.pid).get(d, 1.0)
+                    items.append((len(cands), ctx.value_pg[pl.pid] * f * prob, ctx.mask[pl.pid]))
                     cands.append(i)
                     probs.append(prob)
+                    forms.append(f)
             if not cands:
                 continue
             assigned = solve_day(items, n_slots)
@@ -154,7 +157,8 @@ class MatchupSimulator:
             fill = {}
             for k, j in starters:
                 fill[j] = [b for b in bench if ctx.mask[players[cands[b]].pid] >> j & 1]
-            plans.append(_Day(period=d, cands=cands, p=np.array(probs), starters=starters, fill_order=fill))
+            plans.append(_Day(period=d, cands=cands, p=np.array(probs), form=np.array(forms), starters=starters,
+                              fill_order=fill))
         return players, plans
 
     # -- simulation -----------------------------------------------------------------
@@ -179,7 +183,7 @@ class MatchupSimulator:
             lam = np.stack([players[i].lam for i in day.cands])  # (k, E)
             shapes = np.array([players[i].shape for i in day.cands])
             plays = self.rng.random((n, k)) < day.p
-            shock = self.rng.gamma(shapes, 1.0 / shapes, size=(n, k))
+            shock = self.rng.gamma(shapes, 1.0 / shapes, size=(n, k)) * day.form
             if week is not None:
                 shock *= week[:, day.cands]
             if team is not None:

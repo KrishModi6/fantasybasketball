@@ -8,6 +8,7 @@ from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
+import fbb.projections as P
 from fbb.baseline import FALLBACK_LEAGUE_RATES, RATE_STATS, aging_factor, per_game_from_rates, sps_projection
 from fbb.connectors.espn import EASTERN, parse_settings
 from fbb.connectors.fileimport import normalize_name, parse_upload
@@ -162,6 +163,34 @@ def test_healthy_player_rarely_misses_his_next_game():
     assert pp[-1] == pytest.approx(pr.availability, abs=0.005)
 
 
+def test_first_games_of_the_season_are_projected_below_his_level():
+    """The opening dip: a player's first games fall short of his settled level, fading game by game."""
+    f = [P.opening_factor(n) for n in range(1, 60)]
+    assert f[0] == pytest.approx((1 - P.OPENING_DIP_MINUTES) * (1 - P.OPENING_DIP_RATE))
+    assert all(a < b for a, b in zip(f, f[1:])) and f[-1] == pytest.approx(1.0, abs=1e-3)
+
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    form = [v for _, v in sorted(ctx.form("1").items())]
+    assert form[0] == pytest.approx(f[0]) and form[3] == pytest.approx(f[3])
+    days = ctx.matchup_days(1)
+    opening = ctx.project_window(["1"], days)
+    for pr in ctx.proj.values():
+        pr.games_played = 60  # settled in: no dip
+    settled = AnalysisContext(snap, ctx.proj)
+    assert settled.form("1") == {}
+    assert opening.mean < settled.project_window(["1"], days).mean
+
+
+def test_opening_dip_waits_for_an_injured_player_to_return():
+    snap = make_snapshot(injured={"1": "OUT"})
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    out = int(ctx.proj["1"].games_out)
+    days = sorted(ctx.team_days[snap.players["1"].pro_team])
+    assert out >= 1 and min(ctx.form("1")) == days[out]  # his first game back is his first game
+    assert ctx.form("1")[days[out]] == pytest.approx(P.opening_factor(1))
+
+
 def test_teammates_minutes_come_from_their_own_games():
     """No team-minutes budget: an injured teammate changes nobody else's projected minutes."""
     def team(injured=None):
@@ -303,6 +332,16 @@ def test_last_seasons_closing_games_count_before_this_season_starts():
     assert pr.fp_pg > base.fp_pg
     assert pr.carryover_games == 10 and pr.carryover_weight > 0 and pr.in_season_weight == 0
     assert pr.recent_fp_pg == pytest.approx(ScoringSettings().fantasy_points(BIG_GAME))
+
+
+def test_first_games_minutes_count_scaled_up_by_the_opening_dip(monkeypatch):
+    """His first games' minutes count at what they'd be once he settles in; per-minute output as it happened."""
+    dipped, late = _with_games([2027] * 3), _with_games([2027] * 40)
+    monkeypatch.setattr(P, "OPENING_DIP_MINUTES", 0.0)
+    face = _with_games([2027] * 3)
+    assert dipped.mpg > face.mpg
+    assert dipped.fp_pg / dipped.mpg == pytest.approx(face.fp_pg / face.mpg)
+    assert _with_games([2027] * 40).mpg == pytest.approx(late.mpg, rel=0.005)  # long settled in: hardly any
 
 
 def test_this_seasons_games_count_more_than_last_seasons():

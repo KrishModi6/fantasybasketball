@@ -272,7 +272,7 @@ def prepare(season: int, tag: str = "", live: bool = False) -> Path | None:
         proj_out[mp] = {pid: {
             "team": players[pid].pro_team, "status": players[pid].injury_status, "mpg": pr.mpg,
             "availability": pr.availability, "games_out": pr.games_out, "fp_pg": pr.fp_pg, "fp_sd": pr.fp_sd,
-            "per_game": {k: round(v, 4) for k, v in pr.per_game.items()},
+            "gp": pr.games_played, "per_game": {k: round(v, 4) for k, v in pr.per_game.items()},
         } for pid, pr in proj.items()}
         print(f"  {season} week {mp}: projected {len(proj)} players", flush=True)
 
@@ -322,7 +322,8 @@ class Season:
                 player_id=pid, name=self.info[pid]["name"], pro_team=r["team"], positions=self.info[pid]["positions"],
                 mpg=r["mpg"], availability=r["availability"], games_out=r["games_out"], per_game=r["per_game"],
                 fp_pg=r["fp_pg"], fp_sd=r["fp_sd"], preseason_fp_pg=r["fp_pg"], season_fp_pg=None,
-                recent_fp_pg=None, games_played=0) for pid, r in rows.items()}
+                # Inputs prepared before the opening dip have no games played: no dip for them.
+                recent_fp_pg=None, games_played=r.get("gp", 10**6)) for pid, r in rows.items()}
             self.players[mp] = {pid: Player(id=pid, name=self.info[pid]["name"], pro_team=r["team"],
                                             positions=self.info[pid]["positions"], injury_status=r["status"])
                                 for pid, r in rows.items()}

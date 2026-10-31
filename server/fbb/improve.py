@@ -186,6 +186,10 @@ def lineup_plan(ctx: AnalysisContext, team_id: int, n_days: int = 7) -> list[dic
         gone = {pid for pid, (cut, _) in res.cuts.items() if cut <= d}  # dropped when an injured teammate returned
         roster = [pid for pid in roster if pid not in gone]
         playing = {pid for pid in roster if ctx.p_play(pid).get(d, 0) > 0}
+
+        def projected(pid: str) -> float:
+            return ctx.proj[pid].fp_pg * ctx.form(pid).get(d, 1.0) * ctx.p_play(pid).get(d, 0)
+
         starters = []
         bench = [pid for pid in day["bench"]]
         for s in day["starters"]:
@@ -198,22 +202,20 @@ def lineup_plan(ctx: AnalysisContext, team_id: int, n_days: int = 7) -> list[dic
             alts = [b for b in bench if j_mask and ctx.mask[b] & j_mask]
             conf, alt_name = 1.0, None
             if alts:
-                alt = max(alts, key=lambda b: ctx.value_pg[b] * ctx.p_play(b).get(d, 0))
-                ps, pa = ctx.p_play(pid)[d], ctx.p_play(alt)[d]
-                ms, ma = ctx.proj[pid].fp_pg * ps, ctx.proj[alt].fp_pg * pa
+                alt = max(alts, key=lambda b: ctx.value_pg[b] * ctx.form(b).get(d, 1.0) * ctx.p_play(b).get(d, 0))
+                ms, ma = projected(pid), projected(alt)
                 sd = math.sqrt(ctx.proj[pid].fp_sd ** 2 + ctx.proj[alt].fp_sd ** 2)
                 conf = normal_cdf((ms - ma) / max(sd, 1.0))
                 alt_name = ctx.proj[alt].name
             starters.append({"player_id": pid, "name": ctx.proj[pid].name, "slot": slot,
-                             "projected": ctx.proj[pid].fp_pg * ctx.p_play(pid)[d], "confidence": conf,
+                             "projected": projected(pid), "confidence": conf,
                              "alternative": alt_name})
         idle = [pid for pid in roster if pid not in playing]
         date = ctx.s.schedule.period_dates.get(d)
         out.append({
             "period": d, "date": date.isoformat() if date else None, "expected": day["expected"],
             "starters": starters,
-            "bench": [{"player_id": b, "name": ctx.proj[b].name, "projected": ctx.proj[b].fp_pg * ctx.p_play(b)[d]}
-                      for b in bench],
+            "bench": [{"player_id": b, "name": ctx.proj[b].name, "projected": projected(b)} for b in bench],
             "no_game": [{"player_id": pid, "name": ctx.proj[pid].name} for pid in idle],
         })
     return out

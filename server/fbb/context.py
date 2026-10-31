@@ -15,7 +15,7 @@ import numpy as np
 
 from .lineup import SlotModel, solve_day
 from .models import LeagueSnapshot
-from .projections import PlayerProjection, ProjectionEngine
+from .projections import PlayerProjection, ProjectionEngine, opening_factor
 from .schedule import game_state, period_for_date, period_to_matchup, remaining_days
 from .valuation import CategoryValuer
 
@@ -84,6 +84,7 @@ class AnalysisContext:
             self.mask[pid] = self.slots.mask_for(p.eligible_slots, p.positions)
             self.value_pg[pid] = pr.fp_pg if self.is_points else self.cat_valuer.value_pg(pid)
         self._pplay: dict[str, dict[int, float]] = {}
+        self._form: dict[str, dict[int, float]] = {}
         self._rostered = {e.player_id for t in snapshot.teams for e in t.roster}
         self._first_day: dict[str, int] = {}
 
@@ -121,6 +122,24 @@ class AnalysisContext:
                 if played:
                     out[today] *= max(0.0, 1 - played / max(pr.mpg, 1.0))
         self._pplay[pid] = out
+        return out
+
+    def form(self, pid: str) -> dict[int, float]:
+        """period -> his expected output that day relative to his projection: below 1 in his first games of
+        the season (the opening dip in fbb/projections.py), counting from the games he has played and after
+        those he's expected to miss. Days not listed are 1."""
+        if pid in self._form:
+            return self._form[pid]
+        pr = self.proj[pid]
+        days = sorted(self.team_days.get(self.s.players[pid].pro_team, ()))
+        full_out = int(math.floor(pr.games_out))
+        out: dict[int, float] = {}
+        for k, d in enumerate(days[full_out:]):
+            f = opening_factor(pr.games_played + k + 1)
+            if f > 0.999:
+                break
+            out[d] = f
+        self._form[pid] = out
         return out
 
     def today_state(self, team: str) -> str | None:
@@ -220,6 +239,7 @@ class AnalysisContext:
         val = {pid: self.value_pg[pid] for pid in roster}
         fp = {pid: self.proj[pid].fp_pg for pid in roster}
         sd = {pid: self.proj[pid].fp_sd for pid in roster}
+        form = {pid: self.form(pid) for pid in roster}
         n_slots = self.slots.n
         memo: dict[tuple, dict[int, int]] = {}
         index = {pid: i for i, pid in enumerate(roster)}
@@ -230,7 +250,7 @@ class AnalysisContext:
             for pid in roster:
                 prob = pp[pid].get(d, 0.0)
                 if prob > 0:
-                    cands.append((index[pid], val[pid] * prob, self.mask[pid]))
+                    cands.append((index[pid], val[pid] * form[pid].get(d, 1.0) * prob, self.mask[pid]))
             if not cands:
                 if n_slots:
                     res.empty_slot_games += 0  # no games: not a lineup failure
@@ -266,8 +286,9 @@ class AnalysisContext:
                 if q > 0:
                     contributors.append((pid, q))
             for pid, q in contributors:
-                m = q * fp[pid]
-                v = q * sd[pid] ** 2 + q * (1 - q) * fp[pid] ** 2
+                f = form[pid].get(d, 1.0)
+                m = q * fp[pid] * f
+                v = q * (sd[pid] * f) ** 2 + q * (1 - q) * (fp[pid] * f) ** 2
                 day_mean += m
                 res.mean += m
                 res.var += v
@@ -275,13 +296,13 @@ class AnalysisContext:
                 bym[1] += v
                 week_pts[(pid, mp)] = week_pts.get((pid, mp), 0.0) + m
                 res.starts[pid] = res.starts.get(pid, 0.0) + q
-                res.points[pid] = res.points.get(pid, 0.0) + q * (fp[pid] if self.is_points else val[pid])
+                res.points[pid] = res.points.get(pid, 0.0) + q * f * (fp[pid] if self.is_points else val[pid])
                 if track_stats:
                     pg = self.proj[pid].per_game
                     smp = res.stats_by_mp.setdefault(mp, {})
                     svar = res.stat_var_by_mp.setdefault(mp, {})
                     for stat in CATEGORY_STATS:
-                        x = pg.get(stat, 0.0)
+                        x = pg.get(stat, 0.0) * f
                         if x:
                             smp[stat] = smp.get(stat, 0.0) + q * x
                             # Poisson-ish game variance plus the play/no-play Bernoulli term.
