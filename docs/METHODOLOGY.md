@@ -259,6 +259,7 @@ Each change, tested alone and in combination:
 - **Week-level swings.** Without them the odds were too sure (slope 0.75) and 80% ranges held 70% of the time. Team swings of 4% were too small; 6% and 8% tied. Adding the 10% player swing made the calibration best. Scaling every game's role shock by 1.4 instead helped less.
 - **Next-game miss rate.** 45% of the season rate instead of 30% was worse (log loss +0.002).
 - **Season level for playoff odds.** 0.10 and 0.15 tied on Brier score; 0.10 is better calibrated (slope 0.93 vs 1.17). Odds before week 4 are still too sure (slope 0.5 at week 1).
+- **Opening dip (§1.5.2)**, on a separate local run of 96 league-seasons. Week-1 team scores had been projected 12.4% above real (9.6%, 15.3% and 12.1% by season), and 80% ranges held only 65% of week-1 scores. With the dip: 3.3% above (0.7%, 6.0%, 3.2%), and 80%. Points per player-game started in week 1 went from 1.081 to 0.993 of real. What's left is starts: simulated teams start 4% more player-games in week 1 than real teams did. Over the season: log loss 0.5662 → 0.5658, Brier unchanged (0.1925), playoff-odds Brier 0.142 → 0.134 (slope 0.90 → 1.06), title Brier unchanged (0.086).
 
 The same check runs every morning on this season's finished weeks (`scripts/daily_sims.py`, docs/AWS.md §4).
 
