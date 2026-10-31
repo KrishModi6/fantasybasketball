@@ -1,6 +1,15 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.1
+## What's new in 0.5.2
+
+- **An injured player's IR spot ends when he comes back.** A team with a player on IR was projected to play him and everyone else for the rest of the season, a player more than ESPN allows. Now, the day he's back, a full team drops its weakest player from then on. This mostly shows in trades for injured players: one that looked 64 points a week better comes out at about 10. The trade's calculation names the player dropped and the date.
+- **Add/drop never suggests dropping your IR player.** Dropping him frees only the IR slot, which a healthy pickup can't take, so ESPN wouldn't allow the move.
+- **Finished games stop counting.** Once a player's game tonight is over, nothing more is expected from it: a player who sat or played short minutes no longer gets the rest of a game that already ended.
+- **Pickups play when they can.** A player on waivers counts only the games after his claim clears (the **Streaming** table marks him **waivers**), and the player you'd drop for him keeps playing until then. A free agent can't join a game that has already tipped off.
+- **Playoff odds by win percentage.** In a league with an odd number of teams, a team with more byes plays fewer games. Seeding now goes by win percentage instead of total wins, so those teams' playoff odds aren't marked down for it.
+- Courtside refreshes your league once after updating, to read each team's tip-off times and when waiver claims clear.
+
+## In 0.5.1
 
 - **xFP and Luck show up right after updating.** 0.5.0 added them, but until the next hourly refresh Courtside kept showing the league data the old version had saved, which has none. Now Courtside refreshes your league as soon as it starts on a new version. The projections, power rankings and win odds are recalculated with xFP too.
 - **Trades no longer drop a player for no reason.** A team with a day-to-day player still in its IR slot looked one player over the limit, so every trade it made dropped someone (in one 2-for-2, Joel Embiid, about 50 points a week). That player now keeps his IR spot, for every team. And an injured player you get in a 2-for-1 now goes in your empty IR slot instead of costing you a drop, as he would in ESPN.

@@ -262,7 +262,7 @@ function Improve({ teamId }: { teamId: number }) {
                 <tbody>
                   {data.streaming.moves.map((m) => (
                     <tr key={m.add}>
-                      <td><PlayerName name={m.add_name} onOpen={() => openPlayer(m.add)} /></td>
+                      <td><PlayerName name={m.add_name} onOpen={() => openPlayer(m.add)} sub={m.on_waivers ? "waivers" : undefined} /></td>
                       <td className="muted">{m.drop_name}</td>
                       <td className="n">{fmt1(m.games_this_week)}</td>
                       <td className="n"><Delta value={m.delta_this_week} /></td>
