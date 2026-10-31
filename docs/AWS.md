@@ -141,8 +141,9 @@ flat-rate Free plan bundles WAF at $0 if you want it later (console only).
 Not under `%LOCALAPPDATA%`: the Claude desktop app is a packaged app, so files its sessions create
 there are redirected into its private storage, where Task Scheduler can't see them.
 
-It signs in with the `aws login` session, which renews itself for 90 days; after that, or if the log
-says to sign in again, run `aws login --profile courtside`. If it stops, apps notice nothing for a day
+It signs in with the `aws login` session. That session lasts at most 12 hours (the CLI refreshes the
+credentials every 15 minutes within it, then needs a new `aws login`), so a run more than 12 hours
+after the last sign-in fails until you run `aws login --profile courtside`. If it stops, apps notice nothing for a day
 and then fetch from NBA.com themselves, as before 0.5.0. To stop it: `schtasks /Delete /TN "Courtside
 tracking publisher" /F` and `git worktree remove C:\Users\Krish\.courtside-publisher\publisher`.
 
@@ -229,6 +230,75 @@ trying Claude, run about 20 saved questions through both models and compare the 
 | KMS customer-managed key on the bucket | The data is public stats, and SSE-S3 is enough. | $1/month plus requests |
 | Athena / S3 Tables over the shot files | Seven gzipped files that pandas reads in seconds. | per query |
 | AWS WAF on the CloudFront distribution | It would rate-limit one cached static file; the budget alert covers runaway use. | ≈ $6/month |
+
+## 4. Lambda sims: the simulator backtest and the daily check (built 2026-10-30/31)
+
+`server/scripts/backtest_sims.py` checks the matchup simulator and the season simulation against real
+seasons: synthetic 10-team ESPN points leagues on 2023-24 to 2025-26 game logs, with the app's own code
+forecasting every week and the real box scores deciding it. One league-season with 17 settings takes
+about 6 CPU-minutes, and the study ran 192 of them, so it fans out to Lambda.
+
+**Why Lambda.** Each league is an independent, CPU-only job under 15 minutes that needs only numpy and
+pydantic. It runs from a zip with no container, cluster or queue to manage, and you pay only while it
+runs. The free plan allows 3,008 MB per function (about 1.7 vCPUs, so two processes per invocation) and
+10 at once: about 17 vCPUs, roughly this PC. EC2 on the free plan is limited to 2-vCPU instances,
+and AWS Batch or Fargate would add a container image for no gain.
+
+**How it runs.**
+1. At home: `python -m scripts.backtest_sims prepare` builds each season's projections and real
+   outcomes (`data/cache/sims/inputs_<season>.json.gz`, about 1 MB each; NBA data can't be fetched
+   from the cloud).
+2. Upload the inputs to `sims/inputs/` and the package from `python -m scripts.sims_lambda <zip>` to
+   `sims/code/`, then point the function at it (`aws lambda update-function-code`).
+3. Send one asynchronous invocation per league, `{"run": "r1", "tasks": [[season, league, 0],
+   [season, league, 1]]}`. Lambda queues what it can't run at once. Each writes
+   `sims/results/<run>/<season>_<league>_g<group>.json.gz` and skips leagues already there, so
+   sending again is safe.
+4. `{"run": "r1", "action": "merge"}` writes `sims/merged/<run>.json.gz`. Download it and run
+   `python -m scripts.backtest_sims report <file>`.
+
+**The daily check** (`server/scripts/daily_sims.py`). Every morning the scheduled task in 1b runs it
+right after the tracking feed. It checks the app as shipped against this season's finished matchup weeks:
+1. At home it rebuilds this season's projections week by week from ESPN's games so far, the same way
+   as for past seasons, and uploads them to `sims/inputs/inputs_<season>.json.gz`.
+2. It sends 16 invocations of 2 leagues each (32 synthetic leagues, settings `"app"`) and waits for
+   their results under `sims/results/daily-<season>-<day>/`.
+3. `{"action": "report"}` scores them and writes `sims/daily/<season>/<day>.json` and `latest.json`:
+   Brier score, log loss and calibration of the weekly win odds, how often the 80% ranges held, and
+   the bias of projected scores, overall and week by week.
+4. `publish.log` gets one line with the headline numbers.
+
+Before the first week ends there is nothing to score, so it stops after step 1. The numbers change
+only when a week ends; on the other days it repeats the same weeks. Playoff odds aren't checked
+until the season is over. The task runs it only once `scripts/daily_sims.py` is on `main`.
+
+It signs in as the IAM user `courtside-publisher` (1b). Its second inline policy, `run-daily-sims`,
+allows three things: upload `sims/inputs/inputs_*.json.gz`, list `sims/results/daily-*`, and invoke
+`courtside-sims`. Trade-off: anyone holding that key could run the function on your bill, at most
+10 at once (about $1.40 an hour). The budget email would show it, and deleting the key stops it.
+
+**What exists in AWS** (tagged `project=courtside`, `us-east-2`)
+
+| Resource | Name |
+|---|---|
+| Lambda function | `courtside-sims` (Python 3.12, arm64, 3,008 MB, 15-minute timeout, async retries off) |
+| IAM role | `courtside-sims-lambda`: Lambda may assume it for this function only; inline policy `sims-s3-and-logs` reads `sims/inputs/*`, writes `sims/results/*`, `sims/merged/*` and `sims/daily/*`, writes its own logs |
+| IAM user policy | `run-daily-sims` on `courtside-publisher` (above) |
+| CloudWatch log group | `/aws/lambda/courtside-sims` (14-day retention) |
+| S3 objects | `sims/` in the bucket above: inputs, code, results, merged, daily (about 40 MB, plus about 1 MB a day in season) |
+
+**Cost.** Lambda bills $0.0000133334 per GB-second on arm64. A study league (both setting groups,
+218 s at 3,008 MB) costs about $0.0085, so the 192-league study comes to about $1.65. The daily check
+runs one setting with no playoff odds, about a second per league per finished week: under $1 a month
+by the end of the season. S3 storage and requests add well under a cent.
+
+To remove it all: first take the daily-sims lines out of `publish-tracking.cmd` and delete the user
+policy (`aws iam delete-user-policy --user-name courtside-publisher --policy-name run-daily-sims`).
+Then `aws lambda delete-function --function-name courtside-sims`, then
+`aws logs delete-log-group --log-group-name /aws/lambda/courtside-sims`, then delete the role's
+inline policy and the role (`aws iam delete-role-policy --role-name courtside-sims-lambda
+--policy-name sims-s3-and-logs`, `aws iam delete-role --role-name courtside-sims-lambda`), then
+`aws s3 rm s3://courtside-<account-id>-us-east-2-an/sims/ --recursive`. Nothing else uses them.
 
 ## Hosted Courtside
 

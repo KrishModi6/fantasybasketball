@@ -125,12 +125,13 @@ Only structured signals change numbers, and each has a cap:
 |---|---|---|
 | ESPN injury status / return date | Games missed only (rates untouched). Defaults: OUT 4 games, IR 12, suspension 3, day-to-day 0.5 | Never more than the team's games left |
 | Return-time phrase in the official injury note ("3-to-4 months", "season-ending") | Games missed only, used if longer than the default | Same |
-| Team minutes budget (healthy players on each NBA team scaled toward 236 min/game) | Minutes, moved halfway toward the budget. This is how injuries and trades reallocate opportunity | ±8% |
 | New team since last season | Game-to-game uncertainty ×1.15; rates unchanged | — |
 | League override by a member (logged to the feed) | Minutes, optional games out | ±15% minutes |
 | **All minutes adjustments combined** | | **−20% / +15%** |
 
 Free-text news headlines are shown for context only and are never parsed into numbers.
+
+There is no team minutes budget. An earlier version scaled each NBA team's healthy players toward 236 minutes a game (±8%) so that injuries would hand out playing time. On 28,526 player-games in 2023‑24 to 2025‑26, projections were unbiased before that step (real/projected 0.99–1.01) and about 7% too high after it for the players it raised the most (real/projected 0.93 at the cap). Teammates' recent games already show who absorbs an absence, so the step counted it twice (`scripts/backtest_sims.py`).
 
 ## 2. Backtest
 
@@ -170,7 +171,7 @@ Using them would leak in-season information into training and flatter ESPN, so t
 ## 3. Team strength
 
 1. **Daily lineups.** For every remaining day, the optimal legal lineup is solved exactly. A player's value doesn't depend on which slot he fills, so the startable sets form a transversal matroid. Greedy-by-value with Kuhn augmenting paths [7] is optimal, equivalent to the Hungarian method on the assignment problem but faster.
-2. **Weights.** Each player's lineup weight is expected fantasy points × probability of playing that day (availability, or 0 during an injury window).
+2. **Weights.** Each player's lineup weight is expected fantasy points × probability of playing that day: 0 during an injury window, otherwise his availability. A healthy player's next games are more likely than that: the injuries that would keep him out are mostly on the report already. His chance of missing his next game is 30% of his season miss rate, and it climbs back to the season rate over about 9 team games (`exp(−games ahead / 9)`). In 2023‑24 to 2025‑26 game logs, healthy rotation players missed 8% of their next two games and 24% over a season. Players back from an injury keep the season rate.
 3. **Depth.** When a starter sits, the best playing bench player fills the expected vacancy, so depth has value.
 4. **Weekly distribution.** Mean = sum of expected starts × FP/G. Variance = sum of `q·σ² + q(1−q)·μ²` over starts (game volatility plus play/no-play). A sum of ~35 player-games is close to Normal.
 5. **Matchups.** `P(A beats B) = Φ((μA − μB) / √(σA² + σB²))`. The current week adds points already scored. Category leagues use Normal per-category totals (percentages via the delta method) and a Poisson-binomial count of categories won.

@@ -45,10 +45,11 @@ SETTINGS = {  # changes to the settings in fbb/projections.py; the first row is 
 }
 
 
-def season_logs(season: int) -> dict[str, list[dict]]:
-    """Every game of a completed season for the 350 most-rostered players (cached after the first run)."""
+def season_logs(season: int, refresh: bool = False) -> dict[str, list[dict]]:
+    """Every game of a season for the 350 most-rostered players (cached after the first run; ``refresh``
+    fetches again, for the season in progress)."""
     path = CACHE_DIR / f"game_logs_{season}_full.json"
-    if path.exists():
+    if path.exists() and not refresh:
         return json.loads(path.read_text())
     out = {}
     for entry in EspnClient().player_pool(season, limit=350, recent_games=200):
