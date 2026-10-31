@@ -319,7 +319,7 @@ and deleting the key stops it. Retiring the user (1b) needs this policy deleted 
 | IAM role | `courtside-sims-lambda`: Lambda may assume it for this function only; inline policy `sims-s3-and-logs` reads `sims/inputs/*`, writes `sims/results/*`, `sims/merged/*` and `sims/daily/*`, writes its own logs |
 | IAM user policy | `run-daily-sims` on `courtside-publisher` (above) |
 | CloudWatch log group | `/aws/lambda/courtside-sims` (14-day retention) |
-| S3 objects | `sims/` in the bucket above: inputs, code, results, merged, daily (about 40 MB, plus about 1 MB a day in season) |
+| S3 objects | `sims/` in the bucket above: inputs, code, results, merged, daily (about 150 MB on 2026-10-31). 127 MB of it is study run `r1` (`results/r1/` and `merged/r1.json.gz`), kept so the study can be re-scored without rerunning it. A daily run adds about 35 KB per finished week: under 1 MB a day, about 60 MB a season |
 
 **Cost.** Lambda bills $0.0000133334 per GB-second on arm64. A study league (both setting groups,
 about 218 s at 3,008 MB) costs about $0.0085. Everything through 2026-10-31 took 212 invocations and
@@ -335,7 +335,11 @@ Then `aws lambda delete-function --function-name courtside-sims`, then
 `aws logs delete-log-group --log-group-name /aws/lambda/courtside-sims`, then delete the role's
 inline policy and the role (`aws iam delete-role-policy --role-name courtside-sims-lambda
 --policy-name sims-s3-and-logs`, `aws iam delete-role --role-name courtside-sims-lambda`), then
-`aws s3 rm s3://courtside-<account-id>-us-east-2-an/sims/ --recursive`. Nothing else uses them.
+`aws s3 rm s3://courtside-<account-id>-us-east-2-an/sims/ --recursive`. Nothing else uses them. To
+drop only the study, remove `sims/results/r1/` and `sims/merged/r1.json.gz`. The bucket is
+versioned and its `expire-old-versions` rule always keeps a file's 3 newest old versions, so a delete
+only hides them: delete those versions too (`aws s3api list-object-versions`, then
+`delete-object --version-id`) to free the space.
 
 ## Hosted Courtside
 
