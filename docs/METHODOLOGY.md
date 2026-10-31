@@ -82,7 +82,7 @@ rate = (K · preseason_rate + Σ w_g · stat_g) / (K + Σ w_g · minutes_g)
 | 3PM | 164 | 423 |
 | Turnovers | 296 | 564 |
 
-Steals need about 3× more minutes than rebounds before this season's sample dominates. Minutes per game update faster: 8 games of prior weight with a 10-game half-life, because roles change. A player's minutes in his first games of a season count scaled back up by the opening dip (§1.5.2), so a short first week doesn't lower his level.
+Steals need about 3× more minutes than rebounds before this season's sample dominates. Minutes per game update faster: 8 games of prior weight with a 10-game half-life, because roles change. A player's minutes in his first games of a season, and in his first games back from an absence, count scaled back up by the opening and return dips (§1.5.2), so a short first week doesn't lower his level.
 
 How quickly old evidence fades is tested, not assumed. `scripts/backtest_recency.py` replays every game of 2024-25 and 2025-26: each player starts from the preseason projection the app would have made (ML refit on earlier seasons only), sees the closing games of the season before, takes in his first 0 to 35 games, and is scored on his rest-of-season FP/G. Fading faster (12- and 5-game half-lives) was about 0.4-0.5% less accurate, and no recency weighting was 0.9-2.3% less accurate. Adding last season's last 10 games at a quarter weight cut the error by 0.8% overall and 1.1% over a player's first 0-3 games (2025‑26: 4.51 → 4.45 FP/G; 2024‑25: 3.87 → 3.86). Half weight, or all 20 games, did better in 2025‑26 but worse in 2024‑25.
 
@@ -117,7 +117,7 @@ The gain is largest after a player's 15th game, when the preseason prior drops o
 
 stats.nba.com does not answer cloud hosts (AWS, Azure, GitHub Actions), so tracking is fetched during a league sync on the desktop app or a home server. Each sync downloads only days not already cached. Where NBA.com can't be reached, projections are what they were without xFP.
 
-### 1.5.2 A player's first games of a season (the opening dip)
+### 1.5.2 A player's first games of a season and back from an absence (the opening and return dips)
 
 Opening-week projections used to run 6–11% above what players scored, per game, in 2023‑24 to 2025‑26. The preseason level was not the problem: it was 0.98–0.99 of the same players' FP/G over the whole season. Their first games were. Week 1 ran 8–11% below those players' rest-of-season FP/G (0.906, 0.891 and 0.924 of it in 2023‑24, 2024‑25 and 2025‑26). In 2022‑23 to 2025‑26 box scores, players who played their team's opener scored, against the preseason projection the app would have made: 0.91 in game 1, 0.93 in games 2 and 3, 0.97 in games 4 and 5, 0.975 in games 6 to 8, and about 1 after that. About three fifths of the gap is minutes, the rest is output per minute.
 
@@ -152,6 +152,42 @@ Over weeks 1–19 the average distance from 1 fell from 0.022 to 0.016 and per-g
 Tried and dropped:
 - **The dip in the windows only**, with early games taken at face value in the update: the same week 1, but a slow start then pulled the level down for the rest of the season (rest-of-season error 4.228 / 4.004 / 4.569).
 - **A longer, gentler dip** (10% fading over 3–8 games): fitted the game-by-game numbers worse and under-projected week 2 (0.975 with an 8-game fade).
+
+**First games back from an absence (the return dip).** The offseason is one absence; every other absence does the same on a smaller scale. In the same weekly projections, a player's first game back mid-season, against his projection that week, after missing *L* straight team games:
+
+| Team games missed | 1 | 2 | 3–4 | 5–6 | 7–9 | 10–14 | 15–19 | 20–29 |
+|---|---|---|---|---|---|---|---|---|
+| First game back vs projection | 0.96 | 0.91 | 0.89 | 0.89 | 0.85 | 0.83 | 0.83 | 0.75 |
+
+Nearly all of it is minutes. After a long absence it also lasts longer: after 20–29 games his second and third games were 0.74 and 0.70. Players whose season starts late, mostly back from an injury, have both dips. In their first game they scored 0.67 of their projection, and over their first five games 0.86; the opening dip alone projected 0.88 and 0.94.
+
+So in his *j*-th game back after missing *L* straight team games, a player is projected at
+
+```
+1 − 0.07 · ln(1 + L) · exp(−(j − 1) · 8 / L)
+```
+
+of his level, times the opening dip in his first games of the season. The dip fades over one game for every 8 he missed:
+
+| Games missed \ game back | 1 | 2 | 3 | 5 | 8 |
+|---|---|---|---|---|---|
+| 1 | 0.95 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 3 | 0.90 | 0.99 | 1.00 | 1.00 | 1.00 |
+| 10 | 0.83 | 0.92 | 0.97 | 0.99 | 1.00 |
+| 25 | 0.77 | 0.83 | 0.88 | 0.94 | 0.98 |
+
+Absences are counted in his team's games (the NBA schedule) between the games in his ESPN game log, which reaches back about 20 team games. The absence he is in now counts the games he has missed plus those the injury report says he'll miss, and the dip starts after them. It is used wherever the opening dip is: the windows, the simulator and the daily lineup scale his days by it, the update counts his first games back with their minutes scaled back up, and rest-of-season value leaves it out.
+
+Fitted on mid-season returns in the weekly projections (each first-to-tenth game back after each length of absence, weighted squared error 4,151 with no dip, 3,094 with it). Fitted on two seasons and scored on the third, 0.07 was the best depth every time, and it lowered the held-out error in all three. Against the opening dip alone, in the weekly projections (projected / actual per game; error per player-game):
+
+| | Before | After |
+|---|---|---|
+| Late joiners, games 1–8 | 1.022 | **1.007** |
+| Late joiners, error | 10.98 FP | **10.82** |
+| Back mid-season, games 1–8 | 0.993 | **0.997** |
+| Weeks 1–19, average distance from 1 | 0.018 | **0.016** |
+
+In the recency backtest it lowered rest-of-season error in every season, and the bias moved toward 0: 4.208 → 4.198 FP/G (2023‑24), 3.997 → 3.984 (2024‑25), 4.567 → 4.565 (2025‑26).
 
 ### 1.6 Bounded adjustments (the "news" layer)
 
@@ -207,10 +243,10 @@ Using them would leak in-season information into training and flatter ESPN, so t
 ## 3. Team strength
 
 1. **Daily lineups.** For every remaining day, the optimal legal lineup is solved exactly. A player's value doesn't depend on which slot he fills, so the startable sets form a transversal matroid. Greedy-by-value with Kuhn augmenting paths [7] is optimal, equivalent to the Hungarian method on the assignment problem but faster.
-2. **Weights.** Each player's lineup weight is expected fantasy points × probability of playing that day: 0 during an injury window, otherwise his availability. A healthy player's next games are more likely than that: the injuries that would keep him out are mostly on the report already. His chance of missing his next game is 30% of his season miss rate, and it climbs back to the season rate over about 9 team games (`exp(−games ahead / 9)`). In 2023‑24 to 2025‑26 game logs, healthy rotation players missed 8% of their next two games and 24% over a season. Players back from an injury keep the season rate. Today, a game in progress counts only the minutes he hasn't played yet, and a finished game counts nothing: what he scored is already in the matchup total. Each NBA team's own tip-off time tells which games are over; older data with only the day's first and last tip-off can tell only once every game is.
+2. **Weights.** Each player's lineup weight is expected fantasy points × probability of playing that day: 0 during an injury window, otherwise his availability. A healthy player's next games are more likely than that: the injuries that would keep him out are mostly on the report already. His chance of missing his next game is 30% of his season miss rate, and it climbs back to the season rate over about 9 team games (`exp(−games ahead / 9)`). In 2023‑24 to 2025‑26 game logs, healthy rotation players missed 8% of their next two games and 24% over a season. Players back from an injury keep the season rate. At the start of a season, with the injury report fresh from training camp, healthy players miss even less: 0.76–0.85 as often as the ramp says in their team's 2nd to 6th games, and as often from about the 7th. So in his team's *n*-th game of the season (0 = the opener) a healthy player's chance of missing is also scaled by `1 − 0.6 · exp(−n / 2)`: 0.40 at the opener, 0.78 in game 2, 0.92 in game 4. In 2026‑27 all 90 rostered players ESPN listed as active before their team's opener played it. The ramp alone expected 6.9 of them to sit; with the season-start factor, 2.8. Today, a game in progress counts only the minutes he hasn't played yet, and a finished game counts nothing: what he scored is already in the matchup total. Each NBA team's own tip-off time tells which games are over; older data with only the day's first and last tip-off can tell only once every game is.
 3. **Depth.** When a starter sits, the best playing bench player fills the expected vacancy, so depth has value.
 4. **Roster limits and pickups.** A team holds its active slots plus one IR slot per injured player it can put there (OUT or IR, or already in its IR slot), and only while he's out. The day an IR player is back, a full team is a player over the limit, and its lowest-value player from then on is dropped. Without this, the returning player and everyone else played the rest of the season: a phantom extra player worth 35–50 points a week. A pickup plays from the day his waiver claim clears (ESPN's processing date, else the league's waiver period) and never in a game that has already tipped off. The player dropped for a waiver claim plays until it clears.
-5. **Weekly distribution.** Mean = sum of expected starts × FP/G, lower in a player's first games of the season (§1.5.2). Variance = sum of `q·σ² + q(1−q)·μ²` over starts (game volatility plus play/no-play), plus two swings that last a whole week: each player's level (10% of his expected points that week, squared) and the whole roster's (6% of the team's expected total, squared). Games aren't independent within a week: role, form and the projection's own error carry over from one game to the next. Points leagues only. A sum of ~35 player-games is close to Normal.
+5. **Weekly distribution.** Mean = sum of expected starts × FP/G, lower in a player's first games of the season and his first games back from an absence (§1.5.2). Variance = sum of `q·σ² + q(1−q)·μ²` over starts (game volatility plus play/no-play), plus two swings that last a whole week: each player's level (10% of his expected points that week, squared) and the whole roster's (6% of the team's expected total, squared). Games aren't independent within a week: role, form and the projection's own error carry over from one game to the next. Points leagues only. A sum of ~35 player-games is close to Normal.
 6. **Matchups.** `P(A beats B) = Φ((μA − μB) / √(σA² + σB²))`. The current week adds points already scored. Category leagues use Normal per-category totals (percentages via the delta method) and a Poisson-binomial count of categories won.
 7. **Power score.** `played/season × record win% + (1 − played/season) × projected all-play win%`, where *played* is games played so far, *season* the regular-season length, ties count as half a win, and the projected all-play win rate is every team against every other team in every remaining regular-season week. It is each team's projected final win rate with an average opponent in every remaining week: week 1 is all projection, halfway is half each, and the last week is almost all record. The future part removes schedule luck; the record part is what actually happened, luck included.
 8. **Season simulation.** 5,000 runs of the real remaining schedule, then seeding (win percentage, tiebreak by strength) and your bracket, including two-week rounds and byes. Seeding goes by win percentage because with an odd number of teams some play a game fewer: counting wins gave each extra game about 8 points of playoff odds. In points leagues each run also draws every team a level for the rest of the season (mean 1, SD 10%) that scales its projected points every week, for injuries, trades and form that last. Without it the weekly swings average out over a season and the odds come out far too sure. The outputs are projected record, playoff odds, title odds and average seed.
@@ -225,7 +261,7 @@ Using them would leak in-season information into training and flatter ESPN, so t
 
 The season-long model uses the Normal approximation above. The **Matchups** page instead plays a single week out 10,000 times (`fbb/matchup_sim.py`).
 
-1. **Each player-game.** The player plays with his availability probability (0 inside an injury window, or if you toggle him to sit). He then gets a role shock `S ~ Gamma(mean 1)` that scales every stat together (minutes, usage, foul trouble). In his first games of the season its mean is his opening dip instead of 1 (§1.5.2). Finally, independent Poisson counts are drawn for 2s made/missed, 3s made/missed, FTs made/missed, rebounds, assists, steals, blocks, turnovers, fouls, double- and triple-doubles, with means `rate × S`. Poisson thinning makes makes and misses independent given `S`, so shooting percentages emerge from simulated attempts.
+1. **Each player-game.** The player plays with his availability probability (0 inside an injury window, or if you toggle him to sit). He then gets a role shock `S ~ Gamma(mean 1)` that scales every stat together (minutes, usage, foul trouble). In his first games of the season or back from an absence its mean is his opening and return dip instead of 1 (§1.5.2). Finally, independent Poisson counts are drawn for 2s made/missed, 3s made/missed, FTs made/missed, rebounds, assists, steals, blocks, turnovers, fouls, double- and triple-doubles, with means `rate × S`. Poisson thinning makes makes and misses independent given `S`, so shooting percentages emerge from simulated attempts.
 2. **Calibration.** For fantasy points (linear in those counts), `Var(FP) = Var_Poisson + μ²·Var(S)` exactly. `Var(S)` is solved per player so the simulated spread equals his projected game-to-game SD. Checked: Jokić 65.1 ± 24.1 projected vs 65.1 ± 24.2 simulated. In points leagues each player's shocks are also multiplied by a level for the week (`Gamma`, mean 1, SD 10%) and the whole roster's by another (SD 6%), the week-level swings of §3.
 3. **Lineups.** Each day's lineup is set from expected values, as a manager would set it. Because lineups lock at tip-off, a starter who doesn't play is replaced by the best *eligible* bench player who does.
 4. **Scoring.** Points leagues sum fantasy points and add points already scored this week (ESPN's live total). Category leagues compare every category, with percentages from simulated makes/attempts and accrued category totals added where ESPN provides them. Ties count half.
@@ -259,7 +295,21 @@ Each change, tested alone and in combination:
 - **Week-level swings.** Without them the odds were too sure (slope 0.75) and 80% ranges held 70% of the time. Team swings of 4% were too small; 6% and 8% tied. Adding the 10% player swing made the calibration best. Scaling every game's role shock by 1.4 instead helped less.
 - **Next-game miss rate.** 45% of the season rate instead of 30% was worse (log loss +0.002).
 - **Season level for playoff odds.** 0.10 and 0.15 tied on Brier score; 0.10 is better calibrated (slope 0.93 vs 1.17). Odds before week 4 are still too sure (slope 0.5 at week 1).
-- **Opening dip (§1.5.2)**, on a separate local run of 96 league-seasons. Week-1 team scores had been projected 12.4% above real (9.6%, 15.3% and 12.1% by season), and 80% ranges held only 65% of week-1 scores. With the dip: 3.3% above (0.7%, 6.0%, 3.2%), and 80%. Points per player-game started in week 1 went from 1.081 to 0.993 of real. What's left is starts: simulated teams start 4% more player-games in week 1 than real teams did. Over the season: log loss 0.5662 → 0.5658, Brier unchanged (0.1925), playoff-odds Brier 0.142 → 0.134 (slope 0.90 → 1.06), title Brier unchanged (0.086).
+- **Opening dip (§1.5.2)**, on a separate local run of 96 league-seasons. Week-1 team scores had been projected 12.4% above real (9.6%, 15.3% and 12.1% by season), and 80% ranges held only 65% of week-1 scores. With the dip: 3.3% above (0.7%, 6.0%, 3.2%), and 80%. Points per player-game started in week 1 went from 1.081 to 0.993 of real. What was left was starts: simulated teams started 4% more player-games in week 1 than real teams did (next bullet). Over the season: log loss 0.5662 → 0.5658, Brier unchanged (0.1925), playoff-odds Brier 0.142 → 0.134 (slope 0.90 → 1.06), title Brier unchanged (0.086).
+- **Week-1 starts, season start and return dip (§1.5.2, §3)**, on the same 96 league-seasons. The 4% was the study's, not the app's. Mid-season, the study stands in for the injury report with how long absences like each one lasted, but before week 1 nobody has missed a game, so it had no injury report at all. Players who would miss their team's opener were simulated as healthy: 2,740 week-1 games, where they played 263. Now a player who missed his team's opener stands in for one the report lists, out for as long as season-opening absences lasted in the other seasons (about 15 games on average). The app gets this from ESPN. That alone took week-1 starts to 0.966 of real. The rest was healthy players: they miss less at the start of a season than the ramp says (§3 step 2).
+
+| 96 league-seasons | Before | Injury report in week 1 | + season start | + return dip (now) |
+|---|---|---|---|---|
+| Week-1 player-games started vs real | 1.040 | 0.966 | 0.996 | **0.996** |
+| Week-1 team score, projected vs real | +3.3% | −4.7% | −1.6% | **−1.7%** |
+| Week-1 Brier | 0.225 | 0.162 | 0.160 | **0.160** |
+| Log loss, all weeks | 0.5658 | 0.5579 | 0.5576 | **0.5567** |
+| Brier, all weeks | 0.1925 | 0.1892 | 0.1891 | **0.1881** |
+| Playoff-odds Brier | 0.134 | 0.133 | 0.133 | 0.136 |
+| Title-odds Brier | 0.086 | 0.086 | 0.086 | **0.084** |
+| Week-1 playoff odds, calibration slope | 0.64 | 0.77 | 0.78 | **0.95** |
+
+  The return dip changes projections, and so every draft and pickup, so its leagues aren't the same leagues: on 96 league-seasons its differences are within noise (log loss −0.0009, 95% interval −0.010 to +0.008; playoff Brier +0.002, −0.005 to +0.010). What it does to players is measured directly in §1.5.2. With the week-1 bias gone, week-1 80% ranges hold 90% of real scores: they are about a quarter wider than the real errors (week 1's errors over the spread have an SD of 0.79, weeks 2 and 3 of 0.84–0.90, week 4 on of 0.99).
 
 The same check runs every morning on this season's finished weeks (`scripts/daily_sims.py`, docs/AWS.md §4).
 
@@ -291,13 +341,12 @@ The same check runs every morning on this season's finished weeks (`scripts/dail
 
 ## 7. Valuation measures
 
-- **Points leagues.** Rest-of-season value = FP/G × expected games, without the opening dip (§1.5.2). VORP uses the replacement level: the median FP/G of the five best healthy free agents in *your* league.
+- **Points leagues.** Rest-of-season value = FP/G × expected games, without the opening and return dips (§1.5.2). VORP uses the replacement level: the median FP/G of the five best healthy free agents in *your* league.
 - **Category leagues.** G-scores [8]: `(x − μ) / √(σ² + τ²/G)`, where σ is the spread of per-game means across rosterable players and τ² is the per-game variance (overdispersed Poisson; binomial for percentages). G ≈ 3.5 games per week. Percentages use volume-weighted impact: makes − attempts × league %.
 
 ## 8. Limitations
 
 - Lineups assume an attentive manager who sets the optimal lineup daily.
-- The opening dip (§1.5.2) is measured on players who played their team's opener. Players whose first game comes later, mostly back from injury, start lower still (0.67 of their projection in that game), and that isn't modeled.
 - The weekly distribution treats player games as independent. In reality there's some correlation, e.g. blowouts and pace.
 - Category-league support is complete but less battle-tested than points.
 - Accrued category totals for percentage categories are only added when ESPN reports the underlying makes and attempts.

@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import itertools
+import math
 import random
 from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
+import fbb.context as C
 import fbb.projections as P
 from fbb.baseline import FALLBACK_LEAGUE_RATES, RATE_STATS, aging_factor, per_game_from_rates, sps_projection
 from fbb.connectors.espn import EASTERN, parse_settings
 from fbb.connectors.fileimport import normalize_name, parse_upload
-from fbb.context import MISS_NEXT_FLOOR, MISS_NEXT_GAME, AnalysisContext
+from fbb.context import MISS_NEXT_FLOOR, MISS_NEXT_GAME, SEASON_START_GAMES, SEASON_START_MISS_CUT, AnalysisContext
 from fbb.enrich import enrich_players
 from fbb.improve import add_drop_moves, streaming_moves
 from fbb.lineup import SlotModel, solve_day
@@ -153,14 +155,32 @@ def test_injury_reduces_games_not_rates():
 
 def test_healthy_player_rarely_misses_his_next_game():
     """Availability is a season's worth of misses; the injuries behind his next few mostly haven't happened."""
-    ctx = AnalysisContext(make_snapshot())
+    snap = make_snapshot()
+    snap.current_period = 41  # mid-season: his team has played about 20 games
+    ctx = AnalysisContext(snap)
     pr = ctx.proj["1"]
     pp = [v for _, v in sorted(ctx.p_play("1").items())]
     assert pr.availability < 0.99
     miss = 1 - pr.availability
-    assert pp[0] == pytest.approx(1 - min(miss, MISS_NEXT_FLOOR + MISS_NEXT_GAME * miss))
+    assert pp[0] == pytest.approx(1 - min(miss, MISS_NEXT_FLOOR + MISS_NEXT_GAME * miss), abs=1e-4)
     assert pp[0] > pp[10] > pp[-1]
     assert pp[-1] == pytest.approx(pr.availability, abs=0.005)
+
+
+def test_healthy_players_miss_even_less_at_the_seasons_start():
+    """Fresh from camp: in his team's first games of the season the ramp's chance of missing is cut, fading."""
+    opener = AnalysisContext(make_snapshot())
+    pr = opener.proj["1"]
+    assert opener.team_games_played(pr.pro_team) == 0
+    m = 1 - pr.availability
+    near = min(m, MISS_NEXT_FLOOR + MISS_NEXT_GAME * m)
+    pp = [v for _, v in sorted(opener.p_play("1").items())]
+    for k in (0, 1, 3, 10):
+        ramp = m - (m - near) * math.exp(-k / C.MISS_RAMP_GAMES)
+        assert pp[k] == pytest.approx(1 - ramp * (1 - SEASON_START_MISS_CUT * math.exp(-k / SEASON_START_GAMES)))
+    later = make_snapshot()
+    later.current_period = 41
+    assert pp[0] > [v for _, v in sorted(AnalysisContext(later, opener.proj).p_play("1").items())][0]
 
 
 def test_first_games_of_the_season_are_projected_below_his_level():
@@ -188,7 +208,74 @@ def test_opening_dip_waits_for_an_injured_player_to_return():
     out = int(ctx.proj["1"].games_out)
     days = sorted(ctx.team_days[snap.players["1"].pro_team])
     assert out >= 1 and min(ctx.form("1")) == days[out]  # his first game back is his first game
-    assert ctx.form("1")[days[out]] == pytest.approx(P.opening_factor(1))
+    # both dips: his first game of the season, after missing his team's first `out` games
+    assert ctx.form("1")[days[out]] == pytest.approx(P.opening_factor(1) * P.return_factor(1, out))
+
+
+def test_return_dip_is_deeper_and_longer_after_a_longer_absence():
+    assert P.return_factor(1, 0) == 1.0
+    assert P.return_factor(1, 1) > P.return_factor(1, 4) > P.return_factor(1, 20)
+    assert P.return_factor(3, 20) < P.return_factor(3, 2)
+    for missed in (1, 4, 20):
+        f = [P.return_factor(j, missed) for j in range(1, 60)]
+        assert f[0] == pytest.approx(1 - P.RETURN_DIP * math.log1p(missed)) and f[0] < f[1]
+        assert all(a <= b for a, b in zip(f, f[1:])) and f[-1] == pytest.approx(1.0, abs=1e-3)
+
+
+def _season_games(snap, pid: str, played: list[int], minutes: dict[int, float] | None = None) -> list[int]:
+    """Give a player games on the listed team games of this season so far (indices into his team's game days)."""
+    p = snap.players[pid]
+    days = sorted(d for d, teams in snap.schedule.games.items() if p.pro_team in teams and d < snap.current_period)
+    games = []
+    for i in played:
+        m = (minutes or {}).get(i, 30.0)
+        games.append(GameLog(season=2027, period=days[i], team=p.pro_team, minutes=m,
+                             stats=make_line(2027, 1, m, 1.0, p.pro_team).stats))
+    stats: dict[str, float] = {}
+    for g in games:
+        for k, v in g.stats.items():
+            stats[k] = stats.get(k, 0.0) + v
+    p.recent_games = games
+    p.current = SeasonLine(season=2027, team=p.pro_team, gp=len(games), minutes=sum(g.minutes for g in games),
+                           stats=stats)
+    return days
+
+
+def test_return_dip_follows_his_absences():
+    """His first games back from an absence are projected below his level, by how many team games he missed."""
+    snap = make_snapshot()
+    snap.current_period = 41
+    days = _season_games(snap, "1", [])
+    n = len(days)
+    # Played his team's first 5 games, missed the next n - 7, back for the last two.
+    _season_games(snap, "1", [0, 1, 2, 3, 4, n - 2, n - 1])
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    pr = ctx.proj["1"]
+    assert (pr.games_missed, pr.back_from, pr.games_back) == (0, n - 7, 2)
+    first = min(ctx.form("1"))
+    assert ctx.form("1")[first] == pytest.approx(P.opening_factor(8) * P.return_factor(3, n - 7))
+    # Out for his team's last 3 games (and ESPN says out for 4 more): his first game back follows all 7.
+    snap = make_snapshot(injured={"1": "OUT"})
+    snap.current_period = 41
+    _season_games(snap, "1", list(range(n - 3)))
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    pr = ctx.proj["1"]
+    out = int(pr.games_out)
+    assert pr.games_missed == 3 and out >= 1
+    upcoming = sorted(ctx.team_days[snap.players["1"].pro_team])
+    assert ctx.form("1")[upcoming[out]] == pytest.approx(P.opening_factor(n - 2) * P.return_factor(1, 3 + out))
+
+
+def test_update_counts_return_games_minutes_scaled_up(monkeypatch):
+    """A short first game back doesn't drag his minutes down for the games after it."""
+    snap = make_snapshot()
+    snap.current_period = 41
+    n = len(_season_games(snap, "1", []))
+    _season_games(snap, "1", [*range(10), n - 1], minutes={n - 1: 22.0})
+    with_dip = ProjectionEngine(snap, model=None).project_all()["1"].mpg
+    monkeypatch.setattr(P, "RETURN_DIP", 0.0)
+    without = ProjectionEngine(snap, model=None).project_all()["1"].mpg
+    assert with_dip > without
 
 
 def test_teammates_minutes_come_from_their_own_games():

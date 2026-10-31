@@ -15,7 +15,7 @@ import numpy as np
 
 from .lineup import SlotModel, solve_day
 from .models import LeagueSnapshot
-from .projections import PlayerProjection, ProjectionEngine, opening_factor
+from .projections import PlayerProjection, ProjectionEngine, opening_factor, return_factor
 from .schedule import game_state, period_for_date, period_to_matchup, remaining_days
 from .valuation import CategoryValuer
 
@@ -40,6 +40,14 @@ TEAM_WEEK_CV = 0.06
 MISS_NEXT_GAME = 0.30
 MISS_NEXT_FLOOR = 0.0
 MISS_RAMP_GAMES = 9.0
+# Healthier still at the season's start, with the injury report fresh from camp: healthy players missed their
+# team's 2nd to 6th games 15-25% less often than the ramp says, and in 2026-27 all 90 rostered players ESPN listed
+# as active before their team's opener played it (the ramp alone expected 6.9 to sit, this 2.8). So in his
+# team's n-th game of the season (0 = the opener) a healthy player's chance of missing is scaled by
+# 1 - SEASON_START_MISS_CUT x exp(-n / SEASON_START_GAMES).
+# Fitted on 2023-24 to 2025-26 game logs; without it, synthetic leagues started 3% too few player-games in week 1.
+SEASON_START_MISS_CUT = 0.6
+SEASON_START_GAMES = 2.0
 
 
 @dataclass
@@ -85,6 +93,7 @@ class AnalysisContext:
             self.value_pg[pid] = pr.fp_pg if self.is_points else self.cat_valuer.value_pg(pid)
         self._pplay: dict[str, dict[int, float]] = {}
         self._form: dict[str, dict[int, float]] = {}
+        self._team_played: dict[str, int] = {}
         self._rostered = {e.player_id for t in snapshot.teams for e in t.roster}
         self._first_day: dict[str, int] = {}
 
@@ -103,11 +112,16 @@ class AnalysisContext:
         g_out = pr.games_out
         full_out = int(math.floor(g_out))
         frac = g_out - full_out
+        team_gp = self.team_games_played(p.pro_team)
         for k, d in enumerate(days):
             if k < full_out:
                 out[d] = 0.0
                 continue
-            avail = 1 - (miss - (miss - near) * math.exp(-k / MISS_RAMP_GAMES) if g_out == 0 else miss)
+            if g_out == 0:
+                fresh = 1 - SEASON_START_MISS_CUT * math.exp(-(team_gp + k) / SEASON_START_GAMES)
+                avail = 1 - (miss - (miss - near) * math.exp(-k / MISS_RAMP_GAMES)) * fresh
+            else:
+                avail = 1 - miss
             out[d] = avail * (1 - frac) if k == full_out and frac > 0 else avail
         # Once today's game has started, what he has scored is already in the matchup totals, so only the
         # part of the game he hasn't played yet is left, and nothing once it's over: a player who sat or played
@@ -126,21 +140,31 @@ class AnalysisContext:
 
     def form(self, pid: str) -> dict[int, float]:
         """period -> his expected output that day relative to his projection: below 1 in his first games of
-        the season (the opening dip in fbb/projections.py), counting from the games he has played and after
-        those he's expected to miss. Days not listed are 1."""
+        the season and his first games back from an absence (the opening and return dips in fbb/projections.py),
+        counting from the games he has played and after those he's expected to miss. Days not listed are 1."""
         if pid in self._form:
             return self._form[pid]
         pr = self.proj[pid]
         days = sorted(self.team_days.get(self.s.players[pid].pro_team, ()))
         full_out = int(math.floor(pr.games_out))
+        # The absence he comes back from: the one he's in (games missed so far and still to miss), else his last.
+        away = pr.games_missed + full_out
+        missed, back = (away, 0) if away else (pr.back_from, pr.games_back)
         out: dict[int, float] = {}
         for k, d in enumerate(days[full_out:]):
-            f = opening_factor(pr.games_played + k + 1)
+            f = opening_factor(pr.games_played + k + 1) * return_factor(back + k + 1, missed)
             if f > 0.999:
                 break
             out[d] = f
         self._form[pid] = out
         return out
+
+    def team_games_played(self, team: str) -> int:
+        """A pro team's games this season before today."""
+        if team not in self._team_played:
+            self._team_played[team] = sum(1 for p, teams in self.s.schedule.games.items()
+                                          if p < self.s.current_period and team in teams)
+        return self._team_played[team]
 
     def today_state(self, team: str) -> str | None:
         """"upcoming", "live" or "final" for an NBA team's game today, as of the snapshot (None: can't tell)."""
