@@ -37,7 +37,9 @@ EVENTS = ["2PM", "2PX", "3PM", "3PX", "FTM", "FTX", "REB", "AST", "STL", "BLK", 
 _E = {e: i for i, e in enumerate(EVENTS)}
 DEFAULT_SIMS = 10_000
 MAX_SIMS = 20_000
-ROLE_SHOCK_SCALE = 1.0  # multiplies the calibrated role-shock variance (scripts/backtest_sims.py tests it)
+# Multiplies the calibrated role-shock variance. x1.4 helped less than the week-level shocks in fbb/context.py,
+# which the simulator draws below (scripts/backtest_sims.py).
+ROLE_SHOCK_SCALE = 1.0
 
 
 def event_rates(per_game: dict[str, float]) -> np.ndarray:

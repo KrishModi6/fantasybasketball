@@ -1,8 +1,9 @@
 # Courtside on AWS
 
-Status (2026-10-30): **built**: the S3 bucket and uploader, the daily tracking feed behind xFP (S3 +
-CloudFront, Courtside 0.5.0) and a cost budget. Bedrock was evaluated and not adopted. Everything else
-here is a record of the decision.
+Status (2026-10-31): **built**: the S3 bucket and uploader, the daily tracking feed behind xFP (S3 +
+CloudFront, Courtside 0.5.0), a cost budget, and Lambda sims: the simulator backtest and its daily
+check on this season (section 4). Bedrock was evaluated and not adopted. Everything else here is a
+record of the decision.
 
 The repo is public, so the project's account ID is written `<account-id>` here. The uploader looks
 it up at runtime.
@@ -262,6 +263,8 @@ trying Claude, run about 20 saved questions through both models and compare the 
 
 ## 4. Lambda sims: the simulator backtest and the daily check (built 2026-10-30/31)
 
+Results: docs/METHODOLOGY.md, "Calibration against real seasons".
+
 `server/scripts/backtest_sims.py` checks the matchup simulator and the season simulation against real
 seasons: synthetic 10-team ESPN points leagues on 2023-24 to 2025-26 game logs, with the app's own code
 forecasting every week and the real box scores deciding it. One league-season with 17 settings takes
@@ -301,10 +304,12 @@ Before the first week ends there is nothing to score, so it stops after step 1. 
 only when a week ends; on the other days it repeats the same weeks. Playoff odds aren't checked
 until the season is over. The task runs it only once `scripts/daily_sims.py` is on `main`.
 
-It signs in as the IAM user `courtside-publisher` (1b). Its second inline policy, `run-daily-sims`,
-allows three things: upload `sims/inputs/inputs_*.json.gz`, list `sims/results/daily-*`, and invoke
-`courtside-sims`. Trade-off: anyone holding that key could run the function on your bill, at most
-10 at once (about $1.40 an hour). The budget email would show it, and deleting the key stops it.
+It signs in as the IAM user `courtside-publisher` (1b). Besides `publish-live-tracking`, that user has a
+second inline policy, `run-daily-sims`, added 2026-10-31. It allows three things: upload
+`sims/inputs/inputs_*.json.gz`, list `sims/results/daily-*`, and invoke `courtside-sims`. So the
+worst case of a leaked key in 1b is no longer a few cents: anyone holding it could run the function
+on your bill, at most 10 at once (about $1.40 an hour, $34 a day). The $5 budget email would show it,
+and deleting the key stops it. Retiring the user (1b) needs this policy deleted first.
 
 **What exists in AWS** (tagged `project=courtside`, `us-east-2`)
 
@@ -317,9 +322,12 @@ allows three things: upload `sims/inputs/inputs_*.json.gz`, list `sims/results/d
 | S3 objects | `sims/` in the bucket above: inputs, code, results, merged, daily (about 40 MB, plus about 1 MB a day in season) |
 
 **Cost.** Lambda bills $0.0000133334 per GB-second on arm64. A study league (both setting groups,
-218 s at 3,008 MB) costs about $0.0085, so the 192-league study comes to about $1.65. The daily check
-runs one setting with no playoff odds, about a second per league per finished week: under $1 a month
-by the end of the season. S3 storage and requests add well under a cent.
+about 218 s at 3,008 MB) costs about $0.0085. Everything through 2026-10-31 took 212 invocations and
+129,000 GB-seconds: $1.72 at list price. That covers the canary, the pilots, the 192-league study run
+`r1`, its merge and the first daily run. Lambda's always-free allowance is 400,000 GB-seconds a month,
+so the bill may show less, if this plan gets that allowance. The daily check runs one setting with no
+playoff odds: the first one (week 1, 32 leagues) took about 40 s end to end. Expect under $1 a month by
+the end of the season. S3 storage and requests add well under a cent.
 
 To remove it all: first take the daily-sims lines out of `publish-tracking.cmd` and delete the user
 policy (`aws iam delete-user-policy --user-name courtside-publisher --policy-name run-daily-sims`).

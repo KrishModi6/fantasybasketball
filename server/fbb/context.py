@@ -23,11 +23,12 @@ CATEGORY_STATS = ["PTS", "REB", "AST", "STL", "BLK", "TO", "3PM", "FGM", "FGA", 
                   "OREB", "DREB", "PF"]
 IR_STATUSES = ("OUT", "INJURY_RESERVE")  # statuses ESPN lets a team put in an IR slot
 
-# Uncertainty beyond each game's own spread, for points leagues (scripts/backtest_sims.py measures these
-# against real seasons). A player's level over one matchup week moves together across his games (role,
-# form, and the projection's own error), and a whole roster can run hot or cold together in a week.
-PLAYER_WEEK_CV = 0.0
-TEAM_WEEK_CV = 0.0
+# Uncertainty beyond each game's own spread, for points leagues. A player's level over one matchup week
+# moves together across his games (role, form, and the projection's own error), and a whole roster can
+# run hot or cold together in a week. Without them weekly win odds were overconfident and 80% ranges held
+# 70% of the time; with them, 80% (scripts/backtest_sims.py: 192 synthetic leagues, 2023-24 to 2025-26).
+PLAYER_WEEK_CV = 0.10
+TEAM_WEEK_CV = 0.06
 
 # A player who isn't hurt rarely misses his next game or two: the injuries that would keep him out are mostly
 # on the report already. Games further off carry more of the season's injury risk. So a healthy player's
