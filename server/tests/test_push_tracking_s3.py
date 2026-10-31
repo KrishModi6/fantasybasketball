@@ -103,3 +103,13 @@ def test_live_file_is_published_gzipped_to_public_without_our_etag():
     assert json.loads(gzip.decompress(put["Body"])) == {k: v for k, v in live.items() if k != "etag"}
     P.publish_live(s3, "bucket", live, dry_run=True)
     assert len(s3.puts) == 1
+
+
+def test_only_sign_in_profiles_are_told_to_run_aws_login(tmp_path, monkeypatch):
+    config = tmp_path / "config"
+    config.write_text("[profile courtside]\nregion = us-east-2\nlogin_session = arn:aws:sts::1:assumed-role/r/s\n"
+                      "[profile courtside-publisher]\nregion = us-east-2\n")
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(config))
+    assert P.credentials_hint("courtside") == "Sign in again with: aws login --profile courtside"
+    assert "aws login" not in P.credentials_hint("courtside-publisher")
+    assert "aws login" not in P.credentials_hint("no-such-profile")
