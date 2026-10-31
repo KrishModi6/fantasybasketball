@@ -3,6 +3,7 @@ Courtside runs on your computer: projections, power rankings, matchup simulation
 ## What's new in 0.5.4
 
 - **xFP data on time every morning.** The daily file of NBA.com tracking data behind xFP and Luck was published with an AWS sign-in that runs out after 12 hours, so on October 31 it went out at 11:12 a.m. instead of 8:00. It now has its own AWS key that doesn't run out. When the file is late, Courtside fetches the missing day from NBA.com itself, so nothing was lost.
+- **Powered by AWS.** The bottom of the league list says so now. Hover it to see what runs there: the daily NBA.com tracking data is published on Amazon S3 and CloudFront, and the simulations are tested at scale on AWS Lambda.
 
 ## In 0.5.3
 

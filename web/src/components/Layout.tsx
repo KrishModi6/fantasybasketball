@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useIsFetching, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, LogOut, Menu, Moon, RefreshCw, Sun } from "lucide-react";
+import { ArrowLeft, Cloud, LogOut, Menu, Moon, RefreshCw, Sun } from "lucide-react";
 import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { openAppMenu, openWhatsNew } from "../lib/desktop";
@@ -137,6 +137,9 @@ function LeagueSwitch({ current }: { current: League | undefined }) {
   );
 }
 
+const AWS_NOTE = "The daily NBA.com tracking data behind xFP and Luck is published on Amazon Web Services (S3 and "
+  + "CloudFront), and Courtside's simulations are tested at scale on AWS Lambda.";
+
 function Dock({ league, myTeamId }: { league: League; myTeamId: number | null }) {
   const { data } = useRankings(league.id, Boolean(league.settings));
   const nav = useNavigate();
@@ -162,6 +165,9 @@ function Dock({ league, myTeamId }: { league: League; myTeamId: number | null })
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="dock-foot" title={AWS_NOTE}>
+        <Cloud aria-hidden="true" /> Powered by AWS
       </div>
     </aside>
   );
