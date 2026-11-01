@@ -367,14 +367,15 @@ class TradeEvaluator:
 
 
 def _fairness(sides: list[TradeSide]) -> dict:
-    # "balanced" only when no side moves past the same ±ADVANTAGE_PCT line its verdict uses; otherwise name
-    # who comes out ahead.
-    if all(s.delta_ros > 0 for s in sides):
+    # "balanced" whenever no side moves past the same ±ADVANTAGE_PCT line its verdict uses, even if every
+    # side moves the same way: -0.1% and -0.2% is noise, not "lose-lose". Otherwise win-win, lose-lose, or
+    # name who comes out ahead.
+    if all(s.verdict == "neutral" for s in sides):
+        label = "balanced"
+    elif all(s.delta_ros > 0 for s in sides):
         label = "-".join(["win"] * len(sides))
     elif all(s.delta_ros < 0 for s in sides):
         label = "-".join(["lose"] * len(sides))
-    elif all(s.verdict == "neutral" for s in sides):
-        label = "balanced"
     else:
         ahead = [s for s in sides if s.delta_ros > 0] or [max(sides, key=lambda s: s.delta_pct)]
         label = "favors " + " and ".join(s.team_name for s in ahead)

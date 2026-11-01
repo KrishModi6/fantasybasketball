@@ -856,6 +856,8 @@ def test_fairness_label_follows_verdicts():
     assert label(0.004, -0.003) == "balanced"
     assert label(0.02, 0.001) == "win-win"
     assert label(-0.002, -0.015) == "lose-lose"
+    assert label(-0.001, -0.002) == "balanced"  # both lose, but neither past 1%: noise, not "lose-lose"
+    assert label(0.003, 0.009) == "balanced"
     assert label(0.0, -0.02) == "favors T0"
     assert label(0.006, 0.003, -0.02) == "favors T0 and T1"
 

@@ -1,6 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.5
+## What's new in 0.5.6
+
+- **Lose-lose only when someone really loses.** The **Fit** label called a trade **lose-lose** (or **win-win**) whenever both teams moved the same way, even by a tenth of a percent, while both verdicts said **neutral**. Now a trade where no team gains or loses 1% or more is **balanced**, whichever way the small changes point, and **win-win** or **lose-lose** means at least one team moves 1% or more. The **Fit** column in **Find trades**, **Target a player** and **Shop a player** and the trade analyzer all use it.
+- **Target a player says when a player isn't worth it.** Offers are listed by whether the other team should accept them, so sometimes every one of them costs your team points too. When even the best offer does, the **Best offer** box turns into a warning and says why that usually happens: positions you're already deep at, games on the same nights as your starters, or a roster spot you'd have to give up.
+
+## In 0.5.5
 
 - **Opening-week projections match players' first games.** Players start a season below their usual level: over the last three seasons they scored about 9% below it in their first game, 7% in games 2 and 3 and 3% through game 8, then settled. Courtside projected those games at the full season level, so opening-week projections ran 6–11% above what players really scored. Each player's first few games of the season are now projected lower, and opening-week projections land within about 3% of what players scored.
 - **A slow first week doesn't drag a player down.** The fewer minutes players get in their first games count as part of that opening dip, not as a smaller role, so his projection for the weeks after isn't marked down for it. Rest-of-season projections come out a little more accurate.
