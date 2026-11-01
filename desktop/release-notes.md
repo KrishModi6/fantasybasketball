@@ -1,6 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.5
+## What's new in 0.5.7
+
+- **Second-year players are projected to grow into their roles.** Over the last three seasons, second-year players played about three quarters of their usual minutes in their first game, under half if they were coming off a small rookie role, and took about 10 games to climb back. Courtside read those short minutes as the role they'd keep, so after 3 to 10 games it projected their rest of the season about 8% below what they went on to score. Their early minutes now count toward the role they grow into, and the next few games of one still working into the rotation are projected lower. Second-year players projected for starter's minutes (28 or more a game) are unchanged. Rest-of-season projections for second-year players are about 3% more accurate.
+- This season is a few games old, so it already shows for second-year players in small roles, whose first games still count in their projections.
+
+## In 0.5.5
 
 - **Opening-week projections match players' first games.** Players start a season below their usual level: over the last three seasons they scored about 9% below it in their first game, 7% in games 2 and 3 and 3% through game 8, then settled. Courtside projected those games at the full season level, so opening-week projections ran 6–11% above what players really scored. Each player's first few games of the season are now projected lower, and opening-week projections land within about 3% of what players scored.
 - **A slow first week doesn't drag a player down.** The fewer minutes players get in their first games count as part of that opening dip, not as a smaller role, so his projection for the weeks after isn't marked down for it. Rest-of-season projections come out a little more accurate.

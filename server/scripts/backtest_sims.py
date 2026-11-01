@@ -308,6 +308,7 @@ def prepare(season: int, tag: str = "", live: bool = False) -> Path | None:
             "availability": pr.availability, "games_out": pr.games_out, "fp_pg": pr.fp_pg, "fp_sd": pr.fp_sd,
             "gp": pr.games_played, "missed": pr.games_missed, "back_from": pr.back_from, "back": pr.games_back,
             "rookie": "rookie" in pr.flags, "rookie_minutes_dip": pr.rookie_minutes_dip,
+            "second_year_dip": pr.second_year_dip,
             "per_game": {k: round(v, 4) for k, v in pr.per_game.items()},
         } for pid, pr in proj.items()}
         print(f"  {season} week {mp}: projected {len(proj)} players", flush=True)
@@ -361,7 +362,8 @@ class Season:
                 # Inputs prepared before the opening and return dips have no games played or absences: no dips.
                 recent_fp_pg=None, games_played=r.get("gp", 10**6), games_missed=r.get("missed", 0),
                 back_from=r.get("back_from", 0), games_back=r.get("back", 0),
-                flags=["rookie"] if r.get("rookie") else [], rookie_minutes_dip=r.get("rookie_minutes_dip", 1.0))
+                flags=["rookie"] if r.get("rookie") else [], rookie_minutes_dip=r.get("rookie_minutes_dip", 1.0),
+                second_year_dip=r.get("second_year_dip", 0.0))
                 for pid, r in rows.items()}
             self.players[mp] = {pid: Player(id=pid, name=self.info[pid]["name"], pro_team=r["team"],
                                             positions=self.info[pid]["positions"], injury_status=r["status"])
