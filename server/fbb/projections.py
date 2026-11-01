@@ -13,6 +13,9 @@ Order of operations for every player (each step is recorded for the UI):
      season, last season's closing games are added too, behind this season's
      and at a reduced weight. From SEASON_ONLY_AFTER_GAMES games played, the
      prior and last season's games drop out: this season's games alone.
+     A player's first games of a season run below his projection (the opening
+     dip, deeper and longer for a rookie): their minutes count scaled back up,
+     and the weekly windows (fbb/context.py) project his own first games below it.
   3. Bounded adjustments (news layer). Only structured signals are used and
      each is capped:
        injury status / return date -> games missed (availability only)
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import math
 import re
+from bisect import bisect_left, bisect_right
 from dataclasses import asdict, dataclass, field
 from datetime import date
 
@@ -70,6 +74,45 @@ CARRYOVER_MINUTES_WEIGHT = 0.25
 # From this many games played this season, a projection is this season's games alone: the preseason prior
 # (built from last season's stats) and last season's closing games stop counting.
 SEASON_ONLY_AFTER_GAMES = 15
+# A player's first games of a season fall short of his projection: in 2023-24 to 2025-26, players who played
+# their team's opener scored 9% below it in game 1, 7% in games 2-3 and 3% in games 4-8, then level. About 3/5
+# of it is minutes, the rest output per minute. His n-th game is projected at (1 - OPENING_DIP_MINUTES x e) x
+# (1 - OPENING_DIP_RATE x e), e = exp(-(n - 1) / OPENING_GAMES), in the weekly windows (fbb/context.py). The
+# update counts his first games' minutes scaled back up by the same dip; their output per minute counts as it
+# happened, which already takes part of the dip into the projection for his next games, hence a short dip.
+# Tuned in scripts/backtest_sims.py's weekly projections: opening-week per-game projections had run 6-11% above
+# what players scored, and this setting left rest-of-season error (scripts/backtest_recency.py) no worse in
+# any season. Scaling per-minute output up too made it worse once the preseason prior drops out.
+OPENING_DIP_MINUTES = 0.07
+OPENING_DIP_RATE = 0.05
+OPENING_GAMES = 2.0
+# His first games back from an absence fall short too, by more the longer he was out: in 2023-24 to 2025-26, his
+# first game back after missing one team game was 0.96 of his projection, 0.89 after three or four, 0.85 after
+# seven to nine, 0.83 after 10-19 and 0.75 after 20-29, which also lasted longer (0.73 over three games).
+# Nearly all of it is minutes. His j-th game back after missing L team games is projected at
+# 1 - RETURN_DIP x ln(1 + L) x exp(-(j - 1) x RETURN_MISSED_PER_GAME / L): it fades over a game for every 8 he
+# missed. It multiplies the opening dip, which is the same thing after the offseason: a player whose season
+# starts late has both: his games 1-5 were 0.86 of his projection, now projected at 0.85 (game 1: 0.67, 0.74
+# projected; the opening dip alone said 0.94 and 0.88). The update counts
+# those games' minutes scaled back up. Fitted on mid-season returns in scripts/backtest_sims.py's weekly inputs.
+RETURN_DIP = 0.07
+RETURN_MISSED_PER_GAME = 8.0
+# A player with no NBA minutes in the last two seasons (a rookie, mostly) has a deeper, longer dip of his own
+# on top: his n-th game is also x (1 - ROOKIE_DIP_MINUTES x r) minutes and (1 - ROOKIE_DIP_RATE x r) output per
+# minute, r = exp(-(n - 1) / ROOKIE_GAMES). In 2023-24 to 2025-26 rookies' first games ran about half their
+# preseason minutes and 43% of its fantasy points, and they kept climbing for weeks, so the update read their
+# early games as a smaller role than they grew into: after 5-20 games their rest-of-season FP/G ran 7-15% above
+# projection. The update counts a rookie's early minutes scaled back up by his dip (output per minute as it
+# happened, like everyone's). In the weekly windows the minutes part is scaled by how far his minutes so far
+# fall short of his preseason projection (PlayerProjection.rookie_minutes_dip): a rookie already playing a full
+# role has no minutes left to climb, and with the whole dip rookies who played 28+ minutes in their first five
+# games were projected at 0.85 of their next ten (0.94 scaled). Chosen on rest-of-season FP/G after 0-20 games,
+# for every rookie and for those projected for 20+ minutes (docs/METHODOLOGY.md 1.5.2): rookies' error
+# 5.24 -> 5.00, 4.31 -> 4.01, 4.62 -> 4.39 FP/G, and their next four games projected at 1.03-1.08 of what they
+# scored after 0-12 games (1.05-1.65 without it).
+ROOKIE_DIP_MINUTES = 0.30
+ROOKIE_DIP_RATE = 0.20
+ROOKIE_GAMES = 8.0
 POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
 
 INJURY_DEFAULT_GAMES = {
@@ -115,6 +158,11 @@ class PlayerProjection:
     season_fp_pg: float | None
     recent_fp_pg: float | None
     games_played: int
+    # This season's absences, for the dip in his first games back: team games he has missed in a row up to now (all
+    # of his team's games so far if he hasn't played yet), else the absence he last came back from and his games since.
+    games_missed: int = 0
+    back_from: int = 0
+    games_back: int = 0
     sources: list[SourceEstimate] = field(default_factory=list)
     adjustments: list[Adjustment] = field(default_factory=list)
     ml_explanation: list[dict] = field(default_factory=list)
@@ -126,6 +174,9 @@ class PlayerProjection:
     tracked_fp_pg: float | None = None
     xfp_pg: float | None = None
     flags: list[str] = field(default_factory=list)
+    # A rookie's minutes dip still ahead of him in the weekly windows: 1 before his first game, 0 once his
+    # minutes so far reach his preseason projection.
+    rookie_minutes_dip: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -133,6 +184,33 @@ class PlayerProjection:
 
 def _decay(n_back: int, half_life: float) -> float:
     return 0.5 ** (n_back / half_life)
+
+
+def opening_factors(n: float, rookie: bool = False, rookie_minutes: float = 1.0) -> tuple[float, float]:
+    """Minutes and per-minute output in a player's n-th game of the season (1 = his first), relative to
+    his settled level. A rookie (no NBA minutes in the last two seasons) has his own dip on top, its
+    minutes part scaled by ``rookie_minutes``."""
+    n = max(n, 1.0)
+    e = math.exp(-(n - 1.0) / OPENING_GAMES)
+    m, r = 1.0 - OPENING_DIP_MINUTES * e, 1.0 - OPENING_DIP_RATE * e
+    if rookie:
+        e = math.exp(-(n - 1.0) / ROOKIE_GAMES)
+        m, r = m * (1.0 - ROOKIE_DIP_MINUTES * rookie_minutes * e), r * (1.0 - ROOKIE_DIP_RATE * e)
+    return m, r
+
+
+def opening_factor(n: float, rookie: bool = False, rookie_minutes: float = 1.0) -> float:
+    """Fantasy output in a player's n-th game of the season relative to his settled level."""
+    m, r = opening_factors(n, rookie, rookie_minutes)
+    return m * r
+
+
+def return_factor(j: float, missed: float) -> float:
+    """Minutes (and fantasy output) in a player's j-th game back (1 = his first) after missing ``missed`` straight
+    team games, relative to his settled level."""
+    if missed <= 0:
+        return 1.0
+    return 1.0 - RETURN_DIP * math.log1p(missed) * math.exp(-(max(j, 1.0) - 1.0) * RETURN_MISSED_PER_GAME / missed)
 
 
 def _without(line: SeasonLine, games: list[GameLog]) -> SeasonLine:
@@ -189,8 +267,34 @@ class ProjectionEngine:
         self.xfp_beta: dict[str, float] = xfp.rate_beta() if xfp else {}
         self._feats: dict[str, dict | None] = {}
         self._importance: dict[str, float] | None = None
+        self._team_days: dict[str, list[int]] = {}  # each team's game days this season before today
+        for d in sorted(snapshot.schedule.games):
+            if d < snapshot.current_period:
+                for t in snapshot.schedule.games[d]:
+                    self._team_days.setdefault(t, []).append(d)
 
     # -- helpers -------------------------------------------------------------
+
+    def _absences(self, p: Player, games: list[GameLog], gp: int) -> tuple[list[tuple[int, int]], int]:
+        """For each of this season's logged games, (j, L): his j-th game back after missing L straight team games
+        (L = 0: no absence since the season started). Plus the team games he has missed in a row up to now. A gap
+        before his first logged game counts only when it is his first game of the season: ESPN's last 20 team
+        games may start after older games of his."""
+        out, prev, j, missed = [], 0, 0, 0
+        for i, g in enumerate(games):
+            days = self._team_days.get(g.team, [])
+            gap = bisect_left(days, g.period) - bisect_right(days, prev)
+            if i == 0 and gp > len(games):
+                gap = 0
+            if gap > 0:
+                j, missed = 1, gap
+            else:
+                j += 1
+            out.append((j, missed))
+            prev = g.period
+        team = self._team_days.get(p.pro_team, [])
+        streak = len(team) - bisect_right(team, games[-1].period) if games else max(0, len(team) - gp)
+        return out, streak
 
     def _prior_k(self, stat: str, weighted_minutes: float) -> float:
         """Prior strength in minutes; established players (more history) get a stronger prior."""
@@ -308,7 +412,12 @@ class ProjectionEngine:
         obs_min = 0.0
         w_minutes_sum = 0.0
         mins_prior_w = 0.0
-        # Most recent game is index 0 in the decay.
+        seen = max(len(games), int(cur.gp) if cur else 0)
+        back, games_missed = self._absences(p, games, seen)
+        w_min = pre["feats"].get("w_min", 0.0)
+        rookie = w_min == 0.0
+        # Most recent game is index 0 in the decay. His first games of the season and first games back from an
+        # absence count their minutes scaled up by their dips.
         for n_back, g in enumerate(reversed(games)):
             w = _decay(n_back, RATE_HALF_LIFE_GAMES)
             tot = line_rates_from_game(g.stats)
@@ -316,9 +425,10 @@ class ProjectionEngine:
                 obs_tot[k] += w * tot.get(k, 0.0)
             obs_min += w * g.minutes
             wm = _decay(n_back, MINUTES_HALF_LIFE_GAMES)
-            w_minutes_sum += wm * g.minutes
+            j, missed = back[len(games) - 1 - n_back]
+            w_minutes_sum += wm * g.minutes / (opening_factors(seen - n_back, rookie)[0] * return_factor(j, missed))
             mins_prior_w += wm
-        # Season-to-date beyond the logged games, as one older block.
+        # Season-to-date beyond the logged games, as one older block: his first extra_gp games.
         if cur and cur.gp > len(games):
             extra_gp = cur.gp - len(games)
             extra_min = max(0.0, cur.minutes - sum(g.minutes for g in games))
@@ -332,7 +442,8 @@ class ProjectionEngine:
                 obs_tot[k] += w * max(0.0, cur_tot.get(k, 0.0) - logged[k])
             obs_min += w * extra_min
             wm = _decay(len(games) + extra_gp / 2, MINUTES_HALF_LIFE_GAMES)
-            w_minutes_sum += wm * extra_min
+            f_min = float(np.mean([opening_factors(n, rookie)[0] for n in range(1, max(1, round(extra_gp)) + 1)]))
+            w_minutes_sum += wm * extra_min / f_min
             mins_prior_w += wm * extra_gp
         # xFP: this season's shooting, passing, rebounding, steals and blocks move part of the way from what
         # happened toward what his opportunities were worth (fbb/xfp.py), by weights learned in
@@ -345,7 +456,6 @@ class ProjectionEngine:
                 obs_tot[k] = max(0.0, obs_tot[k] + beta * (exp[k] - act[k]) / xt.minutes * season_min)
         # Last season's closing games continue the decay behind everything from this season, until he has
         # played SEASON_ONLY_AFTER_GAMES games this season.
-        seen = max(len(games), int(cur.gp) if cur else 0)
         season_only = seen >= SEASON_ONLY_AFTER_GAMES and season_min > 0
         if season_only:
             carry = []
@@ -358,7 +468,6 @@ class ProjectionEngine:
             w_minutes_sum += wm * g.minutes
             mins_prior_w += wm
 
-        w_min = pre["feats"].get("w_min", 0.0)
         K = {k: 0.0 if season_only else self._prior_k(k, w_min) for k in RATE_STATS}
         rates = {k: (K[k] * prior_rates[k] + obs_tot[k]) / (K[k] + obs_min) for k in RATE_STATS}
         k_mpg = 0.0 if season_only else MINUTES_PRIOR_GAMES
@@ -389,15 +498,29 @@ class ProjectionEngine:
 
         self._feats[p.id] = pre["feats"] if pre["has_ml"] else None
         tracked_fp, xfp_fp = xfp_per_game(xt, self.fp_scoring) if xt and xt.gp else (None, None)
+        back_games, back_from = back[-1] if back and not games_missed else (0, 0)
+        # A rookie already playing his projected minutes has no minutes dip left to come; one playing as
+        # far below them as the dip goes still has all of it.
+        rookie_minutes = 0.0
+        if rookie:
+            rookie_minutes = 1.0
+            played = cur.minutes / cur.gp if cur and cur.gp else None
+            if played is None and games:
+                played = float(np.mean([g.minutes for g in games]))
+            if played is not None and ROOKIE_DIP_MINUTES > 0:
+                shortfall = 1.0 - played / max(prior_mpg, 1.0)
+                rookie_minutes = min(1.0, max(0.0, shortfall / ROOKIE_DIP_MINUTES))
 
         return PlayerProjection(
             player_id=p.id, name=p.name, pro_team=p.pro_team, positions=p.positions,
             mpg=mpg, availability=blend["avail"], games_out=0.0, per_game=per_game,
             fp_pg=fp, fp_sd=sd, preseason_fp_pg=self._fp(pre_pg), season_fp_pg=season_fp,
             recent_fp_pg=recent_fp, games_played=int(cur.gp) if cur else 0,
+            games_missed=games_missed, back_from=back_from, games_back=back_games if back_from else 0,
             sources=pre["sources"], in_season_weight=in_season_weight,
             carryover_games=len(carry) if CARRYOVER_RATE_WEIGHT or CARRYOVER_MINUTES_WEIGHT else 0,
             carryover_weight=carryover_weight, tracked_fp_pg=tracked_fp, xfp_pg=xfp_fp,
+            flags=["rookie"] if rookie else [], rookie_minutes_dip=rookie_minutes,
         )
 
     def explain(self, pr: PlayerProjection) -> list[dict]:

@@ -96,7 +96,7 @@ def roster_capacity(ctx: AnalysisContext, team_id: int, roster: list[str]) -> in
 
 
 def _ros_value(ctx: AnalysisContext, pid: str) -> float:
-    return ctx.value_pg[pid] * ctx.expected_games(pid)
+    return ctx.value_pg[pid] * ctx.output_games(pid)
 
 
 def pickup_pool(ctx: AnalysisContext) -> list[str]:
@@ -309,7 +309,7 @@ class TradeEvaluator:
         return {
             "player_id": pid, "name": pr.name, "pro_team": pr.pro_team, "positions": pr.positions,
             "fantasy_team_id": p.fantasy_team_id, "fp_pg": pr.fp_pg, "fp_sd": pr.fp_sd,
-            "ros_games": v["ros_games"], "ros_points": pr.fp_pg * v["ros_games"], "vorp": v["vorp"],
+            "ros_games": v["ros_games"], "ros_points": self.ctx.ros_points(pid), "vorp": v["vorp"],
             "injury_status": p.injury_status, "games_out": pr.games_out,
             "season_fp_pg": pr.season_fp_pg, "recent_fp_pg": pr.recent_fp_pg,
         }

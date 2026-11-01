@@ -5,8 +5,12 @@ would have made (the ML model is refit on earlier seasons only, then blended wit
 learned weights, so nothing leaks from the season being tested), feed in his first N games through the
 engine's own in-season update, and compare the projected fantasy points per game with his actual
 average over the rest of that season. Like the app, the update also sees the closing games of the season
-before (his games among his team's last 20). Settings are the half-lives, prior strength and the weight
-of last season's closing games in fbb/projections.py; the first row is what the app uses now.
+before (his games among his team's last 20), and his team's schedule, so it knows which games he missed.
+As in the app's weekly windows, each game left is projected at the player's level times its opening dip
+(below 1 in his first games of the season) and, when he has just come back from an absence, its return
+dip. Settings are the half-lives, prior strength, the weight of last season's closing games and the
+opening and return dips in fbb/projections.py; the first row is what the app uses now. Bias is total
+projected over total actual, minus 1.
 
 Usage: python -m scripts.backtest_recency --season 2026 --season 2025
 """
@@ -42,6 +46,10 @@ SETTINGS = {  # changes to the settings in fbb/projections.py; the first row is 
     "stronger prior": {"PRIOR_STRENGTH_SCALE": 2.0},
     "no recency weighting": {"RATE_HALF_LIFE_GAMES": 1e9, "MINUTES_HALF_LIFE_GAMES": 1e9,
                              "CARRYOVER_RATE_WEIGHT": 0.0, "CARRYOVER_MINUTES_WEIGHT": 0.0},
+    "no opening dip": {"OPENING_DIP_MINUTES": 0.0, "OPENING_DIP_RATE": 0.0, "ROOKIE_DIP_MINUTES": 0.0,
+                       "ROOKIE_DIP_RATE": 0.0},
+    "no return dip": {"RETURN_DIP": 0.0},
+    "no rookie dip": {"ROOKIE_DIP_MINUTES": 0.0, "ROOKIE_DIP_RATE": 0.0},
 }
 
 
@@ -101,7 +109,12 @@ def preseason(season: int, pids: set[str]) -> dict[str, dict]:
 
 def run(season: int) -> None:
     ds = load_history()
-    logs = {pid: g for pid, g in season_logs(season).items() if len(g) >= MIN_GAMES}
+    all_logs = season_logs(season)
+    logs = {pid: g for pid, g in all_logs.items() if len(g) >= MIN_GAMES}
+    games_by_day: dict[int, set[str]] = {}  # each team's game days, from its players' games
+    for games in all_logs.values():
+        for g in games:
+            games_by_day.setdefault(g["period"], set()).add(g["team"])
     players = {}
     for pid in logs:
         espn = ds.espn.get((pid, season))
@@ -109,7 +122,8 @@ def run(season: int) -> None:
                               history=[h for h in ds.lines.get(pid, []) if h.season < season],
                               experts=[espn] if espn else [], adp=ds.adp.get((pid, season)))
     snap = LeagueSnapshot(settings=LeagueSettings(name="backtest", season=season), teams=[], players=players,
-                          schedule=ProSchedule(season=season), current_period=10_000)  # every game is over
+                          schedule=ProSchedule(season=season, games={d: sorted(t) for d, t in games_by_day.items()}),
+                          current_period=10_000)  # every game is over
     engine = P.ProjectionEngine(snap)  # loads the learned prior strengths
     pre = preseason(season, set(players))
     logs = {pid: g for pid, g in logs.items() if pid in pre}
@@ -118,23 +132,39 @@ def run(season: int) -> None:
 
     print(f"\n{season - 1}-{str(season)[2:]}: {len(players)} players with {MIN_GAMES}+ games, "
           f"{sum(1 for pid in logs if closing.get(pid))} with closing games from {season - 2}-{str(season - 1)[2:]}")
-    print(f"{'settings':<22}{'mean error':>11}" + "".join(f"{f'after {c}':>10}" for c in CUTOFFS))
+    print(f"{'settings':<22}{'mean error':>11}" + "".join(f"{f'after {c}':>10}" for c in CUTOFFS) + f"{'bias':>8}")
     saved = {k: getattr(P, k) for changes in SETTINGS.values() for k in changes}
+    biases = {}
     for name, changes in SETTINGS.items():
         for k, v in {**saved, **changes}.items():
             setattr(P, k, v)
-        errors = []
+        errors, bias = [], []
         for c in CUTOFFS:
-            err = []
+            err, proj_tot, act_tot = [], 0.0, 0.0
             for pid, games in logs.items():
                 if len(games) - c < MIN_LEFT:
                     continue
                 seen = [GameLog(**g) for g in closing.get(pid, []) + games[:c]]
                 actual = statistics.fmean(fp(g["stats"]) for g in games[c:])
-                err.append(abs(engine._in_season(players[pid].model_copy(update={"recent_games": seen}), pre[pid]).fp_pg
-                               - actual))
+                player = players[pid].model_copy(update={"recent_games": seen})
+                pr = engine._in_season(player, pre[pid])
+                rookie = "rookie" in pr.flags
+                back = engine._absences(player, seen[len(seen) - c:], c)[0] if c else []
+                j, missed = back[-1] if back else (0, 0)
+                proj = pr.fp_pg * statistics.fmean(
+                    P.opening_factor(n, rookie, pr.rookie_minutes_dip) * P.return_factor(j + n - c, missed)
+                    for n in range(c + 1, len(games) + 1))
+                err.append(abs(proj - actual))
+                proj_tot += proj * (len(games) - c)
+                act_tot += actual * (len(games) - c)
             errors.append(statistics.fmean(err))
-        print(f"{name:<22}{statistics.fmean(errors):>11.3f}" + "".join(f"{e:>10.2f}" for e in errors))
+            bias.append(proj_tot / act_tot - 1)
+        biases[name] = bias
+        print(f"{name:<22}{statistics.fmean(errors):>11.3f}" + "".join(f"{e:>10.2f}" for e in errors)
+              + f"{statistics.fmean(bias):>8.1%}")
+    print("bias by games seen")
+    for name, bias in biases.items():
+        print(f"{name:<22}{'':>11}" + "".join(f"{b:>10.1%}" for b in bias))
     for k, v in saved.items():
         setattr(P, k, v)
 

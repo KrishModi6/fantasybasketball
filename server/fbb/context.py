@@ -15,7 +15,7 @@ import numpy as np
 
 from .lineup import SlotModel, solve_day
 from .models import LeagueSnapshot
-from .projections import PlayerProjection, ProjectionEngine
+from .projections import PlayerProjection, ProjectionEngine, opening_factor, return_factor
 from .schedule import game_state, period_for_date, period_to_matchup, remaining_days
 from .valuation import CategoryValuer
 
@@ -29,6 +29,12 @@ IR_STATUSES = ("OUT", "INJURY_RESERVE")  # statuses ESPN lets a team put in an I
 # 70% of the time; with them, 80% (scripts/backtest_sims.py: 192 synthetic leagues, 2023-24 to 2025-26).
 PLAYER_WEEK_CV = 0.10
 TEAM_WEEK_CV = 0.06
+# Except early in a season, when rosters don't run hot or cold together: with the full swing from the opener,
+# 80% ranges held 90% of week-1 scores and 86% of week 2's, and win odds in weeks 1-3 were too timid
+# (calibration slope 1.33). So the roster-wide swing grows in: TEAM_WEEK_CV x (1 - exp(-g / TEAM_WEEK_RAMP_GAMES)),
+# g = the league's games per team before the week, nearly full by week 8. Ranges then held 83% and 79%, the
+# slope was 1.15 and weekly log loss 0.0009 lower; ramps of 4 and 12 games did worse (96 local synthetic leagues).
+TEAM_WEEK_RAMP_GAMES = 8.0
 
 # A player who isn't hurt rarely misses his next game or two: the injuries that would keep him out are mostly
 # on the report already. Games further off carry more of the season's injury risk. So a healthy player's
@@ -40,6 +46,14 @@ TEAM_WEEK_CV = 0.06
 MISS_NEXT_GAME = 0.30
 MISS_NEXT_FLOOR = 0.0
 MISS_RAMP_GAMES = 9.0
+# Healthier still at the season's start, with the injury report fresh from camp: healthy players missed their
+# team's 2nd to 6th games 15-25% less often than the ramp says, and in 2026-27 all 90 rostered players ESPN listed
+# as active before their team's opener played it (the ramp alone expected 6.9 to sit, this 2.8). So in his
+# team's n-th game of the season (0 = the opener) a healthy player's chance of missing is scaled by
+# 1 - SEASON_START_MISS_CUT x exp(-n / SEASON_START_GAMES).
+# Fitted on 2023-24 to 2025-26 game logs; without it, synthetic leagues started 3% too few player-games in week 1.
+SEASON_START_MISS_CUT = 0.6
+SEASON_START_GAMES = 2.0
 
 
 @dataclass
@@ -84,6 +98,9 @@ class AnalysisContext:
             self.mask[pid] = self.slots.mask_for(p.eligible_slots, p.positions)
             self.value_pg[pid] = pr.fp_pg if self.is_points else self.cat_valuer.value_pg(pid)
         self._pplay: dict[str, dict[int, float]] = {}
+        self._form: dict[str, dict[int, float]] = {}
+        self._team_played: dict[str, int] = {}
+        self._league_gp: float | None = None
         self._rostered = {e.player_id for t in snapshot.teams for e in t.roster}
         self._first_day: dict[str, int] = {}
 
@@ -102,11 +119,16 @@ class AnalysisContext:
         g_out = pr.games_out
         full_out = int(math.floor(g_out))
         frac = g_out - full_out
+        team_gp = self.team_games_played(p.pro_team)
         for k, d in enumerate(days):
             if k < full_out:
                 out[d] = 0.0
                 continue
-            avail = 1 - (miss - (miss - near) * math.exp(-k / MISS_RAMP_GAMES) if g_out == 0 else miss)
+            if g_out == 0:
+                fresh = 1 - SEASON_START_MISS_CUT * math.exp(-(team_gp + k) / SEASON_START_GAMES)
+                avail = 1 - (miss - (miss - near) * math.exp(-k / MISS_RAMP_GAMES)) * fresh
+            else:
+                avail = 1 - miss
             out[d] = avail * (1 - frac) if k == full_out and frac > 0 else avail
         # Once today's game has started, what he has scored is already in the matchup totals, so only the
         # part of the game he hasn't played yet is left, and nothing once it's over: a player who sat or played
@@ -122,6 +144,47 @@ class AnalysisContext:
                     out[today] *= max(0.0, 1 - played / max(pr.mpg, 1.0))
         self._pplay[pid] = out
         return out
+
+    def form(self, pid: str) -> dict[int, float]:
+        """period -> his expected output that day relative to his projection: below 1 in his first games of
+        the season and his first games back from an absence (the opening and return dips in fbb/projections.py,
+        the opening dip deeper and longer for a rookie), counting from the games he has played and after those
+        he's expected to miss. Days not listed are 1."""
+        if pid in self._form:
+            return self._form[pid]
+        pr = self.proj[pid]
+        rookie = "rookie" in pr.flags
+        days = sorted(self.team_days.get(self.s.players[pid].pro_team, ()))
+        full_out = int(math.floor(pr.games_out))
+        # The absence he comes back from: the one he's in (games missed so far and still to miss), else his last.
+        away = pr.games_missed + full_out
+        missed, back = (away, 0) if away else (pr.back_from, pr.games_back)
+        out: dict[int, float] = {}
+        for k, d in enumerate(days[full_out:]):
+            f = (opening_factor(pr.games_played + k + 1, rookie, pr.rookie_minutes_dip)
+                 * return_factor(back + k + 1, missed))
+            if f > 0.999:
+                break
+            out[d] = f
+        self._form[pid] = out
+        return out
+
+    def team_games_played(self, team: str) -> int:
+        """A pro team's games this season before today."""
+        if team not in self._team_played:
+            self._team_played[team] = sum(1 for p, teams in self.s.schedule.games.items()
+                                          if p < self.s.current_period and team in teams)
+        return self._team_played[team]
+
+    def team_week_cv(self) -> float:
+        """The roster-wide week swing (TEAM_WEEK_CV), smaller in the season's first weeks."""
+        if TEAM_WEEK_RAMP_GAMES <= 0:
+            return TEAM_WEEK_CV
+        if self._league_gp is None:  # the league's games per team before today
+            games = self.s.schedule.games
+            teams = len({t for ts in games.values() for t in ts}) or 30
+            self._league_gp = sum(len(ts) for p, ts in games.items() if p < self.s.current_period) / teams
+        return TEAM_WEEK_CV * (1 - math.exp(-self._league_gp / TEAM_WEEK_RAMP_GAMES))
 
     def today_state(self, team: str) -> str | None:
         """"upcoming", "live" or "final" for an NBA team's game today, as of the snapshot (None: can't tell)."""
@@ -190,6 +253,12 @@ class AnalysisContext:
             return sum(pp.values())
         return sum(pp.get(d, 0.0) for d in days)
 
+    def output_games(self, pid: str) -> float:
+        """His expected games left, each counted at his form that day (fewer than expected_games in his first
+        games of the season): rest-of-season value is value per game times this."""
+        form = self.form(pid)
+        return sum(p * form.get(d, 1.0) for d, p in self.p_play(pid).items())
+
     # -- the core simulation ------------------------------------------------------
 
     def project_window(self, roster: list[str], days: list[int] | None = None, collect_days: bool = False,
@@ -220,6 +289,7 @@ class AnalysisContext:
         val = {pid: self.value_pg[pid] for pid in roster}
         fp = {pid: self.proj[pid].fp_pg for pid in roster}
         sd = {pid: self.proj[pid].fp_sd for pid in roster}
+        form = {pid: self.form(pid) for pid in roster}
         n_slots = self.slots.n
         memo: dict[tuple, dict[int, int]] = {}
         index = {pid: i for i, pid in enumerate(roster)}
@@ -230,7 +300,7 @@ class AnalysisContext:
             for pid in roster:
                 prob = pp[pid].get(d, 0.0)
                 if prob > 0:
-                    cands.append((index[pid], val[pid] * prob, self.mask[pid]))
+                    cands.append((index[pid], val[pid] * form[pid].get(d, 1.0) * prob, self.mask[pid]))
             if not cands:
                 if n_slots:
                     res.empty_slot_games += 0  # no games: not a lineup failure
@@ -266,8 +336,9 @@ class AnalysisContext:
                 if q > 0:
                     contributors.append((pid, q))
             for pid, q in contributors:
-                m = q * fp[pid]
-                v = q * sd[pid] ** 2 + q * (1 - q) * fp[pid] ** 2
+                f = form[pid].get(d, 1.0)
+                m = q * fp[pid] * f
+                v = q * (sd[pid] * f) ** 2 + q * (1 - q) * (fp[pid] * f) ** 2
                 day_mean += m
                 res.mean += m
                 res.var += v
@@ -275,13 +346,13 @@ class AnalysisContext:
                 bym[1] += v
                 week_pts[(pid, mp)] = week_pts.get((pid, mp), 0.0) + m
                 res.starts[pid] = res.starts.get(pid, 0.0) + q
-                res.points[pid] = res.points.get(pid, 0.0) + q * (fp[pid] if self.is_points else val[pid])
+                res.points[pid] = res.points.get(pid, 0.0) + q * f * (fp[pid] if self.is_points else val[pid])
                 if track_stats:
                     pg = self.proj[pid].per_game
                     smp = res.stats_by_mp.setdefault(mp, {})
                     svar = res.stat_var_by_mp.setdefault(mp, {})
                     for stat in CATEGORY_STATS:
-                        x = pg.get(stat, 0.0)
+                        x = pg.get(stat, 0.0) * f
                         if x:
                             smp[stat] = smp.get(stat, 0.0) + q * x
                             # Poisson-ish game variance plus the play/no-play Bernoulli term.
@@ -301,9 +372,10 @@ class AnalysisContext:
         for (pid, mp), m in week_pts.items():
             res.by_mp[mp][1] += (PLAYER_WEEK_CV * m) ** 2
             res.var += (PLAYER_WEEK_CV * m) ** 2
+        team_cv = self.team_week_cv()
         for bym in res.by_mp.values():
-            res.var += (TEAM_WEEK_CV * bym[0]) ** 2
-            bym[1] += (TEAM_WEEK_CV * bym[0]) ** 2
+            res.var += (team_cv * bym[0]) ** 2
+            bym[1] += (team_cv * bym[0]) ** 2
         if not track_stats:
             # Totals of counting stats from started games (used for explanations).
             for pid, q in res.starts.items():
@@ -334,7 +406,7 @@ class AnalysisContext:
         return mps
 
     def ros_points(self, pid: str) -> float:
-        return self.proj[pid].fp_pg * self.expected_games(pid)
+        return self.proj[pid].fp_pg * self.output_games(pid)
 
     def team_roster(self, team_id: int, include_ir: bool = True) -> list[str]:
         t = self.s.team(team_id)

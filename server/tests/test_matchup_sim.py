@@ -59,6 +59,7 @@ def test_points_matchup_probabilities_and_consistency():
 
 def test_week_level_swings_widen_both_weekly_spreads(monkeypatch):
     """The simulator and the analytic weekly window carry the same week-level swings (fbb.context)."""
+    monkeypatch.setattr(context, "TEAM_WEEK_RAMP_GAMES", 0.0)  # the whole roster-wide swing, as mid-season
     ctx = _ctx()
     mp = 2
     roster, days = ctx.team_roster(1), ctx.matchup_days(mp)

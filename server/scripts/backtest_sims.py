@@ -153,6 +153,30 @@ def absence_table(season: int) -> list[np.ndarray]:
     return [np.zeros(1)] + [np.array(rem[k] or [0]) for k in range(1, MAX_MISSED + 1)]
 
 
+def opening_absences(season: int) -> np.ndarray:
+    """Team games missed from the season's start by every player who missed his team's opener, in the other
+    seasons' game logs. They run far longer than absences that start mid-season (about 15 games on average,
+    against 3 or 4 after one game missed): offseason surgeries and injuries from camp."""
+    from fbb.history import CACHE_DIR
+
+    spells: list[int] = []
+    for other in LOG_SEASONS:
+        path = CACHE_DIR / f"game_logs_{other}_full.json"
+        if other == season or not path.exists():
+            continue
+        logs = json.loads(path.read_text())
+        team_days: dict[str, set[int]] = {}
+        for games in logs.values():
+            for g in games:
+                team_days.setdefault(g["team"], set()).add(g["period"])
+        for games in logs.values():
+            first = min(games, key=lambda g: g["period"])
+            spell = sum(1 for d in team_days[first["team"]] if d < first["period"])
+            if spell:
+                spells.append(spell)
+    return np.array(spells or [0])
+
+
 def injury_status(games_out: float) -> str:
     """The ESPN status that goes with an expected absence (it sets team minutes and IR moves)."""
     if games_out >= 6:
@@ -215,6 +239,7 @@ def prepare(season: int, tag: str = "", live: bool = False) -> Path | None:
     pre = preseason(season, pids)
     pids = sorted(p for p in pids if p in pre)
     absence = absence_table(season)
+    opening = opening_absences(season)
 
     def season_team(pid: str) -> str:
         if logs.get(pid):
@@ -250,6 +275,15 @@ def prepare(season: int, tag: str = "", live: bool = False) -> Path | None:
             status[pid] = injury_status(float(rem.mean())) if missed else "ACTIVE"
             out[pid] = 0.0 if not missed else (float(rem.mean()) if status[pid] == "INJURY_RESERVE"
                                                else float(np.minimum(rem, week_games).mean()))
+            # Before his team's opener nobody has missed a game yet, but the injury report already says who will.
+            # A player who missed the opener stands for one it listed: out from the start, as long as such
+            # absences lasted in the other seasons. Only this week's games count, since nothing reads the
+            # absence's length before week 2's moves. Without this, week 1's players out from the start were
+            # simulated to play 2,740 games in synthetic leagues and played 263: 4% too many starts.
+            tdays = sorted(team_days.get(team, ()))
+            if tdays and tdays[0] >= start and tdays[0] not in {g["period"] for g in logs.get(pid, [])}:
+                status[pid] = injury_status(float(opening.mean()))
+                out[pid] = float(np.minimum(opening, week_games).mean())
             stats: dict[str, float] = {}
             for g in seen:
                 for k, v in g["stats"].items():
@@ -272,6 +306,8 @@ def prepare(season: int, tag: str = "", live: bool = False) -> Path | None:
         proj_out[mp] = {pid: {
             "team": players[pid].pro_team, "status": players[pid].injury_status, "mpg": pr.mpg,
             "availability": pr.availability, "games_out": pr.games_out, "fp_pg": pr.fp_pg, "fp_sd": pr.fp_sd,
+            "gp": pr.games_played, "missed": pr.games_missed, "back_from": pr.back_from, "back": pr.games_back,
+            "rookie": "rookie" in pr.flags, "rookie_minutes_dip": pr.rookie_minutes_dip,
             "per_game": {k: round(v, 4) for k, v in pr.per_game.items()},
         } for pid, pr in proj.items()}
         print(f"  {season} week {mp}: projected {len(proj)} players", flush=True)
@@ -322,7 +358,11 @@ class Season:
                 player_id=pid, name=self.info[pid]["name"], pro_team=r["team"], positions=self.info[pid]["positions"],
                 mpg=r["mpg"], availability=r["availability"], games_out=r["games_out"], per_game=r["per_game"],
                 fp_pg=r["fp_pg"], fp_sd=r["fp_sd"], preseason_fp_pg=r["fp_pg"], season_fp_pg=None,
-                recent_fp_pg=None, games_played=0) for pid, r in rows.items()}
+                # Inputs prepared before the opening and return dips have no games played or absences: no dips.
+                recent_fp_pg=None, games_played=r.get("gp", 10**6), games_missed=r.get("missed", 0),
+                back_from=r.get("back_from", 0), games_back=r.get("back", 0),
+                flags=["rookie"] if r.get("rookie") else [], rookie_minutes_dip=r.get("rookie_minutes_dip", 1.0))
+                for pid, r in rows.items()}
             self.players[mp] = {pid: Player(id=pid, name=self.info[pid]["name"], pro_team=r["team"],
                                             positions=self.info[pid]["positions"], injury_status=r["status"])
                                 for pid, r in rows.items()}

@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import itertools
+import math
 import random
 from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
+import fbb.context as C
+import fbb.projections as P
 from fbb.baseline import FALLBACK_LEAGUE_RATES, RATE_STATS, aging_factor, per_game_from_rates, sps_projection
 from fbb.connectors.espn import EASTERN, parse_settings
 from fbb.connectors.fileimport import normalize_name, parse_upload
-from fbb.context import MISS_NEXT_FLOOR, MISS_NEXT_GAME, AnalysisContext
+from fbb.context import MISS_NEXT_FLOOR, MISS_NEXT_GAME, SEASON_START_GAMES, SEASON_START_MISS_CUT, AnalysisContext
 from fbb.enrich import enrich_players
 from fbb.improve import add_drop_moves, streaming_moves
 from fbb.lineup import SlotModel, solve_day
@@ -152,14 +155,176 @@ def test_injury_reduces_games_not_rates():
 
 def test_healthy_player_rarely_misses_his_next_game():
     """Availability is a season's worth of misses; the injuries behind his next few mostly haven't happened."""
-    ctx = AnalysisContext(make_snapshot())
+    snap = make_snapshot()
+    snap.current_period = 41  # mid-season: his team has played about 20 games
+    ctx = AnalysisContext(snap)
     pr = ctx.proj["1"]
     pp = [v for _, v in sorted(ctx.p_play("1").items())]
     assert pr.availability < 0.99
     miss = 1 - pr.availability
-    assert pp[0] == pytest.approx(1 - min(miss, MISS_NEXT_FLOOR + MISS_NEXT_GAME * miss))
+    assert pp[0] == pytest.approx(1 - min(miss, MISS_NEXT_FLOOR + MISS_NEXT_GAME * miss), abs=1e-4)
     assert pp[0] > pp[10] > pp[-1]
     assert pp[-1] == pytest.approx(pr.availability, abs=0.005)
+
+
+def test_healthy_players_miss_even_less_at_the_seasons_start():
+    """Fresh from camp: in his team's first games of the season the ramp's chance of missing is cut, fading."""
+    opener = AnalysisContext(make_snapshot())
+    pr = opener.proj["1"]
+    assert opener.team_games_played(pr.pro_team) == 0
+    m = 1 - pr.availability
+    near = min(m, MISS_NEXT_FLOOR + MISS_NEXT_GAME * m)
+    pp = [v for _, v in sorted(opener.p_play("1").items())]
+    for k in (0, 1, 3, 10):
+        ramp = m - (m - near) * math.exp(-k / C.MISS_RAMP_GAMES)
+        assert pp[k] == pytest.approx(1 - ramp * (1 - SEASON_START_MISS_CUT * math.exp(-k / SEASON_START_GAMES)))
+    later = make_snapshot()
+    later.current_period = 41
+    assert pp[0] > [v for _, v in sorted(AnalysisContext(later, opener.proj).p_play("1").items())][0]
+
+
+def test_roster_week_swing_grows_in_over_the_season():
+    """No roster-wide week swing at the opener; it grows toward TEAM_WEEK_CV with the league's games played."""
+    opener = AnalysisContext(make_snapshot())
+    assert opener.team_week_cv() == 0.0
+    later = make_snapshot()
+    later.current_period = 41
+    ctx = AnalysisContext(later, opener.proj)
+    teams = {t for ts in later.schedule.games.values() for t in ts}
+    per_team = sum(len(t) for p, t in later.schedule.games.items() if p < 41) / len(teams)
+    assert ctx.team_week_cv() == pytest.approx(C.TEAM_WEEK_CV * (1 - math.exp(-per_team / C.TEAM_WEEK_RAMP_GAMES)))
+    assert 0.9 * C.TEAM_WEEK_CV < ctx.team_week_cv() < C.TEAM_WEEK_CV
+    roster = [pid for pid in ctx.proj][:10]
+    days = opener.matchup_days(1)
+    narrow = opener.project_window(roster, days)
+    C_ramp, C.TEAM_WEEK_RAMP_GAMES = C.TEAM_WEEK_RAMP_GAMES, 0.0
+    try:
+        wide = opener.project_window(roster, days)
+    finally:
+        C.TEAM_WEEK_RAMP_GAMES = C_ramp
+    assert narrow.mean == pytest.approx(wide.mean)
+    assert narrow.var == pytest.approx(wide.var - (C.TEAM_WEEK_CV * wide.mean) ** 2)
+
+
+def test_first_games_of_the_season_are_projected_below_his_level():
+    """The opening dip: a player's first games fall short of his settled level, fading game by game."""
+    f = [P.opening_factor(n) for n in range(1, 60)]
+    assert f[0] == pytest.approx((1 - P.OPENING_DIP_MINUTES) * (1 - P.OPENING_DIP_RATE))
+    assert all(a < b for a, b in zip(f, f[1:])) and f[-1] == pytest.approx(1.0, abs=1e-3)
+
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    form = [v for _, v in sorted(ctx.form("1").items())]
+    assert form[0] == pytest.approx(f[0]) and form[3] == pytest.approx(f[3])
+    days = ctx.matchup_days(1)
+    opening = ctx.project_window(["1"], days)
+    for pr in ctx.proj.values():
+        pr.games_played = 60  # settled in: no dip
+    settled = AnalysisContext(snap, ctx.proj)
+    assert settled.form("1") == {}
+    assert opening.mean < settled.project_window(["1"], days).mean
+
+
+def test_a_rookie_has_a_deeper_longer_opening_dip():
+    f, rookie = [P.opening_factor(n) for n in range(1, 60)], [P.opening_factor(n, True) for n in range(1, 60)]
+    assert rookie[0] == pytest.approx(f[0] * (1 - P.ROOKIE_DIP_MINUTES) * (1 - P.ROOKIE_DIP_RATE))
+    assert all(r < g for r, g in zip(rookie, f)) and all(a < b for a, b in zip(rookie, rookie[1:]))
+    assert rookie[9] < 0.9 < f[3] and rookie[-1] == pytest.approx(1.0, abs=1e-3)
+
+    snap = make_snapshot()
+    snap.players["1"].history = []  # no NBA minutes yet
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    assert "rookie" in ctx.proj["1"].flags and "rookie" not in ctx.proj["2"].flags
+    form = [v for _, v in sorted(ctx.form("1").items())]
+    assert form[0] == pytest.approx(rookie[0]) and form[9] == pytest.approx(rookie[9])
+
+
+def test_rest_of_season_value_counts_his_first_games_at_their_dip():
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    assert ctx.output_games("1") < ctx.expected_games("1")
+    values = player_values(ctx)["1"]
+    assert values["ros_value"] == pytest.approx(ctx.value_pg["1"] * ctx.output_games("1"))
+    for pr in ctx.proj.values():
+        pr.games_played = 60
+    settled = AnalysisContext(snap, ctx.proj)
+    assert settled.output_games("1") == pytest.approx(settled.expected_games("1"))
+
+
+def test_opening_dip_waits_for_an_injured_player_to_return():
+    snap = make_snapshot(injured={"1": "OUT"})
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    out = int(ctx.proj["1"].games_out)
+    days = sorted(ctx.team_days[snap.players["1"].pro_team])
+    assert out >= 1 and min(ctx.form("1")) == days[out]  # his first game back is his first game
+    # both dips: his first game of the season, after missing his team's first `out` games
+    assert ctx.form("1")[days[out]] == pytest.approx(P.opening_factor(1) * P.return_factor(1, out))
+
+
+def test_return_dip_is_deeper_and_longer_after_a_longer_absence():
+    assert P.return_factor(1, 0) == 1.0
+    assert P.return_factor(1, 1) > P.return_factor(1, 4) > P.return_factor(1, 20)
+    assert P.return_factor(3, 20) < P.return_factor(3, 2)
+    for missed in (1, 4, 20):
+        f = [P.return_factor(j, missed) for j in range(1, 60)]
+        assert f[0] == pytest.approx(1 - P.RETURN_DIP * math.log1p(missed)) and f[0] < f[1]
+        assert all(a <= b for a, b in zip(f, f[1:])) and f[-1] == pytest.approx(1.0, abs=1e-3)
+
+
+def _season_games(snap, pid: str, played: list[int], minutes: dict[int, float] | None = None) -> list[int]:
+    """Give a player games on the listed team games of this season so far (indices into his team's game days)."""
+    p = snap.players[pid]
+    days = sorted(d for d, teams in snap.schedule.games.items() if p.pro_team in teams and d < snap.current_period)
+    games = []
+    for i in played:
+        m = (minutes or {}).get(i, 30.0)
+        games.append(GameLog(season=2027, period=days[i], team=p.pro_team, minutes=m,
+                             stats=make_line(2027, 1, m, 1.0, p.pro_team).stats))
+    stats: dict[str, float] = {}
+    for g in games:
+        for k, v in g.stats.items():
+            stats[k] = stats.get(k, 0.0) + v
+    p.recent_games = games
+    p.current = SeasonLine(season=2027, team=p.pro_team, gp=len(games), minutes=sum(g.minutes for g in games),
+                           stats=stats)
+    return days
+
+
+def test_return_dip_follows_his_absences():
+    """His first games back from an absence are projected below his level, by how many team games he missed."""
+    snap = make_snapshot()
+    snap.current_period = 41
+    days = _season_games(snap, "1", [])
+    n = len(days)
+    # Played his team's first 5 games, missed the next n - 7, back for the last two.
+    _season_games(snap, "1", [0, 1, 2, 3, 4, n - 2, n - 1])
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    pr = ctx.proj["1"]
+    assert (pr.games_missed, pr.back_from, pr.games_back) == (0, n - 7, 2)
+    first = min(ctx.form("1"))
+    assert ctx.form("1")[first] == pytest.approx(P.opening_factor(8) * P.return_factor(3, n - 7))
+    # Out for his team's last 3 games (and ESPN says out for 4 more): his first game back follows all 7.
+    snap = make_snapshot(injured={"1": "OUT"})
+    snap.current_period = 41
+    _season_games(snap, "1", list(range(n - 3)))
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    pr = ctx.proj["1"]
+    out = int(pr.games_out)
+    assert pr.games_missed == 3 and out >= 1
+    upcoming = sorted(ctx.team_days[snap.players["1"].pro_team])
+    assert ctx.form("1")[upcoming[out]] == pytest.approx(P.opening_factor(n - 2) * P.return_factor(1, 3 + out))
+
+
+def test_update_counts_return_games_minutes_scaled_up(monkeypatch):
+    """A short first game back doesn't drag his minutes down for the games after it."""
+    snap = make_snapshot()
+    snap.current_period = 41
+    n = len(_season_games(snap, "1", []))
+    _season_games(snap, "1", [*range(10), n - 1], minutes={n - 1: 22.0})
+    with_dip = ProjectionEngine(snap, model=None).project_all()["1"].mpg
+    monkeypatch.setattr(P, "RETURN_DIP", 0.0)
+    without = ProjectionEngine(snap, model=None).project_all()["1"].mpg
+    assert with_dip > without
 
 
 def test_teammates_minutes_come_from_their_own_games():
@@ -190,11 +355,13 @@ BIG_GAME = {"PTS": 42, "REB": 12, "AST": 9, "STL": 2, "BLK": 1, "TO": 2, "FGM": 
             "3PM": 4, "3PA": 9}
 
 
-def _with_games(seasons: list[int]):
+def _with_games(seasons: list[int], rookie: bool = False, minutes: float = 36):
     snap = make_snapshot()
     snap.current_period = 40  # every logged game is over
     p = snap.players["1"]
-    p.recent_games = [GameLog(season=s, period=160 + i if s == 2026 else 1 + i, team=p.pro_team, minutes=36,
+    if rookie:
+        p.history = []
+    p.recent_games = [GameLog(season=s, period=160 + i if s == 2026 else 1 + i, team=p.pro_team, minutes=minutes,
                               stats=BIG_GAME) for i, s in enumerate(seasons)]
     return ProjectionEngine(snap, model=None).project_all()["1"]
 
@@ -303,6 +470,35 @@ def test_last_seasons_closing_games_count_before_this_season_starts():
     assert pr.fp_pg > base.fp_pg
     assert pr.carryover_games == 10 and pr.carryover_weight > 0 and pr.in_season_weight == 0
     assert pr.recent_fp_pg == pytest.approx(ScoringSettings().fantasy_points(BIG_GAME))
+
+
+def test_first_games_minutes_count_scaled_up_by_the_opening_dip(monkeypatch):
+    """His first games' minutes count at what they'd be once he settles in; per-minute output as it happened."""
+    dipped, late = _with_games([2027] * 3), _with_games([2027] * 40)
+    monkeypatch.setattr(P, "OPENING_DIP_MINUTES", 0.0)
+    face = _with_games([2027] * 3)
+    assert dipped.mpg > face.mpg
+    assert dipped.fp_pg / dipped.mpg == pytest.approx(face.fp_pg / face.mpg)
+    assert _with_games([2027] * 40).mpg == pytest.approx(late.mpg, rel=0.005)  # long settled in: hardly any
+
+
+def test_a_rookies_first_minutes_count_scaled_up_by_his_own_dip(monkeypatch):
+    dipped = _with_games([2027] * 3, rookie=True)
+    assert "rookie" in dipped.flags and "rookie" not in _with_games([2027] * 3).flags
+    monkeypatch.setattr(P, "ROOKIE_DIP_MINUTES", 0.0)
+    face = _with_games([2027] * 3, rookie=True)
+    assert dipped.mpg > face.mpg
+    assert dipped.fp_pg / dipped.mpg == pytest.approx(face.fp_pg / face.mpg)
+
+
+def test_a_rookie_already_playing_his_minutes_has_no_minutes_dip_left():
+    """The windows keep a rookie's minutes dip only while his minutes so far fall short of his projection."""
+    assert _with_games([], rookie=True).rookie_minutes_dip == 1.0  # before his first game: all of it
+    assert _with_games([2027] * 3, rookie=True, minutes=4).rookie_minutes_dip == 1.0
+    full = _with_games([2027] * 3, rookie=True)  # 36 minutes a game, past any rookie's projection
+    assert full.rookie_minutes_dip == 0.0 and _with_games([2027] * 3).rookie_minutes_dip == 0.0
+    m, r = P.opening_factors(5, True, full.rookie_minutes_dip)
+    assert m == pytest.approx(P.opening_factors(5)[0]) and r < P.opening_factors(5)[1]  # output per minute still dips
 
 
 def test_this_seasons_games_count_more_than_last_seasons():
