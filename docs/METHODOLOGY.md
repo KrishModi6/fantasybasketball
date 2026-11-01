@@ -369,6 +369,7 @@ Each change, tested alone and in combination:
 | In the 80% range, growing in | **0.83** | **0.79** | **0.78** | **0.80** | 0.79 |
 
   The win-odds calibration slope went from 1.33 to 1.15 in weeks 1–3 and from 1.03 to 0.97 in weeks 4–6, and stayed 0.89 after. Weekly log loss fell 0.5567 → 0.5558 (paired −0.0009, 95% interval −0.0016 to −0.0003), Brier 0.1881 → 0.1879, and week-1 Brier 0.160 → 0.158. Playoff and title odds didn't move. A 4-game ramp did less (−0.0005), and a 12-game one was worse than 8 (+0.0006, 95% +0.0001 to +0.0012), with weeks 4–19 too sure. Week 1 is still a little wide (83%): the projected game-to-game spread runs high early in a season (§8).
+- **The rookie dip (§1.5.2) on top**, on the same 96 league-seasons. Like the return dip it changes projections, and so drafts and pickups. 80% ranges held 0.82 of real week-1 scores, 0.78 of week 2's and week 3's, and 0.79 after (0.83, 0.79, 0.78 and 0.79 without it). The win-odds calibration slope went from 1.14 to 1.06 in weeks 1–3, 0.97 to 0.91 in weeks 4–6 and 0.88 to 0.92 after. Weekly log loss 0.5558 → 0.5523 (−0.0035, 95% interval −0.013 to +0.007 by league-season), playoff Brier 0.1356 → 0.1378 (+0.002, −0.007 to +0.011): within noise.
 
 The same check runs every morning on this season's finished weeks (`scripts/daily_sims.py`, docs/AWS.md §4).
 
