@@ -7,12 +7,14 @@ import math
 import random
 from datetime import datetime, time, timedelta, timezone
 
+import numpy as np
 import pytest
 
 import fbb.context as C
 import fbb.projections as P
 from fbb.baseline import FALLBACK_LEAGUE_RATES, RATE_STATS, aging_factor, per_game_from_rates, sps_projection
 from fbb.connectors.espn import EASTERN, parse_settings
+from fbb.constants import season_games
 from fbb.connectors.fileimport import normalize_name, parse_upload
 from fbb.context import MISS_NEXT_FLOOR, MISS_NEXT_GAME, SEASON_START_GAMES, SEASON_START_MISS_CUT, AnalysisContext
 from fbb.enrich import enrich_players
@@ -239,6 +241,27 @@ def test_a_rookie_has_a_deeper_longer_opening_dip():
     assert form[0] == pytest.approx(rookie[0]) and form[9] == pytest.approx(rookie[9])
 
 
+def test_a_second_year_player_in_a_small_role_has_a_deeper_opening_dip():
+    f = [P.opening_factors(n) for n in range(1, 60)]
+    d = P.SECOND_YEAR_DIP_MINUTES
+    second = [P.opening_factors(n, second_year_dip=d) for n in range(1, 60)]
+    assert second[0][0] == pytest.approx(f[0][0] * (1 - d)) and second[0][1] == f[0][1]  # minutes only
+    assert all(s[0] < g[0] for s, g in zip(second, f)) and second[-1][0] == pytest.approx(1.0, abs=1e-3)
+
+    snap = make_snapshot()
+    team = snap.players["1"].pro_team
+    snap.players["1"].history = [make_line(2026, 50, 6, 0.8, team)]  # a rookie season deep on the bench
+    snap.players["2"].history = [make_line(2026, 75, 36, 1.2, snap.players["2"].pro_team)]  # a rookie starter
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    small, starter = ctx.proj["1"], ctx.proj["2"]
+    assert "second_year" in small.flags and small.second_year_dip == pytest.approx(d)
+    assert "second_year" in starter.flags and starter.second_year_dip == 0.0  # 28+ minutes: no dip of his own
+    assert "second_year" not in ctx.proj["3"].flags and ctx.proj["3"].second_year_dip == 0.0  # three seasons in
+    form = [v for _, v in sorted(ctx.form("1").items())]
+    assert form[0] == pytest.approx(P.opening_factor(1, second_year_dip=d))
+    assert form[3] == pytest.approx(P.opening_factor(4, second_year_dip=d))
+
+
 def test_rest_of_season_value_counts_his_first_games_at_their_dip():
     snap = make_snapshot()
     ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
@@ -355,12 +378,14 @@ BIG_GAME = {"PTS": 42, "REB": 12, "AST": 9, "STL": 2, "BLK": 1, "TO": 2, "FGM": 
             "3PM": 4, "3PA": 9}
 
 
-def _with_games(seasons: list[int], rookie: bool = False, minutes: float = 36):
+def _with_games(seasons: list[int], rookie: bool = False, minutes: float = 36, second_year: bool = False):
     snap = make_snapshot()
     snap.current_period = 40  # every logged game is over
     p = snap.players["1"]
     if rookie:
         p.history = []
+    if second_year:
+        p.history = [make_line(2026, 50, 6, 0.8, p.pro_team)]  # a rookie season deep on the bench
     p.recent_games = [GameLog(season=s, period=160 + i if s == 2026 else 1 + i, team=p.pro_team, minutes=minutes,
                               stats=BIG_GAME) for i, s in enumerate(seasons)]
     return ProjectionEngine(snap, model=None).project_all()["1"]
@@ -489,6 +514,28 @@ def test_a_rookies_first_minutes_count_scaled_up_by_his_own_dip(monkeypatch):
     face = _with_games([2027] * 3, rookie=True)
     assert dipped.mpg > face.mpg
     assert dipped.fp_pg / dipped.mpg == pytest.approx(face.fp_pg / face.mpg)
+
+
+def test_a_second_year_players_first_minutes_count_scaled_up_by_his_dip(monkeypatch):
+    dipped = _with_games([2027] * 3, minutes=12, second_year=True)
+    assert "second_year" in dipped.flags and dipped.second_year_dip > 0
+    monkeypatch.setattr(P, "SECOND_YEAR_DIP_MINUTES", 0.0)
+    face = _with_games([2027] * 3, minutes=12, second_year=True)
+    assert face.second_year_dip == 0.0 and dipped.mpg > face.mpg
+    assert dipped.fp_pg / dipped.mpg == pytest.approx(face.fp_pg / face.mpg)
+
+
+def test_a_second_year_players_preseason_projection_stays_his_season_average(monkeypatch):
+    """His preseason minutes are a season average with his dip in it: the level he climbs to is above them, and
+    over the games he's projected to play the dip brings him back down to them."""
+    pr = _with_games([], second_year=True)
+    n_games = round(pr.availability * season_games(2027))
+    dips = [P.opening_factors(n, second_year_dip=pr.second_year_dip)[0] / P.opening_factors(n)[0]
+            for n in range(1, n_games + 1)]
+    monkeypatch.setattr(P, "SECOND_YEAR_DIP_MINUTES", 0.0)
+    face = _with_games([], second_year=True)
+    assert pr.mpg > face.mpg
+    assert pr.mpg * float(np.mean(dips)) == pytest.approx(face.mpg)
 
 
 def test_a_rookie_already_playing_his_minutes_has_no_minutes_dip_left():

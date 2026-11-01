@@ -82,7 +82,7 @@ rate = (K · preseason_rate + Σ w_g · stat_g) / (K + Σ w_g · minutes_g)
 | 3PM | 164 | 423 |
 | Turnovers | 296 | 564 |
 
-Steals need about 3× more minutes than rebounds before this season's sample dominates. Minutes per game update faster: 8 games of prior weight with a 10-game half-life, because roles change. A player's minutes in his first games of a season, and in his first games back from an absence, count scaled back up by the opening and return dips (§1.5.2, the opening dip deeper for a rookie), so a short first week doesn't lower his level.
+Steals need about 3× more minutes than rebounds before this season's sample dominates. Minutes per game update faster: 8 games of prior weight with a 10-game half-life, because roles change. A player's minutes in his first games of a season, and in his first games back from an absence, count scaled back up by the opening and return dips (§1.5.2, the opening dip deeper for a rookie and for a second-year player in a small role), so a short first week doesn't lower his level.
 
 How quickly old evidence fades is tested, not assumed. `scripts/backtest_recency.py` replays every game of 2024-25 and 2025-26: each player starts from the preseason projection the app would have made (ML refit on earlier seasons only), sees the closing games of the season before, takes in his first 0 to 35 games, and is scored on his rest-of-season FP/G. Fading faster (12- and 5-game half-lives) was about 0.4-0.5% less accurate, and no recency weighting was 0.9-2.3% less accurate. Adding last season's last 10 games at a quarter weight cut the error by 0.8% overall and 1.1% over a player's first 0-3 games (2025‑26: 4.51 → 4.45 FP/G; 2024‑25: 3.87 → 3.86). Half weight, or all 20 games, did better in 2025‑26 but worse in 2024‑25.
 
@@ -239,6 +239,59 @@ Tried and dropped:
 - **Scaling the whole rookie dip by *s*, in the update too.** The near-term numbers held up, but rest-of-season error came back up to 4.56, because rookies whose early minutes look normal still climb later.
 - **A deeper minutes dip (0.45).** It had the lowest rest-of-season error over all rookies when every rookie got it (4.47), and it was the pick in every season when each was scored with the setting chosen on the other two. But it projected rookies' first four games at 0.86 of what they scored, 0.70 for rookies projected for 20+ minutes, and dragged week‑1 projections for all players to 0.967 of what they scored, per game. 0.30 is the setting that does best on all rookies' and the 20+ minute rookies' rest-of-season error together.
 - **Letting rookies' minutes move faster** (a minutes prior of 4 or 2 games instead of 8): the update followed the low early minutes sooner, and rest-of-season projections after 5 games fell further below what rookies scored (0.89 and 0.86).
+
+**Second-year players.** A player with NBA minutes last season but none the season before (a second-year player, mostly) has a minutes dip of his own, on top of the general one, by how small his role is:
+
+```
+minutes × (1 − 0.40·s·r),  r = exp(−(n − 1) / 5)
+```
+
+*s* is 1 for a preseason projection of 15 minutes or less, 0 from 28 minutes, in between linearly. Output per minute has only the general dip.
+
+| Game of the season | 1 | 2 | 3 | 5 | 8 | 10 | 15 | 20 |
+|---|---|---|---|---|---|---|---|---|
+| Minutes vs his level, projected for 15 or less | 0.56 | 0.64 | 0.71 | 0.81 | 0.90 | 0.93 | 0.98 | 0.99 |
+| Projected for about 21.5 (*s* = ½) | 0.74 | 0.80 | 0.84 | 0.90 | 0.95 | 0.97 | 0.99 | 1.00 |
+
+Measured on every second-year player's games in ESPN's game logs for the 1,000 most-rostered players, 2023‑24 to 2025‑26 (193 player-seasons), not just the season-end pool. Their preseason minutes aren't low: 0.98 of what they averaged over the season. Their rest-of-season projection before the first game was 0.98 of what they scored. But their first games fall short of their own level, the more the smaller the role. Each player's minutes against his minutes in the middle of his season (30–70% of his team's games):
+
+| Games of the season | 1 | 2–3 | 4–5 | 6–8 | 9–12 |
+|---|---|---|---|---|---|
+| Veterans | 0.94 | 0.97 | 0.99 | 0.99 | 1.01 |
+| Second-year players | 0.76 | 0.86 | 0.91 | 0.94 | 0.99 |
+| projected for under 15 minutes | 0.45 | 0.71 | 0.79 | 0.93 | 0.89 |
+| 15–22 | 0.74 | 0.84 | 0.91 | 0.89 | 1.04 |
+| 22–28 | 0.95 | 0.92 | 0.93 | 0.98 | 0.98 |
+| 28+ | 0.93 | 1.01 | 1.04 | 1.01 | 1.03 |
+
+With only the general dip the update read those games as the role he'd keep. After 3, 5, 10 and 20 games, second-year players' rest-of-season FP/G was projected at 0.93, 0.92, 0.91 and 0.92 of what they then scored (veterans 1.00–1.02). The second-year dip works like the rookie one. The update counts his early minutes scaled back up by it, and the weekly windows project his next games lower. Unlike rookies, second-year players' preseason minutes already match their season, dip included. So the level the update starts from is his preseason minutes divided by his dip's average over the games he's projected to play. Before his first game, his rest-of-season projection stays what it was.
+
+From the projection the app would have made after *c* of his games, against what he then scored:
+
+| After *c* games | 0 | 3 | 5 | 10 | 20 |
+|---|---|---|---|---|---|
+| Rest of season, projected / actual: before | 0.98 | 0.93 | 0.92 | 0.91 | 0.92 |
+| after | 0.97 | **0.98** | **0.97** | **0.96** | **0.96** |
+| Next 10 games: before | 1.16 | 1.04 | 1.02 | 0.97 | 0.95 |
+| after | **1.06** | 1.05 | 1.05 | **1.02** | **0.99** |
+
+Averaged over those five points, second-year players' rest-of-season error fell from 4.28 to 4.16 FP/G and next-10-game error from 4.72 to 4.63, in every season (rest of season 3.73 → 3.69 in 2023‑24, 4.03 → 3.91 in 2024‑25, 4.89 → 4.71 in 2025‑26). A paired bootstrap over player-seasons puts the rest-of-season change at −0.13 FP/G (95% interval −0.23 to −0.02) and next-10 at −0.10 (−0.15 to −0.04). By preseason role (rest of season / next 10, error in brackets):
+
+| Preseason minutes | under 15 | 15–22 | 22–28 | 28+ |
+|---|---|---|---|---|
+| Second-year players | 76 | 72 | 25 | 20 |
+| Before | 0.80 (4.57) / 0.97 (4.52) | 0.96 (4.20) / 1.08 (4.79) | 0.96 (4.57) / 1.03 (4.68) | 0.98 (3.59) / 1.02 (5.29) |
+| After | **0.86 (4.25)** / 0.97 **(4.42)** | **1.02 (4.14)** / 1.08 **(4.67)** | **0.98 (4.48)** / 1.03 **(4.64)** | unchanged |
+
+Rookies and third-year players don't change. Veterans hardly do (3.829 → 3.832 FP/G): the few with a season missed two years ago get the dip too. All 1,573 player-seasons together: 4.052 → 4.040 (−0.013, 95% interval −0.025 to −0.001).
+
+In the app's rest-of-season backtest (`scripts/backtest_recency.py`), error fell in every season: 4.536 → 4.514 FP/G (2025‑26), 3.968 → 3.962 (2024‑25), 4.184 → 4.174 (2023‑24). In the weekly check above (`scripts/backtest_sims.py`'s projections, per game), it is about even: second-year players' per-game error 7.022 → 7.032 FP (weeks 1–3: 7.700 → 7.662, 4–6: 7.483 → 7.430; the change is within noise, 95% interval −0.026 to +0.045), all players' 7.038 → 7.039, and for the 150 most valuable players 7.413 → 7.409. Week 1 is the cost, as with rookies: the pool's second-year players, the ones still rostered at the end of the season, went from 0.98 to 0.88 of what they scored in week 1, and all players' week 1 from 0.973 to 0.964. From week 4 on they're closer to 1 than before (week 6: 0.95 → 0.98, week 8: 0.95 → 0.98).
+
+Tried and dropped:
+- **The same dip for every second-year player.** Established second-year starters have no dip to climb out of: projected 28+ minutes, it put their next 10 games at 0.88 of what they scored after no games seen. Scaling by role keeps them where they were.
+- **Leaving the starting level at the preseason projection.** The dip then lowered every small-role second-year player's rest-of-season projection before the first game, to 0.93 of what they scored.
+- **Fading over 8 games instead of 5** (or 3), and a 0.30 depth. 8 games gained about as much on the wide sample (4.16 / 4.61), but missed more in the weekly windows (second-year per-game error 7.051, weeks 7 and 10 worse); 3 games and 0.30 gave up more of the gain (4.18–4.19 / 4.63–4.66).
+- **A smaller dip for third-year players too** (0.20). It lowered all players' wide-sample error further (4.040 → 4.029), but the app keeps only two seasons of history, so a third-year player looks like a veteran to it. That needs his first season from the bundled history first.
 
 ### 1.6 Bounded adjustments (the "news" layer)
 
@@ -408,7 +461,7 @@ The same check runs every morning on this season's finished weeks (`scripts/dail
 
 - Lineups assume an attentive manager who sets the optimal lineup daily.
 - A player's projected game-to-game spread includes his level drifting from week to week, and early in a season his last season's closing games, so it overstates the spread within a week: in the weekly projections, real within-week variance was 0.68 of the projected one in week 1, 0.76 in weeks 2–3 and 0.87 after. His level, meanwhile, moves more than the 10% week swing: about 21% in week 1 and 15% later. The week-level swings were fitted to the team totals, which balance the two.
-- The rookie dip (§1.5.2) is measured on three rookie classes, and only 9 rookies played 28+ minutes in their first 5 games. Before his first game every rookie gets the full dip, which projects rookies who go on to big roles low in week 1. Rookies who outplayed a small projection early (22–28 minutes) are still projected about 8% above their next games. Second-year players are under-projected in-season too: after 3 to 10 games, their rest-of-season FP/G was projected at 0.90–0.93 of what they scored. That isn't modeled either.
+- The rookie dip (§1.5.2) is measured on three rookie classes, and only 9 rookies played 28+ minutes in their first 5 games. Before his first game every rookie gets the full dip, which projects rookies who go on to big roles low in week 1. Rookies who outplayed a small projection early (22–28 minutes) are still projected about 8% above their next games. The second-year dip is measured on 193 player-seasons, and it costs the season-end pool's second-year players in week 1 (0.88 of what they scored). Second-year players projected under 15 minutes are still projected at 0.86 of their rest of season, and young players' late-season climb (second- and third-year players' minutes ran 1.06–1.20 of their mid-season level in the last fifth of the season, veterans 1.02) isn't modeled. Neither are third-year players: the app keeps two seasons of history, so it can't tell them from veterans.
 - The weekly distribution treats player games as independent. In reality there's some correlation, e.g. blowouts and pace.
 - Category-league support is complete but less battle-tested than points.
 - Accrued category totals for percentage categories are only added when ESPN reports the underlying makes and attempts.

@@ -47,9 +47,10 @@ SETTINGS = {  # changes to the settings in fbb/projections.py; the first row is 
     "no recency weighting": {"RATE_HALF_LIFE_GAMES": 1e9, "MINUTES_HALF_LIFE_GAMES": 1e9,
                              "CARRYOVER_RATE_WEIGHT": 0.0, "CARRYOVER_MINUTES_WEIGHT": 0.0},
     "no opening dip": {"OPENING_DIP_MINUTES": 0.0, "OPENING_DIP_RATE": 0.0, "ROOKIE_DIP_MINUTES": 0.0,
-                       "ROOKIE_DIP_RATE": 0.0},
+                       "ROOKIE_DIP_RATE": 0.0, "SECOND_YEAR_DIP_MINUTES": 0.0},
     "no return dip": {"RETURN_DIP": 0.0},
     "no rookie dip": {"ROOKIE_DIP_MINUTES": 0.0, "ROOKIE_DIP_RATE": 0.0},
+    "no second-year dip": {"SECOND_YEAR_DIP_MINUTES": 0.0},
 }
 
 
@@ -152,8 +153,8 @@ def run(season: int) -> None:
                 back = engine._absences(player, seen[len(seen) - c:], c)[0] if c else []
                 j, missed = back[-1] if back else (0, 0)
                 proj = pr.fp_pg * statistics.fmean(
-                    P.opening_factor(n, rookie, pr.rookie_minutes_dip) * P.return_factor(j + n - c, missed)
-                    for n in range(c + 1, len(games) + 1))
+                    P.opening_factor(n, rookie, pr.rookie_minutes_dip, pr.second_year_dip)
+                    * P.return_factor(j + n - c, missed) for n in range(c + 1, len(games) + 1))
                 err.append(abs(proj - actual))
                 proj_tot += proj * (len(games) - c)
                 act_tot += actual * (len(games) - c)

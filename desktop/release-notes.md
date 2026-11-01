@@ -1,6 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.6
+## What's new in 0.5.7
+
+- **Second-year players are projected to grow into their roles.** Over the last three seasons, second-year players played about three quarters of their usual minutes in their first game, under half if they were coming off a small rookie role, and took about 10 games to climb back. Courtside read those short minutes as the role they'd keep, so after 3 to 10 games it projected their rest of the season about 8% below what they went on to score. Their early minutes now count toward the role they grow into, and the next few games of one still working into the rotation are projected lower. Second-year players projected for starter's minutes (28 or more a game) are unchanged. Rest-of-season projections for second-year players are about 3% more accurate.
+- This season is a few games old, so it already shows for second-year players in small roles, whose first games still count in their projections.
+
+## In 0.5.6
 
 - **Lose-lose only when someone really loses.** The **Fit** label called a trade **lose-lose** (or **win-win**) whenever both teams moved the same way, even by a tenth of a percent, while both verdicts said **neutral**. Now a trade where no team gains or loses 1% or more is **balanced**, whichever way the small changes point, and **win-win** or **lose-lose** means at least one team moves 1% or more. The **Fit** column in **Find trades**, **Target a player** and **Shop a player** and the trade analyzer all use it.
 - **Target a player says when a player isn't worth it.** Offers are listed by whether the other team should accept them, so sometimes every one of them costs your team points too. When even the best offer does, the **Best offer** box turns into a warning and says why that usually happens: positions you're already deep at, games on the same nights as your starters, or a roster spot you'd have to give up.

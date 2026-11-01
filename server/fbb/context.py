@@ -148,8 +148,8 @@ class AnalysisContext:
     def form(self, pid: str) -> dict[int, float]:
         """period -> his expected output that day relative to his projection: below 1 in his first games of
         the season and his first games back from an absence (the opening and return dips in fbb/projections.py,
-        the opening dip deeper and longer for a rookie), counting from the games he has played and after those
-        he's expected to miss. Days not listed are 1."""
+        the opening dip deeper and longer for a rookie and a second-year player in a small role), counting from
+        the games he has played and after those he's expected to miss. Days not listed are 1."""
         if pid in self._form:
             return self._form[pid]
         pr = self.proj[pid]
@@ -161,7 +161,7 @@ class AnalysisContext:
         missed, back = (away, 0) if away else (pr.back_from, pr.games_back)
         out: dict[int, float] = {}
         for k, d in enumerate(days[full_out:]):
-            f = (opening_factor(pr.games_played + k + 1, rookie, pr.rookie_minutes_dip)
+            f = (opening_factor(pr.games_played + k + 1, rookie, pr.rookie_minutes_dip, pr.second_year_dip)
                  * return_factor(back + k + 1, missed))
             if f > 0.999:
                 break

@@ -45,6 +45,7 @@ from .baseline import (
     rates_from_per_game,
     sps_projection,
 )
+from .constants import season_games
 from .ml.features import build_features
 from .ml.model import ProjectionModel
 from .models import GameLog, LeagueSnapshot, Player, ScoringSettings, SeasonLine
@@ -113,6 +114,24 @@ RETURN_MISSED_PER_GAME = 8.0
 ROOKIE_DIP_MINUTES = 0.30
 ROOKIE_DIP_RATE = 0.20
 ROOKIE_GAMES = 8.0
+# A second-year player (NBA minutes last season but none the season before) climbs too, by more the smaller his
+# role. In 2023-24 to 2025-26, against his own mid-season level, second-year players' minutes ran 0.76 in game 1,
+# 0.86 in games 2-3 and 0.91 in games 4-5 (veterans 0.94, 0.97, 0.99): 0.45, 0.71 and 0.79 for those projected
+# under 15 minutes, and no dip for those projected 28+. The update read those games as the role: after 3-10 games,
+# their rest-of-season FP/G was projected at 0.91-0.93 of what they scored (veterans 1.00). His n-th game's
+# minutes are also x (1 - SECOND_YEAR_DIP_MINUTES x s x r), r = exp(-(n - 1) / SECOND_YEAR_GAMES), with s = 1 for a
+# preseason projection of SECOND_YEAR_FULL_DIP_MPG minutes or less, 0 from SECOND_YEAR_NO_DIP_MPG, linear between.
+# The update counts his early minutes scaled back up by it, like a rookie's. Unlike rookies' (5% high), second-year
+# players' preseason minutes match their season average (0.98), dip included, so the level the update starts from
+# is the preseason projection over his dip's average across the games he's projected to play. Chosen on
+# rest-of-season and next-10-game FP/G after 0-20 games, for every second-year player in ESPN's 1,000-player pool
+# (docs/METHODOLOGY.md 1.5.2): their error 4.28 -> 4.16 and 4.72 -> 4.63 FP/G, and after 3-10 games projected at
+# 0.96-0.98 of what they scored; everyone else's unchanged. The 28-minute end keeps established second-year
+# starters at their level; fading over 8 games gained as much there but missed more in the weekly windows.
+SECOND_YEAR_DIP_MINUTES = 0.40
+SECOND_YEAR_GAMES = 5.0
+SECOND_YEAR_FULL_DIP_MPG = 15.0
+SECOND_YEAR_NO_DIP_MPG = 28.0
 POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
 
 INJURY_DEFAULT_GAMES = {
@@ -177,6 +196,8 @@ class PlayerProjection:
     # A rookie's minutes dip still ahead of him in the weekly windows: 1 before his first game, 0 once his
     # minutes so far reach his preseason projection.
     rookie_minutes_dip: float = 0.0
+    # A second-year player's minutes dip in his first game of the season, by his preseason role (0 for everyone else).
+    second_year_dip: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -186,22 +207,25 @@ def _decay(n_back: int, half_life: float) -> float:
     return 0.5 ** (n_back / half_life)
 
 
-def opening_factors(n: float, rookie: bool = False, rookie_minutes: float = 1.0) -> tuple[float, float]:
+def opening_factors(n: float, rookie: bool = False, rookie_minutes: float = 1.0,
+                    second_year_dip: float = 0.0) -> tuple[float, float]:
     """Minutes and per-minute output in a player's n-th game of the season (1 = his first), relative to
     his settled level. A rookie (no NBA minutes in the last two seasons) has his own dip on top, its
-    minutes part scaled by ``rookie_minutes``."""
+    minutes part scaled by ``rookie_minutes``; a second-year player, a minutes dip of ``second_year_dip``."""
     n = max(n, 1.0)
     e = math.exp(-(n - 1.0) / OPENING_GAMES)
     m, r = 1.0 - OPENING_DIP_MINUTES * e, 1.0 - OPENING_DIP_RATE * e
     if rookie:
         e = math.exp(-(n - 1.0) / ROOKIE_GAMES)
         m, r = m * (1.0 - ROOKIE_DIP_MINUTES * rookie_minutes * e), r * (1.0 - ROOKIE_DIP_RATE * e)
+    if second_year_dip:
+        m *= 1.0 - second_year_dip * math.exp(-(n - 1.0) / SECOND_YEAR_GAMES)
     return m, r
 
 
-def opening_factor(n: float, rookie: bool = False, rookie_minutes: float = 1.0) -> float:
+def opening_factor(n: float, rookie: bool = False, rookie_minutes: float = 1.0, second_year_dip: float = 0.0) -> float:
     """Fantasy output in a player's n-th game of the season relative to his settled level."""
-    m, r = opening_factors(n, rookie, rookie_minutes)
+    m, r = opening_factors(n, rookie, rookie_minutes, second_year_dip)
     return m * r
 
 
@@ -416,6 +440,16 @@ class ProjectionEngine:
         back, games_missed = self._absences(p, games, seen)
         w_min = pre["feats"].get("w_min", 0.0)
         rookie = w_min == 0.0
+        # Minutes last season and none the season before: a second-year player, mostly. His dip goes by his role,
+        # and his settled level is above his preseason projection, a season average that includes the dip.
+        second_year = not rookie and pre["feats"].get("l2_gp_frac") == 0.0
+        second_year_dip, level_mpg = 0.0, prior_mpg
+        if second_year:
+            s = (SECOND_YEAR_NO_DIP_MPG - prior_mpg) / (SECOND_YEAR_NO_DIP_MPG - SECOND_YEAR_FULL_DIP_MPG)
+            second_year_dip = SECOND_YEAR_DIP_MINUTES * min(1.0, max(0.0, s))
+            n_games = max(1, round(blend["avail"] * season_games(self.season)))
+            level_mpg = prior_mpg / float(np.mean([1.0 - second_year_dip * math.exp(-n / SECOND_YEAR_GAMES)
+                                                   for n in range(n_games)]))
         # Most recent game is index 0 in the decay. His first games of the season and first games back from an
         # absence count their minutes scaled up by their dips.
         for n_back, g in enumerate(reversed(games)):
@@ -426,7 +460,8 @@ class ProjectionEngine:
             obs_min += w * g.minutes
             wm = _decay(n_back, MINUTES_HALF_LIFE_GAMES)
             j, missed = back[len(games) - 1 - n_back]
-            w_minutes_sum += wm * g.minutes / (opening_factors(seen - n_back, rookie)[0] * return_factor(j, missed))
+            dip = opening_factors(seen - n_back, rookie, 1.0, second_year_dip)[0] * return_factor(j, missed)
+            w_minutes_sum += wm * g.minutes / dip
             mins_prior_w += wm
         # Season-to-date beyond the logged games, as one older block: his first extra_gp games.
         if cur and cur.gp > len(games):
@@ -442,7 +477,8 @@ class ProjectionEngine:
                 obs_tot[k] += w * max(0.0, cur_tot.get(k, 0.0) - logged[k])
             obs_min += w * extra_min
             wm = _decay(len(games) + extra_gp / 2, MINUTES_HALF_LIFE_GAMES)
-            f_min = float(np.mean([opening_factors(n, rookie)[0] for n in range(1, max(1, round(extra_gp)) + 1)]))
+            f_min = float(np.mean([opening_factors(n, rookie, 1.0, second_year_dip)[0]
+                                   for n in range(1, max(1, round(extra_gp)) + 1)]))
             w_minutes_sum += wm * extra_min / f_min
             mins_prior_w += wm * extra_gp
         # xFP: this season's shooting, passing, rebounding, steals and blocks move part of the way from what
@@ -471,7 +507,7 @@ class ProjectionEngine:
         K = {k: 0.0 if season_only else self._prior_k(k, w_min) for k in RATE_STATS}
         rates = {k: (K[k] * prior_rates[k] + obs_tot[k]) / (K[k] + obs_min) for k in RATE_STATS}
         k_mpg = 0.0 if season_only else MINUTES_PRIOR_GAMES
-        mpg = (k_mpg * prior_mpg + w_minutes_sum) / (k_mpg + mins_prior_w)
+        mpg = (k_mpg * level_mpg + w_minutes_sum) / (k_mpg + mins_prior_w)
         k_avg = float(np.mean([K[k] for k in ("FGM", "REB", "AST")]))
         in_season_weight = season_min / (obs_min + k_avg) if obs_min else 0.0
         carryover_weight = (obs_min - season_min) / (obs_min + k_avg) if obs_min else 0.0
@@ -520,7 +556,8 @@ class ProjectionEngine:
             sources=pre["sources"], in_season_weight=in_season_weight,
             carryover_games=len(carry) if CARRYOVER_RATE_WEIGHT or CARRYOVER_MINUTES_WEIGHT else 0,
             carryover_weight=carryover_weight, tracked_fp_pg=tracked_fp, xfp_pg=xfp_fp,
-            flags=["rookie"] if rookie else [], rookie_minutes_dip=rookie_minutes,
+            flags=["rookie"] if rookie else ["second_year"] if second_year else [], rookie_minutes_dip=rookie_minutes,
+            second_year_dip=second_year_dip,
         )
 
     def explain(self, pr: PlayerProjection) -> list[dict]:
