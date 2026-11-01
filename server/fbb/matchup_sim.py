@@ -175,8 +175,9 @@ class MatchupSimulator:
         if _context.PLAYER_WEEK_CV > 0:
             k_w = 1.0 / _context.PLAYER_WEEK_CV ** 2
             week = self.rng.gamma(k_w, 1.0 / k_w, size=(n, len(players)))
-        if _context.TEAM_WEEK_CV > 0:
-            k_t = 1.0 / _context.TEAM_WEEK_CV ** 2
+        team_cv = self.ctx.team_week_cv()
+        if team_cv > 0:
+            k_t = 1.0 / team_cv ** 2
             team = self.rng.gamma(k_t, 1.0 / k_t, size=n)
         for day in plans:
             k = len(day.cands)
