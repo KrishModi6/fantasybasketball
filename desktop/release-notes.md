@@ -1,6 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.7
+## What's new in 0.5.8
+
+- **The app itself is the same as 0.5.7.** Nothing you see or use changes.
+- **The daily accuracy check runs in the cloud.** Every morning Courtside's matchup simulator is checked against this season's finished weeks: 32 practice leagues play each week with the app's own projections, the real box scores decide every matchup, and the win odds and score ranges are scored against what really happened. That check ran on one home computer, so a morning it was asleep or switched off went unchecked, as on November 1. It now runs on AWS at 7:30 a.m. Eastern every day. The first check, on week 1, found the 80% score ranges held 85% of real scores.
+
+## In 0.5.7
 
 - **Second-year players are projected to grow into their roles.** Over the last three seasons, second-year players played about three quarters of their usual minutes in their first game, under half if they were coming off a small rookie role, and took about 10 games to climb back. Courtside read those short minutes as the role they'd keep, so after 3 to 10 games it projected their rest of the season about 8% below what they went on to score. Their early minutes now count toward the role they grow into, and the next few games of one still working into the rotation are projected lower. Second-year players projected for starter's minutes (28 or more a game) are unchanged. Rest-of-season projections for second-year players are about 3% more accurate.
 - This season is a few games old, so it already shows for second-year players in small roles, whose first games still count in their projections.
