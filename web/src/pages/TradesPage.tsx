@@ -647,10 +647,13 @@ function OfferResults({ data, team, onLoad }: { data: TradeOffers; team: number;
       </div>
     );
   }
+  // Offers are listed by the other team's acceptance alone, so even the best can cost you: say so.
+  const costsYou = best.my_delta_ros < 0;
   return (
     <div className="stack">
-      <Notice>
+      <Notice level={costsYou ? "warn" : "info"}>
         <strong>Best offer for {want}:</strong> {andList(best.give_names)}. Your team: {signed(best.my_delta_per_week)} per week ({signedPct(best.my_delta_pct)} rest of season). {data.partner_name}: {signedPct(best.partner_delta_pct)}.
+        {costsYou && <> Even the best offer {data.partner_name} should accept costs your team points, so your lineup projects to score more if you keep what you have. Usually that's fit: positions you're already deep at, games on the same nights as your starters, or a roster spot you'd have to give up. <strong>Analyze</strong> an offer to see where the points go.</>}
       </Notice>
       {[1, 2, 3].map((n) => {
         const group = data.offers.filter((o) => o.give.length === n);

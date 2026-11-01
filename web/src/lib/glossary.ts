@@ -72,7 +72,7 @@ export const GLOSSARY = {
   swing: { term: "Swing", def: "How much he can decide the matchup: how much more often the team wins when he has a big week (his best quarter of outcomes) than a quiet one (his worst quarter)." },
 
   verdict: { term: "Verdict", def: "Advantageous if the trade raises that team's rest-of-season points by 1% or more, disadvantageous if it lowers them by 1% or more, neutral in between." },
-  fit: { term: "Fit", def: "How fair the trade is: win-win if every team gains, balanced if nobody gains or loses more than 1%, lose-lose if every team loses, otherwise who it favors." },
+  fit: { term: "Fit", def: "How fair the trade is: balanced if no team gains or loses 1% or more, win-win if every team gains, lose-lose if every team loses, otherwise who it favors." },
   change_wk: { term: "Change per week", def: "How many points per week the team's lineup gains or loses with the trade, compared with what it could do on waivers instead: a player who projects below a free agent counts as that free agent." },
   vs_roster: { term: "Against today's roster", def: "The change per week compared with the roster as it is, without swapping anyone for a free agent first. The two sides of a trade still don't cancel out: each team scores only with its own daily lineup, so the same player is worth more to a team that would start him." },
   trade_ros: { term: "Rest of season", def: "The total change in the team's points for the rest of the season, and that as a % of everything it would have scored." },
