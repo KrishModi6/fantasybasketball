@@ -1,9 +1,9 @@
 # Courtside on AWS
 
-Status (2026-10-31): **built**: the S3 bucket and uploader, the daily tracking feed behind xFP (S3 +
+Status (2026-11-01): **built**: the S3 bucket and uploader, the daily tracking feed behind xFP (S3 +
 CloudFront, Courtside 0.5.0), a cost budget, and Lambda sims: the simulator backtest and its daily
-check on this season (section 4). Bedrock was evaluated and not adopted. Everything else here is a
-record of the decision.
+check on this season, which runs entirely on AWS since 2026-11-01 (section 4). Bedrock was evaluated
+and not adopted. Everything else here is a record of the decision.
 
 The repo is public, so the project's account ID is written `<account-id>` here. The uploader looks
 it up at runtime.
@@ -133,7 +133,7 @@ flat-rate Free plan bundles WAF at $0 if you want it later (console only).
 
 | Piece | Where |
 |---|---|
-| Scheduled task | `Courtside tracking publisher`, daily 08:00, runs late if the PC was off (StartWhenAvailable), only while you're signed in to Windows. It starts `publish-tracking.pyw` with the main checkout's `server\.venv\Scripts\pythonw.exe`, so no console window opens |
+| Scheduled task | `Courtside tracking publisher`, daily 07:00, wakes the PC from sleep (WakeToRun, since 2026-11-01), runs late if the PC was off (StartWhenAvailable), only while you're signed in to Windows. It starts `publish-tracking.pyw` with the main checkout's `server\.venv\Scripts\pythonw.exe`, so no console window opens |
 | Wrapper | `publish-tracking.cmd`: updates the checkout to `origin/main`, then runs the publisher with the `courtside-publisher` profile (below). Run it by hand to publish now |
 | Checkout | `publisher\`, a detached `git worktree` of this repo pinned to `origin/main` |
 | Python | the main checkout's `server\.venv` (has `requirements-dev.txt`) |
@@ -278,8 +278,8 @@ and AWS Batch or Fargate would add a container image for no gain.
 
 **How it runs.**
 1. At home: `python -m scripts.backtest_sims prepare` builds each season's projections and real
-   outcomes (`data/cache/sims/inputs_<season>.json.gz`, about 1 MB each; NBA data can't be fetched
-   from the cloud).
+   outcomes (`data/cache/sims/inputs_<season>.json.gz`, about 1 MB each, from the game logs cached
+   there).
 2. Upload the inputs to `sims/inputs/` and the package from `python -m scripts.sims_lambda <zip>` to
    `sims/code/`, then point the function at it (`aws lambda update-function-code`).
 3. Send one asynchronous invocation per league, `{"run": "r1", "tasks": [[season, league, 0],
@@ -289,27 +289,57 @@ and AWS Batch or Fargate would add a container image for no gain.
 4. `{"run": "r1", "action": "merge"}` writes `sims/merged/<run>.json.gz`. Download it and run
    `python -m scripts.backtest_sims report <file>`.
 
-**The daily check** (`server/scripts/daily_sims.py`). Every morning the scheduled task in 1b runs it
-right after the tracking feed. It checks the app as shipped against this season's finished matchup weeks:
-1. At home it rebuilds this season's projections week by week from ESPN's games so far, the same way
-   as for past seasons, and uploads them to `sims/inputs/inputs_<season>.json.gz`.
-2. It sends 16 invocations of 2 leagues each (32 synthetic leagues, settings `"app"`) and waits for
-   their results under `sims/results/daily-<season>-<day>/`.
+**The daily check** (`server/scripts/daily_sims.py`). Every morning at 7:30 US Eastern, EventBridge
+Scheduler starts the Lambda function `courtside-daily-prep` (`server/scripts/daily_lambda.py`), which
+checks the app as shipped against this season's finished matchup weeks:
+1. It rebuilds this season's projections week by week from ESPN's games so far, the same way as for
+   past seasons, and uploads them to `sims/inputs/inputs_<season>.json.gz`.
+2. It sends 16 invocations of 2 leagues each to `courtside-sims` (32 synthetic leagues, settings
+   `"app"`) and waits for their results under `sims/results/daily-<season>-<day>/`.
 3. `{"action": "report"}` scores them and writes `sims/daily/<season>/<day>.json` and `latest.json`:
    Brier score, log loss and calibration of the weekly win odds, how often the 80% ranges held, and
    the bias of projected scores, overall and week by week.
-4. `publish.log` gets one line with the headline numbers.
+4. The function's log (`/aws/lambda/courtside-daily-prep`) ends with one line of headline numbers.
 
 Before the first week ends there is nothing to score, so it stops after step 1. The numbers change
 only when a week ends; on the other days it repeats the same weeks. Playoff odds aren't checked
-until the season is over. The task runs it only once `scripts/daily_sims.py` is on `main`.
+until the season is over. `python -m scripts.daily_sims` still runs the same check from a PC, signed
+in with `aws login`.
 
-It signs in as the IAM user `courtside-publisher` (1b). Besides `publish-live-tracking`, that user has a
-second inline policy, `run-daily-sims`, added 2026-10-31. It allows three things: upload
-`sims/inputs/inputs_*.json.gz`, list `sims/results/daily-*`, and invoke `courtside-sims`. So the
-worst case of a leaked key in 1b is no longer a few cents: anyone holding it could run the function
-on your bill, at most 10 at once (about $1.40 an hour, $34 a day). The $5 budget email would show it,
-and deleting the key stops it. Retiring the user (1b) needs this policy deleted first.
+**Why it can run on AWS.** Until 2026-11-01 the PC task in 1b ran it after the tracking feed, because
+step 1 was assumed to need the home network. It doesn't: it reads only ESPN, and ESPN answers requests
+from Lambda (tested 2026-11-01). stats.nba.com doesn't (it timed out from Lambda), so the xFP feed
+stays on the PC. Built on AWS, the inputs for 2026-11-01 came out identical to the PC's, number for
+number: same code, same ESPN games, and LightGBM's preseason refit gives the same values on Linux
+arm64.
+
+- **Package**: `python -m scripts.daily_lambda <zip>` (about 52 MB zipped, 174 MB unzipped of the
+  250 MB Lambda allows): fbb, the scripts the check runs, `data/history` and `data/model`, with
+  numpy, scipy, LightGBM, joblib, httpx and pydantic for Linux arm64 at the versions in
+  `requirements.txt`. numpy's and scipy's test suites are left out. LightGBM needs GCC's OpenMP
+  library, which the Lambda runtime lacks, so the build copies the one scikit-learn's wheel bundles
+  into `lib/libgomp.so.1`.
+- **Cache**: fbb's cache and the inputs go to `/tmp`. The past seasons' game logs it reads (the
+  absence table, last season's closing games; 23 MB, the files the PC fetched on 2026-11-01) are kept
+  in `sims/cache/`. This season's logs are saved there after every run, so next season finds last
+  season's.
+- **Timing**: about 40 s on 2026-11-01 (week 1; prep about 25 s of it), at most 431 MB used. A full
+  season's prep took 14 s on the PC. Waiting for the leagues grows with the weeks; everything has to
+  fit in the function's 15 minutes, and the leagues get what's left of them minus 90 s for the report.
+- **Retries**: if Lambda is busy (the project runs at most 10 functions at once, and this one holds
+  one of them) the calls back off and retry. If a run fails, Lambda runs it once more a minute or two
+  later; leagues already done are skipped. If the schedule can't start the function, Scheduler
+  retries for up to an hour.
+
+Since 2026-11-01 the PC no longer needs AWS rights for this. The `run-daily-sims` policy that let
+`courtside-publisher` upload inputs, list results and invoke `courtside-sims` was deleted, so a leaked
+key in 1b can again only replace `live_<season>.json.gz`.
+
+**After a release.** Both functions run the code from the package they were deployed with, so rebuild
+and redeploy both after a release that changes `fbb/` or these scripts: build from `main`'s tree,
+upload over `sims/code/sims_lambda.zip` and `sims/code/daily_prep.zip`, then
+`aws lambda update-function-code --function-name <name> --s3-bucket <bucket> --s3-key <key>
+--s3-object-version <the upload's version>`.
 
 **What exists in AWS** (tagged `project=courtside`, `us-east-2`)
 
@@ -317,9 +347,13 @@ and deleting the key stops it. Retiring the user (1b) needs this policy deleted 
 |---|---|
 | Lambda function | `courtside-sims` (Python 3.12, arm64, 3,008 MB, 15-minute timeout, async retries off) |
 | IAM role | `courtside-sims-lambda`: Lambda may assume it for this function only; inline policy `sims-s3-and-logs` reads `sims/inputs/*`, writes `sims/results/*`, `sims/merged/*` and `sims/daily/*`, writes its own logs |
-| IAM user policy | `run-daily-sims` on `courtside-publisher` (above) |
 | CloudWatch log group | `/aws/lambda/courtside-sims` (14-day retention) |
-| S3 objects | `sims/` in the bucket above: inputs, code, results, merged, daily (about 150 MB on 2026-10-31). 127 MB of it is study run `r1` (`results/r1/` and `merged/r1.json.gz`), kept so the study can be re-scored without rerunning it. A daily run adds about 35 KB per finished week: under 1 MB a day, about 60 MB a season |
+| Lambda function | `courtside-daily-prep` (Python 3.12, arm64, 1,024 MB, 15-minute timeout, 1 async retry, handler `scripts.daily_lambda.handler`, env `SIMS_BUCKET`, `FBB_CACHE_DIR=/tmp/cache`) |
+| IAM role | `courtside-daily-prep-lambda`: Lambda may assume it for this function only; inline policy `daily-prep-s3-sims-logs` writes `sims/inputs/inputs_*.json.gz`, reads and writes `sims/cache/*`, lists `sims/results/daily-*`, invokes `courtside-sims`, writes its own logs |
+| CloudWatch log group | `/aws/lambda/courtside-daily-prep` (14-day retention) |
+| EventBridge Scheduler | schedule group `courtside`, schedule `courtside-daily-sims`: `cron(30 7 * * ? *)` in America/New_York, input `{}`, 3 retries within an hour |
+| IAM role | `courtside-daily-scheduler`: Scheduler may assume it for the `courtside` schedule group only; inline policy `invoke-daily-prep` invokes `courtside-daily-prep` and nothing else |
+| S3 objects | `sims/` in the bucket above: inputs, code, cache, results, merged, daily (about 230 MB on 2026-11-01). 127 MB of it is study run `r1` (`results/r1/` and `merged/r1.json.gz`), kept so the study can be re-scored without rerunning it. `code/` holds both packages (69 MB, plus 120 MB of old versions until the lifecycle rule drops them), `cache/` 23 MB plus this season's logs. A daily run adds about 35 KB per finished week: under 1 MB a day, about 60 MB a season |
 
 **Cost.** Lambda bills $0.0000133334 per GB-second on arm64. A study league (both setting groups,
 about 218 s at 3,008 MB) costs about $0.0085. Everything through 2026-10-31 took 212 invocations and
@@ -327,19 +361,26 @@ about 218 s at 3,008 MB) costs about $0.0085. Everything through 2026-10-31 took
 `r1`, its merge and the first daily run. Lambda's always-free allowance is 400,000 GB-seconds a month,
 so the bill may show less, if this plan gets that allowance. The daily check runs one setting with no
 playoff odds: the first one (week 1, 32 leagues) took about 40 s end to end. Expect under $1 a month by
-the end of the season. S3 storage and requests add well under a cent.
+the end of the season. `courtside-daily-prep` adds 40 s to a few minutes at 1 GB a day, about
+1,000-5,000 GB-seconds a month (under $0.07). Scheduler's first 14 million invocations a month are
+free. S3 storage and requests add about a cent.
 
-To remove it all: first take the daily-sims lines out of `publish-tracking.cmd` and delete the user
-policy (`aws iam delete-user-policy --user-name courtside-publisher --policy-name run-daily-sims`).
-Then `aws lambda delete-function --function-name courtside-sims`, then
-`aws logs delete-log-group --log-group-name /aws/lambda/courtside-sims`, then delete the role's
-inline policy and the role (`aws iam delete-role-policy --role-name courtside-sims-lambda
---policy-name sims-s3-and-logs`, `aws iam delete-role --role-name courtside-sims-lambda`), then
+To remove it all: delete the schedule `courtside-daily-sims` and the schedule group `courtside`
+(`aws scheduler delete-schedule --name courtside-daily-sims --group-name courtside`, then
+`aws scheduler delete-schedule-group --name courtside`), then the role `courtside-daily-scheduler`
+(its inline policy `invoke-daily-prep` first). Then each function with its log group and role:
+`aws lambda delete-function --function-name <function>`, `aws logs delete-log-group --log-group-name
+/aws/lambda/<function>`, `aws iam delete-role-policy --role-name <role> --policy-name <policy>`,
+`aws iam delete-role --role-name <role>`, for `courtside-daily-prep` (role
+`courtside-daily-prep-lambda`, policy `daily-prep-s3-sims-logs`) and `courtside-sims` (role
+`courtside-sims-lambda`, policy `sims-s3-and-logs`). Then
 `aws s3 rm s3://courtside-<account-id>-us-east-2-an/sims/ --recursive`. Nothing else uses them. To
-drop only the study, remove `sims/results/r1/` and `sims/merged/r1.json.gz`. The bucket is
-versioned and its `expire-old-versions` rule always keeps a file's 3 newest old versions, so a delete
-only hides them: delete those versions too (`aws s3api list-object-versions`, then
-`delete-object --version-id`) to free the space.
+stop only the daily check, delete the schedule (or disable it with
+`aws scheduler update-schedule ... --state DISABLED`). To drop only the study, remove
+`sims/results/r1/` and `sims/merged/r1.json.gz`. The bucket is versioned and its
+`expire-old-versions` rule always keeps a file's 3 newest old versions, so a delete only hides them:
+delete those versions too (`aws s3api list-object-versions`, then `delete-object --version-id`) to
+free the space.
 
 ## Hosted Courtside
 
