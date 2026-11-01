@@ -96,11 +96,12 @@ def player_values(ctx: "AnalysisContext") -> dict[str, dict]:
     out = {}
     for pid, pr in ctx.proj.items():
         games = ctx.expected_games(pid)
+        output = ctx.output_games(pid)  # his first games of the season count at their opening dip
         v = ctx.value_pg[pid]
         out[pid] = {
             "value_pg": v,
             "ros_games": games,
-            "ros_value": v * games,
-            "vorp": (v - repl) * games,
+            "ros_value": v * output,
+            "vorp": v * output - repl * games,
         }
     return out

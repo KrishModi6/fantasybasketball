@@ -140,11 +140,13 @@ class AnalysisContext:
 
     def form(self, pid: str) -> dict[int, float]:
         """period -> his expected output that day relative to his projection: below 1 in his first games of
-        the season and his first games back from an absence (the opening and return dips in fbb/projections.py),
-        counting from the games he has played and after those he's expected to miss. Days not listed are 1."""
+        the season and his first games back from an absence (the opening and return dips in fbb/projections.py,
+        the opening dip deeper and longer for a rookie), counting from the games he has played and after those
+        he's expected to miss. Days not listed are 1."""
         if pid in self._form:
             return self._form[pid]
         pr = self.proj[pid]
+        rookie = "rookie" in pr.flags
         days = sorted(self.team_days.get(self.s.players[pid].pro_team, ()))
         full_out = int(math.floor(pr.games_out))
         # The absence he comes back from: the one he's in (games missed so far and still to miss), else his last.
@@ -152,7 +154,8 @@ class AnalysisContext:
         missed, back = (away, 0) if away else (pr.back_from, pr.games_back)
         out: dict[int, float] = {}
         for k, d in enumerate(days[full_out:]):
-            f = opening_factor(pr.games_played + k + 1) * return_factor(back + k + 1, missed)
+            f = (opening_factor(pr.games_played + k + 1, rookie, pr.rookie_minutes_dip)
+                 * return_factor(back + k + 1, missed))
             if f > 0.999:
                 break
             out[d] = f
@@ -232,6 +235,12 @@ class AnalysisContext:
         if days is None:
             return sum(pp.values())
         return sum(pp.get(d, 0.0) for d in days)
+
+    def output_games(self, pid: str) -> float:
+        """His expected games left, each counted at his form that day (fewer than expected_games in his first
+        games of the season): rest-of-season value is value per game times this."""
+        form = self.form(pid)
+        return sum(p * form.get(d, 1.0) for d, p in self.p_play(pid).items())
 
     # -- the core simulation ------------------------------------------------------
 
@@ -379,7 +388,7 @@ class AnalysisContext:
         return mps
 
     def ros_points(self, pid: str) -> float:
-        return self.proj[pid].fp_pg * self.expected_games(pid)
+        return self.proj[pid].fp_pg * self.output_games(pid)
 
     def team_roster(self, team_id: int, include_ir: bool = True) -> list[str]:
         t = self.s.team(team_id)

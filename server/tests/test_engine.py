@@ -202,6 +202,32 @@ def test_first_games_of_the_season_are_projected_below_his_level():
     assert opening.mean < settled.project_window(["1"], days).mean
 
 
+def test_a_rookie_has_a_deeper_longer_opening_dip():
+    f, rookie = [P.opening_factor(n) for n in range(1, 60)], [P.opening_factor(n, True) for n in range(1, 60)]
+    assert rookie[0] == pytest.approx(f[0] * (1 - P.ROOKIE_DIP_MINUTES) * (1 - P.ROOKIE_DIP_RATE))
+    assert all(r < g for r, g in zip(rookie, f)) and all(a < b for a, b in zip(rookie, rookie[1:]))
+    assert rookie[9] < 0.9 < f[3] and rookie[-1] == pytest.approx(1.0, abs=1e-3)
+
+    snap = make_snapshot()
+    snap.players["1"].history = []  # no NBA minutes yet
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    assert "rookie" in ctx.proj["1"].flags and "rookie" not in ctx.proj["2"].flags
+    form = [v for _, v in sorted(ctx.form("1").items())]
+    assert form[0] == pytest.approx(rookie[0]) and form[9] == pytest.approx(rookie[9])
+
+
+def test_rest_of_season_value_counts_his_first_games_at_their_dip():
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    assert ctx.output_games("1") < ctx.expected_games("1")
+    values = player_values(ctx)["1"]
+    assert values["ros_value"] == pytest.approx(ctx.value_pg["1"] * ctx.output_games("1"))
+    for pr in ctx.proj.values():
+        pr.games_played = 60
+    settled = AnalysisContext(snap, ctx.proj)
+    assert settled.output_games("1") == pytest.approx(settled.expected_games("1"))
+
+
 def test_opening_dip_waits_for_an_injured_player_to_return():
     snap = make_snapshot(injured={"1": "OUT"})
     ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
@@ -306,11 +332,13 @@ BIG_GAME = {"PTS": 42, "REB": 12, "AST": 9, "STL": 2, "BLK": 1, "TO": 2, "FGM": 
             "3PM": 4, "3PA": 9}
 
 
-def _with_games(seasons: list[int]):
+def _with_games(seasons: list[int], rookie: bool = False, minutes: float = 36):
     snap = make_snapshot()
     snap.current_period = 40  # every logged game is over
     p = snap.players["1"]
-    p.recent_games = [GameLog(season=s, period=160 + i if s == 2026 else 1 + i, team=p.pro_team, minutes=36,
+    if rookie:
+        p.history = []
+    p.recent_games = [GameLog(season=s, period=160 + i if s == 2026 else 1 + i, team=p.pro_team, minutes=minutes,
                               stats=BIG_GAME) for i, s in enumerate(seasons)]
     return ProjectionEngine(snap, model=None).project_all()["1"]
 
@@ -429,6 +457,25 @@ def test_first_games_minutes_count_scaled_up_by_the_opening_dip(monkeypatch):
     assert dipped.mpg > face.mpg
     assert dipped.fp_pg / dipped.mpg == pytest.approx(face.fp_pg / face.mpg)
     assert _with_games([2027] * 40).mpg == pytest.approx(late.mpg, rel=0.005)  # long settled in: hardly any
+
+
+def test_a_rookies_first_minutes_count_scaled_up_by_his_own_dip(monkeypatch):
+    dipped = _with_games([2027] * 3, rookie=True)
+    assert "rookie" in dipped.flags and "rookie" not in _with_games([2027] * 3).flags
+    monkeypatch.setattr(P, "ROOKIE_DIP_MINUTES", 0.0)
+    face = _with_games([2027] * 3, rookie=True)
+    assert dipped.mpg > face.mpg
+    assert dipped.fp_pg / dipped.mpg == pytest.approx(face.fp_pg / face.mpg)
+
+
+def test_a_rookie_already_playing_his_minutes_has_no_minutes_dip_left():
+    """The windows keep a rookie's minutes dip only while his minutes so far fall short of his projection."""
+    assert _with_games([], rookie=True).rookie_minutes_dip == 1.0  # before his first game: all of it
+    assert _with_games([2027] * 3, rookie=True, minutes=4).rookie_minutes_dip == 1.0
+    full = _with_games([2027] * 3, rookie=True)  # 36 minutes a game, past any rookie's projection
+    assert full.rookie_minutes_dip == 0.0 and _with_games([2027] * 3).rookie_minutes_dip == 0.0
+    m, r = P.opening_factors(5, True, full.rookie_minutes_dip)
+    assert m == pytest.approx(P.opening_factors(5)[0]) and r < P.opening_factors(5)[1]  # output per minute still dips
 
 
 def test_this_seasons_games_count_more_than_last_seasons():

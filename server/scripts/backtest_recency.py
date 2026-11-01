@@ -46,8 +46,10 @@ SETTINGS = {  # changes to the settings in fbb/projections.py; the first row is 
     "stronger prior": {"PRIOR_STRENGTH_SCALE": 2.0},
     "no recency weighting": {"RATE_HALF_LIFE_GAMES": 1e9, "MINUTES_HALF_LIFE_GAMES": 1e9,
                              "CARRYOVER_RATE_WEIGHT": 0.0, "CARRYOVER_MINUTES_WEIGHT": 0.0},
-    "no opening dip": {"OPENING_DIP_MINUTES": 0.0, "OPENING_DIP_RATE": 0.0},
+    "no opening dip": {"OPENING_DIP_MINUTES": 0.0, "OPENING_DIP_RATE": 0.0, "ROOKIE_DIP_MINUTES": 0.0,
+                       "ROOKIE_DIP_RATE": 0.0},
     "no return dip": {"RETURN_DIP": 0.0},
+    "no rookie dip": {"ROOKIE_DIP_MINUTES": 0.0, "ROOKIE_DIP_RATE": 0.0},
 }
 
 
@@ -145,11 +147,13 @@ def run(season: int) -> None:
                 seen = [GameLog(**g) for g in closing.get(pid, []) + games[:c]]
                 actual = statistics.fmean(fp(g["stats"]) for g in games[c:])
                 player = players[pid].model_copy(update={"recent_games": seen})
-                level = engine._in_season(player, pre[pid]).fp_pg
+                pr = engine._in_season(player, pre[pid])
+                rookie = "rookie" in pr.flags
                 back = engine._absences(player, seen[len(seen) - c:], c)[0] if c else []
                 j, missed = back[-1] if back else (0, 0)
-                proj = level * statistics.fmean(P.opening_factor(n) * P.return_factor(j + n - c, missed)
-                                                for n in range(c + 1, len(games) + 1))
+                proj = pr.fp_pg * statistics.fmean(
+                    P.opening_factor(n, rookie, pr.rookie_minutes_dip) * P.return_factor(j + n - c, missed)
+                    for n in range(c + 1, len(games) + 1))
                 err.append(abs(proj - actual))
                 proj_tot += proj * (len(games) - c)
                 act_tot += actual * (len(games) - c)
