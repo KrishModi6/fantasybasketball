@@ -183,6 +183,29 @@ def test_healthy_players_miss_even_less_at_the_seasons_start():
     assert pp[0] > [v for _, v in sorted(AnalysisContext(later, opener.proj).p_play("1").items())][0]
 
 
+def test_roster_week_swing_grows_in_over_the_season():
+    """No roster-wide week swing at the opener; it grows toward TEAM_WEEK_CV with the league's games played."""
+    opener = AnalysisContext(make_snapshot())
+    assert opener.team_week_cv() == 0.0
+    later = make_snapshot()
+    later.current_period = 41
+    ctx = AnalysisContext(later, opener.proj)
+    teams = {t for ts in later.schedule.games.values() for t in ts}
+    per_team = sum(len(t) for p, t in later.schedule.games.items() if p < 41) / len(teams)
+    assert ctx.team_week_cv() == pytest.approx(C.TEAM_WEEK_CV * (1 - math.exp(-per_team / C.TEAM_WEEK_RAMP_GAMES)))
+    assert 0.9 * C.TEAM_WEEK_CV < ctx.team_week_cv() < C.TEAM_WEEK_CV
+    roster = [pid for pid in ctx.proj][:10]
+    days = opener.matchup_days(1)
+    narrow = opener.project_window(roster, days)
+    C_ramp, C.TEAM_WEEK_RAMP_GAMES = C.TEAM_WEEK_RAMP_GAMES, 0.0
+    try:
+        wide = opener.project_window(roster, days)
+    finally:
+        C.TEAM_WEEK_RAMP_GAMES = C_ramp
+    assert narrow.mean == pytest.approx(wide.mean)
+    assert narrow.var == pytest.approx(wide.var - (C.TEAM_WEEK_CV * wide.mean) ** 2)
+
+
 def test_first_games_of_the_season_are_projected_below_his_level():
     """The opening dip: a player's first games fall short of his settled level, fading game by game."""
     f = [P.opening_factor(n) for n in range(1, 60)]

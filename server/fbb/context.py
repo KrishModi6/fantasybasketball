@@ -29,6 +29,12 @@ IR_STATUSES = ("OUT", "INJURY_RESERVE")  # statuses ESPN lets a team put in an I
 # 70% of the time; with them, 80% (scripts/backtest_sims.py: 192 synthetic leagues, 2023-24 to 2025-26).
 PLAYER_WEEK_CV = 0.10
 TEAM_WEEK_CV = 0.06
+# Except early in a season, when rosters don't run hot or cold together: with the full swing from the opener,
+# 80% ranges held 90% of week-1 scores and 86% of week 2's, and win odds in weeks 1-3 were too timid
+# (calibration slope 1.33). So the roster-wide swing grows in: TEAM_WEEK_CV x (1 - exp(-g / TEAM_WEEK_RAMP_GAMES)),
+# g = the league's games per team before the week, nearly full by week 8. Ranges then held 83% and 79%, the
+# slope was 1.15 and weekly log loss 0.0009 lower; ramps of 4 and 12 games did worse (96 local synthetic leagues).
+TEAM_WEEK_RAMP_GAMES = 8.0
 
 # A player who isn't hurt rarely misses his next game or two: the injuries that would keep him out are mostly
 # on the report already. Games further off carry more of the season's injury risk. So a healthy player's
@@ -94,6 +100,7 @@ class AnalysisContext:
         self._pplay: dict[str, dict[int, float]] = {}
         self._form: dict[str, dict[int, float]] = {}
         self._team_played: dict[str, int] = {}
+        self._league_gp: float | None = None
         self._rostered = {e.player_id for t in snapshot.teams for e in t.roster}
         self._first_day: dict[str, int] = {}
 
@@ -165,6 +172,16 @@ class AnalysisContext:
             self._team_played[team] = sum(1 for p, teams in self.s.schedule.games.items()
                                           if p < self.s.current_period and team in teams)
         return self._team_played[team]
+
+    def team_week_cv(self) -> float:
+        """The roster-wide week swing (TEAM_WEEK_CV), smaller in the season's first weeks."""
+        if TEAM_WEEK_RAMP_GAMES <= 0:
+            return TEAM_WEEK_CV
+        if self._league_gp is None:  # the league's games per team before today
+            games = self.s.schedule.games
+            teams = len({t for ts in games.values() for t in ts}) or 30
+            self._league_gp = sum(len(ts) for p, ts in games.items() if p < self.s.current_period) / teams
+        return TEAM_WEEK_CV * (1 - math.exp(-self._league_gp / TEAM_WEEK_RAMP_GAMES))
 
     def today_state(self, team: str) -> str | None:
         """"upcoming", "live" or "final" for an NBA team's game today, as of the snapshot (None: can't tell)."""
@@ -346,9 +363,10 @@ class AnalysisContext:
         for (pid, mp), m in week_pts.items():
             res.by_mp[mp][1] += (PLAYER_WEEK_CV * m) ** 2
             res.var += (PLAYER_WEEK_CV * m) ** 2
+        team_cv = self.team_week_cv()
         for bym in res.by_mp.values():
-            res.var += (TEAM_WEEK_CV * bym[0]) ** 2
-            bym[1] += (TEAM_WEEK_CV * bym[0]) ** 2
+            res.var += (team_cv * bym[0]) ** 2
+            bym[1] += (team_cv * bym[0]) ** 2
         if not track_stats:
             # Totals of counting stats from started games (used for explanations).
             for pid, q in res.starts.items():
