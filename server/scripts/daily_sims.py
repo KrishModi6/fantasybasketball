@@ -1,7 +1,7 @@
 """Daily check of the matchup simulator against this season's finished weeks (docs/AWS.md, section 4).
 
-Run every morning on AWS by the Lambda function courtside-daily-prep (scripts/daily_lambda.py), or by
-hand from here:
+Run at 7:30 AM and 6:30 PM US Eastern on AWS by the Lambda function courtside-daily-prep
+(scripts/daily_lambda.py), or by hand from here:
   1. rebuild this season's projections week by week from ESPN's games so far, the way
      scripts/backtest_sims.py does for past seasons;
   2. upload them to s3://<bucket>/sims/inputs/;
