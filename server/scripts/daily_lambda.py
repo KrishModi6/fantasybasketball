@@ -1,13 +1,14 @@
 """AWS Lambda entry point for the daily check (scripts/daily_sims.py; docs/AWS.md, section 4).
 
-EventBridge Scheduler starts the function courtside-daily-prep every morning. It does what
+EventBridge Scheduler starts the function courtside-daily-prep at 7:30 AM and 6:30 PM US Eastern (the
+evening run repeats the morning's report, or finishes it if the morning run failed). It does what
 ``python -m scripts.daily_sims`` does at home: rebuilds this season's projections from ESPN, sends the
 leagues to courtside-sims, waits for them and has it write the report. ESPN answers requests from AWS;
 stats.nba.com doesn't, which is why the xFP tracking feed (section 1b) stays on the home PC.
 
 The package is read-only, so fbb's cache (FBB_CACHE_DIR) and the inputs go to /tmp. The past seasons'
 game logs that prepare() reads (the absence table, last season's closing games) don't change, so they
-live in s3://<bucket>/sims/cache/ rather than being fetched from ESPN every morning. This season's logs
+live in s3://<bucket>/sims/cache/ rather than being fetched from ESPN on every run. This season's logs
 are saved there after each run, so next season finds them.
 
 Event: {} for this season, or {"season": 2027, "leagues": 32}

@@ -289,8 +289,8 @@ and AWS Batch or Fargate would add a container image for no gain.
 4. `{"run": "r1", "action": "merge"}` writes `sims/merged/<run>.json.gz`. Download it and run
    `python -m scripts.backtest_sims report <file>`.
 
-**The daily check** (`server/scripts/daily_sims.py`). Every morning at 7:30 US Eastern, EventBridge
-Scheduler starts the Lambda function `courtside-daily-prep` (`server/scripts/daily_lambda.py`), which
+**The daily check** (`server/scripts/daily_sims.py`). Every day at 7:30 AM and 6:30 PM US Eastern
+(the evening run since 2026-11-03), EventBridge Scheduler starts the Lambda function `courtside-daily-prep` (`server/scripts/daily_lambda.py`), which
 checks the app as shipped against this season's finished matchup weeks:
 1. It rebuilds this season's projections week by week from ESPN's games so far, the same way as for
    past seasons, and uploads them to `sims/inputs/inputs_<season>.json.gz`.
@@ -305,6 +305,12 @@ Before the first week ends there is nothing to score, so it stops after step 1. 
 only when a week ends; on the other days it repeats the same weeks. Playoff odds aren't checked
 until the season is over. `python -m scripts.daily_sims` still runs the same check from a PC, signed
 in with `aws login`.
+
+The 6:30 PM run uses the same day's run name, so on a normal day it finds the morning's leagues already
+done, skips them and writes the same report again (about 40 s, most of it step 1). It's the same-day
+second chance: if the morning run failed, the evening one finishes the leagues it left. Running the
+leagues again wouldn't give new numbers: the seeds are fixed, and a finished week's projections and
+box scores don't change.
 
 **Why it can run on AWS.** Until 2026-11-01 the PC task in 1b ran it after the tracking feed, because
 step 1 was assumed to need the home network. It doesn't: it reads only ESPN, and ESPN answers requests
@@ -351,7 +357,7 @@ upload over `sims/code/sims_lambda.zip` and `sims/code/daily_prep.zip`, then
 | Lambda function | `courtside-daily-prep` (Python 3.12, arm64, 1,024 MB, 15-minute timeout, 1 async retry, handler `scripts.daily_lambda.handler`, env `SIMS_BUCKET`, `FBB_CACHE_DIR=/tmp/cache`) |
 | IAM role | `courtside-daily-prep-lambda`: Lambda may assume it for this function only; inline policy `daily-prep-s3-sims-logs` writes `sims/inputs/inputs_*.json.gz`, reads and writes `sims/cache/*`, lists `sims/results/daily-*`, invokes `courtside-sims`, writes its own logs |
 | CloudWatch log group | `/aws/lambda/courtside-daily-prep` (14-day retention) |
-| EventBridge Scheduler | schedule group `courtside`, schedule `courtside-daily-sims`: `cron(30 7 * * ? *)` in America/New_York, input `{}`, 3 retries within an hour |
+| EventBridge Scheduler | schedule group `courtside`, schedule `courtside-daily-sims`: `cron(30 7,18 * * ? *)` (7:30 AM and 6:30 PM) in America/New_York, input `{}`, 3 retries within an hour |
 | IAM role | `courtside-daily-scheduler`: Scheduler may assume it for the `courtside` schedule group only; inline policy `invoke-daily-prep` invokes `courtside-daily-prep` and nothing else |
 | S3 objects | `sims/` in the bucket above: inputs, code, cache, results, merged, daily (about 230 MB on 2026-11-01). 127 MB of it is study run `r1` (`results/r1/` and `merged/r1.json.gz`), kept so the study can be re-scored without rerunning it. `code/` holds both packages (69 MB, plus 120 MB of old versions until the lifecycle rule drops them), `cache/` 23 MB plus this season's logs. A daily run adds about 35 KB per finished week: under 1 MB a day, about 60 MB a season |
 
@@ -361,8 +367,8 @@ about 218 s at 3,008 MB) costs about $0.0085. Everything through 2026-10-31 took
 `r1`, its merge and the first daily run. Lambda's always-free allowance is 400,000 GB-seconds a month,
 so the bill may show less, if this plan gets that allowance. The daily check runs one setting with no
 playoff odds: the first one (week 1, 32 leagues) took about 40 s end to end. Expect under $1 a month by
-the end of the season. `courtside-daily-prep` adds 40 s to a few minutes at 1 GB a day, about
-1,000-5,000 GB-seconds a month (under $0.07). Scheduler's first 14 million invocations a month are
+the end of the season. `courtside-daily-prep` adds 40 s to a few minutes at 1 GB a morning plus
+about 40 s an evening, about 2,000-6,000 GB-seconds a month (under $0.10). Scheduler's first 14 million invocations a month are
 free. S3 storage and requests add about a cent.
 
 To remove it all: delete the schedule `courtside-daily-sims` and the schedule group `courtside`
