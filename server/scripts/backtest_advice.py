@@ -10,6 +10,8 @@ manages three ways:
     two weeks, by Courtside's projections.
   * "averages": the same rule by season-to-date points per game (his preseason projection until he has
     played), what ESPN shows a manager without Courtside.
+  * "recent": the same by points per game over the last 15 days (ESPN's other column), the season's when
+    he hasn't played in them: whether reacting fast is what wins pickups.
 Each makes at most two pickups a week (more only to fill open roster spots) and handles IR the same way,
 so the arms differ only in whom they pick up and drop. Every team starts the lineup with the most
 expected points every day, and the real box scores decide every week and the playoffs.
@@ -42,17 +44,21 @@ from fbb.improve import TOP_FREE_AGENTS, add_drop_moves  # noqa: E402
 from fbb.valuation import player_values  # noqa: E402
 from scripts import backtest_sims as B  # noqa: E402
 
-ARMS = ("courtside", "simple", "averages")
+ARMS = ("courtside", "simple", "averages", "recent")
 TEAM = 1
 MOVES = 2  # pickups a week beyond filling open roster spots, as in backtest_sims.manage_team
+RECENT_DAYS = 15
 
 
-def _average(season: B.Season, mp: int, pid: str, horizon: int = 14) -> float:
-    """Season-to-date points per game times his team's games in the next two weeks, less the games he's
-    listed out: backtest_sims._value as a manager without Courtside's projections sees it."""
+def _average(season: B.Season, mp: int, pid: str, recent: bool = False, horizon: int = 14) -> float:
+    """Season-to-date points per game (``recent``: over the last RECENT_DAYS, if he played in them) times his
+    team's games in the next two weeks, less the games he's listed out: backtest_sims._value as a manager
+    without Courtside's projections sees it."""
     start = season.mps[mp][0]
     pr = season.proj[mp][pid]
     played = [v for d, v in season.actual.get(pid, {}).items() if d < start]
+    if recent:
+        played = [v for d, v in season.actual.get(pid, {}).items() if start - RECENT_DAYS <= d < start] or played
     fp_pg = sum(played) / len(played) if played else season.proj[1].get(pid, pr).fp_pg
     games = sum(1 for p in range(start, start + horizon) if pr.pro_team in season.schedule.games.get(p, ()))
     return fp_pg * max(0.0, games - pr.games_out)
@@ -100,8 +106,9 @@ def manage(season: B.Season, mp: int, rosters, ir, rng: np.random.Generator, arm
         tid = int(tid)
         if tid != TEAM or arm == "simple":
             moves = B.manage_team(season, mp, tid, rosters, ir, free)
-        elif arm == "averages":
-            moves = B.manage_team(season, mp, tid, rosters, ir, free, value=lambda p: _average(season, mp, p))
+        elif arm in ("averages", "recent"):
+            moves = B.manage_team(season, mp, tid, rosters, ir, free,
+                                  value=lambda p: _average(season, mp, p, recent=arm == "recent"))
         else:
             moves = _courtside(season, mp, rosters, ir, free, snapshot)
         if tid == TEAM:
@@ -175,7 +182,8 @@ MEASURES = {  # per league-season, team 1
     "rank": lambda r: float(r["rank"]),
     "moves": lambda r: float(len(r["moves"])),
 }
-PAIRS = (("courtside", "simple"), ("courtside", "averages"), ("simple", "averages"))
+PAIRS = (("courtside", "simple"), ("courtside", "averages"), ("courtside", "recent"), ("simple", "averages"),
+         ("recent", "averages"))
 
 
 def summarize(leagues: list[dict]) -> dict:
