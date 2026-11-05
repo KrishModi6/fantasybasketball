@@ -311,7 +311,7 @@ export function TradeResult({ ev }: { ev: TradeEval }) {
         {ev.sides.map((s) => <SidePanel key={s.team_id} s={s} />)}
       </div>
       <Notice>
-        <strong><Term t="fit">{ev.fairness.label}</Term>.</strong> {ev.summary} <Term t="accept">Chance {partners.map((p) => p.team_name).join(" and ")} {three ? "both see" : "sees"} it
+        <strong><Term t="fit">{ev.fairness.label}</Term>.</strong> {ev.fairness.reason} {ev.summary} <Term t="accept">Chance {partners.map((p) => p.team_name).join(" and ")} {three ? "both see" : "sees"} it
         as a gain</Term>: {pct(ev.fairness.partner_accept_likelihood)}.
       </Notice>
       <div className={`grid ${cols}`} style={{ alignItems: "start" }}>
