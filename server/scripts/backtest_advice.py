@@ -1,23 +1,31 @@
-"""Does following Courtside's advice win? The add/drop study on scripts/backtest_sims.py's leagues.
+"""Does following Courtside's advice win? The add/drop study, on scripts/backtest_sims.py's synthetic leagues.
 
-Each synthetic league is played once per arm. Every arm drafts the same teams, and nine teams always
-manage by the study's simple rule (backtest_sims.manage_team). Team 1, whose draft slot is random,
-manages three ways:
+Each league is played once per arm. Every arm drafts the same teams. Nine teams always manage like people
+in a real league (RIVALS below), and team 1, whose draft slot is random, manages four ways:
+  * "averages": the same as its rivals, the control.
   * "courtside": the app's moves. Its top add/drop move (fbb.improve.add_drop_moves) while one gains
     rest-of-season points, and an open roster spot goes to the free agent who adds the most by the same
     measure (fbb.context.project_window).
-  * "simple": the rule everyone else uses: free agents clearly better than its worst player over the next
-    two weeks, by Courtside's projections.
-  * "averages": the same rule by season-to-date points per game (his preseason projection until he has
-    played), what ESPN shows a manager without Courtside.
-  * "recent": the same by points per game over the last 15 days (ESPN's other column), the season's when
-    he hasn't played in them: whether reacting fast is what wins pickups.
+  * "projections": its rivals' rule by Courtside's projections instead of their averages, so the
+    projections alone, without the app's add/drop logic.
+  * "recent": its rivals' rule by points per game over the last 15 days (ESPN's other column).
 Each makes at most two pickups a week (more only to fill open roster spots) and handles IR the same way,
 so the arms differ only in whom they pick up and drop. Every team starts the lineup with the most
 expected points every day, and the real box scores decide every week and the playoffs.
 
+RIVALS judge pickups by points per game so far (the preseason projection until a player has played) times
+his team's games in the next two weeks, less the games he's listed out: what ESPN shows. They let go of
+whoever is lowest on their roster in points per game, so a hurt star stays, until he has missed GIVE_UP
+team games in a row. backtest_sims.manage's rule can't stand in for them here: it judges both by the next
+two weeks and by Courtside's projections, so its managers dropped 26-49 players of 35+ points per game a
+league-season, 82-98% of them while hurt (Durant, out 1.5 games), and never chased a hot start. That fills
+the waiver wire with stars and leaves the breakouts to whoever looks, which flatters anyone who manages
+differently. It doesn't matter for what that study measures, the odds of matchups already set.
+
 The arms play the same leagues, so comparing team 1's results league by league (wins, points, playoff
-spots, titles) takes the draft's luck out of the differences.
+spots, titles) takes the draft's luck out of the differences. The intervals resample leagues, which share
+each season's real games: they say how sure the number is for these three seasons, not for the next one.
+The season-by-season lines show how much it moves.
 
   python -m scripts.backtest_advice run --season 2026 --leagues 0-1 --out results/
   python -m scripts.backtest_advice report results/
@@ -31,6 +39,7 @@ import gzip
 import json
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -44,24 +53,55 @@ from fbb.improve import TOP_FREE_AGENTS, add_drop_moves  # noqa: E402
 from fbb.valuation import player_values  # noqa: E402
 from scripts import backtest_sims as B  # noqa: E402
 
-ARMS = ("courtside", "simple", "averages", "recent")
+ARMS = ("averages", "courtside", "projections", "recent")
 TEAM = 1
 MOVES = 2  # pickups a week beyond filling open roster spots, as in backtest_sims.manage_team
 RECENT_DAYS = 15
+GIVE_UP = 20  # team games in a row a manager waits for a hurt player (about six weeks)
 
 
-def _average(season: B.Season, mp: int, pid: str, recent: bool = False, horizon: int = 14) -> float:
-    """Season-to-date points per game (``recent``: over the last RECENT_DAYS, if he played in them) times his
-    team's games in the next two weeks, less the games he's listed out: backtest_sims._value as a manager
-    without Courtside's projections sees it."""
+@lru_cache(maxsize=None)
+def _per_game(season: B.Season, mp: int, pid: str, recent: bool = False) -> float:
+    """Points per game so far (``recent``: over the last RECENT_DAYS, if he played in them), his preseason
+    projection until he has played."""
+    start = season.mps[mp][0]
+    games = season.actual.get(pid, {})
+    played = [v for d, v in games.items() if d < start]
+    if recent:
+        played = [v for d, v in games.items() if start - RECENT_DAYS <= d < start] or played
+    return sum(played) / len(played) if played else season.proj[1].get(pid, season.proj[mp][pid]).fp_pg
+
+
+@lru_cache(maxsize=None)
+def _absent(season: B.Season, mp: int, pid: str) -> int:
+    """Team games in a row he has missed as of this week."""
+    team = season.proj[mp][pid].pro_team
+    games = season.actual.get(pid, {})
+    missed = 0
+    for day in range(season.mps[mp][0] - 1, 0, -1):
+        if team in season.schedule.games.get(day, ()):
+            if day in games:
+                break
+            missed += 1
+    return missed
+
+
+@lru_cache(maxsize=None)
+def _pickup_value(season: B.Season, mp: int, pid: str, recent: bool = False, horizon: int = 14) -> float:
+    """Points per game times his team's games in the next two weeks, less the games he's listed out."""
     start = season.mps[mp][0]
     pr = season.proj[mp][pid]
-    played = [v for d, v in season.actual.get(pid, {}).items() if d < start]
-    if recent:
-        played = [v for d, v in season.actual.get(pid, {}).items() if start - RECENT_DAYS <= d < start] or played
-    fp_pg = sum(played) / len(played) if played else season.proj[1].get(pid, pr).fp_pg
     games = sum(1 for p in range(start, start + horizon) if pr.pro_team in season.schedule.games.get(p, ()))
-    return fp_pg * max(0.0, games - pr.games_out)
+    return _per_game(season, mp, pid, recent) * max(0.0, games - pr.games_out)
+
+
+def _keep_value(season: B.Season, mp: int, pid: str, arm: str) -> float:
+    """How a manager ranks whom to let go: points per game, by his own source, until he gives up on a player."""
+    if _absent(season, mp, pid) >= GIVE_UP:
+        return 0.0
+    if arm in ("courtside", "projections"):
+        return season.proj[mp][pid].fp_pg
+    return _per_game(season, mp, pid, arm == "recent")
 
 
 def _move(season: B.Season, mp: int, roster: list[str], free: list[str], add: str, drop: str | None) -> tuple:
@@ -77,7 +117,7 @@ def _move(season: B.Season, mp: int, roster: list[str], free: list[str], add: st
 def _courtside(season: B.Season, mp: int, rosters, ir, free: list[str], snapshot) -> list[tuple]:
     """Team 1's week by the app: IR as everyone, open spots to the free agent who adds the most, then the
     top add/drop move while one gains."""
-    B.ir_moves(season, mp, TEAM, rosters, ir, free)
+    B.ir_moves(season, mp, TEAM, rosters, ir, free, keep=lambda p: _keep_value(season, mp, p, "courtside"))
     roster = rosters[TEAM]
     moves = []
     while len(roster) < B.ROUNDS and free:
@@ -98,21 +138,25 @@ def _courtside(season: B.Season, mp: int, rosters, ir, free: list[str], snapshot
     return moves
 
 
+def _by_rule(season: B.Season, mp: int, tid: int, rosters, ir, free: list[str], arm: str) -> list[tuple]:
+    """The rivals' rule, each arm by its own numbers."""
+    value = None if arm == "projections" else (lambda p: _pickup_value(season, mp, p, arm == "recent"))
+    return B.manage_team(season, mp, tid, rosters, ir, free, value=value,
+                         keep=lambda p: _keep_value(season, mp, p, arm))
+
+
 def manage(season: B.Season, mp: int, rosters, ir, rng: np.random.Generator, arm: str, snapshot) -> list[tuple]:
-    """backtest_sims.manage, with team 1 managed by ``arm``. Returns team 1's (added, dropped) pairs."""
+    """One week's moves, in a random order, with team 1 managed by ``arm``. Returns its (added, dropped) pairs."""
     free = B.free_agents(season, mp, rosters, ir)
     mine = []
     for tid in rng.permutation(range(1, B.TEAMS + 1)):
         tid = int(tid)
-        if tid != TEAM or arm == "simple":
-            moves = B.manage_team(season, mp, tid, rosters, ir, free)
-        elif arm in ("averages", "recent"):
-            moves = B.manage_team(season, mp, tid, rosters, ir, free,
-                                  value=lambda p: _average(season, mp, p, recent=arm == "recent"))
+        if tid != TEAM:
+            _by_rule(season, mp, tid, rosters, ir, free, "averages")
+        elif arm == "courtside":
+            mine = _courtside(season, mp, rosters, ir, free, snapshot)
         else:
-            moves = _courtside(season, mp, rosters, ir, free, snapshot)
-        if tid == TEAM:
-            mine = moves
+            mine = _by_rule(season, mp, tid, rosters, ir, free, arm)
     return mine
 
 
@@ -182,17 +226,18 @@ MEASURES = {  # per league-season, team 1
     "rank": lambda r: float(r["rank"]),
     "moves": lambda r: float(len(r["moves"])),
 }
-PAIRS = (("courtside", "simple"), ("courtside", "averages"), ("courtside", "recent"), ("simple", "averages"),
-         ("recent", "averages"))
+PAIRS = (("courtside", "averages"), ("projections", "averages"), ("courtside", "projections"), ("recent", "averages"))
 
 
 def summarize(leagues: list[dict]) -> dict:
     rng = np.random.default_rng(0)
     arms = [a for a in ARMS if all(a in lg["arms"] for lg in leagues)]
-    out: dict = {"leagues": len(leagues), "seasons": sorted({lg["season"] for lg in leagues}), "arms": {},
-                 "differences": {}}
+    seasons = sorted({lg["season"] for lg in leagues})
+    out: dict = {"leagues": len(leagues), "seasons": seasons, "arms": {}, "by_season": {}, "differences": {}}
     for arm in arms:
         out["arms"][arm] = {m: float(np.mean([f(lg["arms"][arm]) for lg in leagues])) for m, f in MEASURES.items()}
+        out["by_season"][arm] = {s: {m: float(np.mean([f(lg["arms"][arm]) for lg in leagues if lg["season"] == s]))
+                                     for m, f in MEASURES.items()} for s in seasons}
     groups = np.arange(len(leagues))
     for x, y in PAIRS:
         if x not in arms or y not in arms:
@@ -201,8 +246,9 @@ def summarize(leagues: list[dict]) -> dict:
         for m, f in MEASURES.items():
             d = np.array([f(lg["arms"][x]) - f(lg["arms"][y]) for lg in leagues])
             res[m] = {"mean": float(d.mean()), "ci": B._bootstrap(lambda i: d[i].mean(), groups, rng)}
-        res["by_season"] = {s: float(np.mean([_wins(lg["arms"][x]) - _wins(lg["arms"][y])
-                                              for lg in leagues if lg["season"] == s])) for s in out["seasons"]}
+        res["by_season"] = {s: {m: float(np.mean([f(lg["arms"][x]) - f(lg["arms"][y])
+                                                  for lg in leagues if lg["season"] == s]))
+                                for m, f in MEASURES.items()} for s in seasons}
         out["differences"][f"{x} - {y}"] = res
     return out
 
@@ -220,22 +266,27 @@ def report(paths: list[Path]) -> dict:
 def print_report(s: dict) -> None:
     print(f"\n{s['leagues']} league-seasons ({', '.join(map(str, s['seasons']))}); team 1 of 10, "
           f"{B.REG_WEEKS} weeks, {B.PLAYOFF_TEAMS} make the playoffs")
-    print(f"\n{'team 1 managed by':<20}" + "".join(f"{m:>17}" for m in MEASURES))
+
+    def cells(r: dict) -> str:
+        return "".join(f"{v:>17.1%}" if m in ("playoffs", "titles") else f"{v:>17.2f}" for m, v in r.items())
+
+    print(f"\n{'team 1 managed by':<24}" + "".join(f"{m:>17}" for m in MEASURES))
     for arm, r in s["arms"].items():
-        cells = []
-        for m, v in r.items():
-            cells.append(f"{v:>17.1%}" if m in ("playoffs", "titles") else f"{v:>17.2f}")
-        print(f"{arm:<20}" + "".join(cells))
-    print("\nLeague by league (95% interval)")
+        print(f"{arm:<24}" + cells(r))
+        for season, by in s["by_season"][arm].items():
+            print(f"  {season:<22}" + cells(by))
+    print("\nLeague by league (95% interval, these three seasons)")
     for name, res in s["differences"].items():
-        cells = []
+        row = []
         for m in MEASURES:
             r = res[m]
-            pct = m in ("playoffs", "titles")
-            fmt = (lambda v: f"{v * 100:+.1f}") if pct else (lambda v: f"{v:+.2f}")
-            cells.append(f"{fmt(r['mean'])} [{fmt(r['ci'][0])},{fmt(r['ci'][1])}]".rjust(26))
-        print(f"{name:<22}" + "".join(cells))
-        print(f"{'':<22}wins by season: " + ", ".join(f"{k} {v:+.2f}" for k, v in res["by_season"].items()))
+            fmt = (lambda v: f"{v * 100:+.1f}") if m in ("playoffs", "titles") else (lambda v: f"{v:+.2f}")
+            row.append(f"{fmt(r['mean'])} [{fmt(r['ci'][0])},{fmt(r['ci'][1])}]".rjust(26))
+        print(f"{name:<24}" + "".join(row))
+        for season, by in res["by_season"].items():
+            print(f"  {season}: " + ", ".join(
+                f"{m} {by[m] * 100:+.1f}" if m in ("playoffs", "titles") else f"{m} {by[m]:+.2f}"
+                for m in ("wins", "points_per_week", "playoffs", "titles")))
 
 
 def main() -> None:
