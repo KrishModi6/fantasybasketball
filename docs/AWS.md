@@ -167,6 +167,7 @@ task:
   file, run `publish-tracking.cmd` and check that `publish.log` ends in `exit 0`, then
   `aws iam delete-access-key --user-name courtside-publisher --access-key-id <old ID> --profile
   courtside`. A user can hold two keys, so the old one keeps working until the new one is tested.
+  Rotate `courtside-sims-operator` the same day (section 4); the reminder covers both.
 
 If the log says the profile has no working access key, the key was deleted, deactivated or mistyped:
 make a new one as above. If it stops, apps notice nothing for a day and then fetch from NBA.com
@@ -347,6 +348,26 @@ upload over `sims/code/sims_lambda.zip` and `sims/code/daily_prep.zip`, then
 `aws lambda update-function-code --function-name <name> --s3-bucket <bucket> --s3-key <key>
 --s3-object-version <the upload's version>`.
 
+**The operator key** (since 2026-11-05). An `aws login` session ends after 12 hours and needs a person at
+the browser, so sims work used to stop whenever one lapsed. The IAM user `courtside-sims-operator` has an
+access key for that work instead, in `%USERPROFILE%\.aws\credentials` as `[courtside-sims-operator]`, with
+its region in `.aws\config`. `server/scripts/aws_operator_key.py` makes it, tests it before saving it (it
+must do its job and be refused the rest) and never prints the secret.
+
+- Its one inline policy, `run-courtside-sims`, allows reading and writing `sims/` (no deletes); running,
+  updating and publishing versions of `courtside-sims` and `courtside-daily-prep`; and reading their logs.
+  Everything else still takes `aws login`: IAM, function settings, new resources, metrics, billing.
+- Anything running as you can read the key, and it never expires by itself. If it leaked, someone could
+  run the sims nonstop at the 10-function limit, about $35 a day at list price: $140 of credits in about
+  4 days, and the project closes at $0. They could also replace the two functions' code, which would run
+  with those functions' roles, or overwrite `sims/` files (the bucket's old versions can restore them).
+  They couldn't touch `public/` or give themselves more rights. To stop it, delete the key:
+  `aws iam delete-access-key --user-name courtside-sims-operator --access-key-id <ID> --profile courtside`.
+- **Rotate it every 90 days**, on the same day as the publisher key (1b; next 2027-01-29). Signed in as
+  `courtside`, from `server/`: `python scripts/aws_operator_key.py --rotate`. It deletes the old key once
+  the new one works.
+- `aws_operator_key.py --dry-run` shows the policy and changes nothing.
+
 **What exists in AWS** (tagged `project=courtside`, `us-east-2`)
 
 | Resource | Name |
@@ -359,6 +380,7 @@ upload over `sims/code/sims_lambda.zip` and `sims/code/daily_prep.zip`, then
 | CloudWatch log group | `/aws/lambda/courtside-daily-prep` (14-day retention) |
 | EventBridge Scheduler | schedule group `courtside`, schedule `courtside-daily-sims`: `cron(30 7,18 * * ? *)` (7:30 AM and 6:30 PM) in America/New_York, input `{}`, 3 retries within an hour |
 | IAM role | `courtside-daily-scheduler`: Scheduler may assume it for the `courtside` schedule group only; inline policy `invoke-daily-prep` invokes `courtside-daily-prep` and nothing else |
+| IAM user (global) | `courtside-sims-operator`: one access key, inline policy `run-courtside-sims` (above) |
 | S3 objects | `sims/` in the bucket above: inputs, code, cache, results, merged, daily (about 230 MB on 2026-11-01). 127 MB of it is study run `r1` (`results/r1/` and `merged/r1.json.gz`), kept so the study can be re-scored without rerunning it. `code/` holds both packages (69 MB, plus 120 MB of old versions until the lifecycle rule drops them), `cache/` 23 MB plus this season's logs. A daily run adds about 35 KB per finished week: under 1 MB a day, about 60 MB a season |
 
 **Cost.** Lambda bills $0.0000133334 per GB-second on arm64. A study league (both setting groups,
@@ -371,7 +393,10 @@ the end of the season. `courtside-daily-prep` adds 40 s to a few minutes at 1 GB
 about 40 s an evening, about 2,000-6,000 GB-seconds a month (under $0.10). Scheduler's first 14 million invocations a month are
 free. S3 storage and requests add about a cent.
 
-To remove it all: delete the schedule `courtside-daily-sims` and the schedule group `courtside`
+To remove it all: retire the operator key with `aws iam delete-access-key`, `aws iam delete-user-policy
+--policy-name run-courtside-sims` and `aws iam delete-user` (each with `--user-name
+courtside-sims-operator --profile courtside`), and delete its sections from `.aws\credentials` and
+`.aws\config`. Delete the schedule `courtside-daily-sims` and the schedule group `courtside`
 (`aws scheduler delete-schedule --name courtside-daily-sims --group-name courtside`, then
 `aws scheduler delete-schedule-group --name courtside`), then the role `courtside-daily-scheduler`
 (its inline policy `invoke-daily-prep` first). Then each function with its log group and role:
