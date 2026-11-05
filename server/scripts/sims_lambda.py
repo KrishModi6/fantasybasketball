@@ -6,6 +6,7 @@ results to S3 next to the inputs the home machine uploaded. A league whose resul
 skipped, so an invocation can safely be sent again.
 
 Event: {"run": "r1", "tasks": [[2026, 0, 0], [2026, 0, 1]]}  (season, league, config group)
+       {"run": "a1", "study": "advice", "tasks": [[2026, 0, 0]]}  -> scripts/backtest_advice.py's league
        {"run": "r1", "action": "merge"}  -> one file with every league of the run
        {"run": "daily-2027-2026-11-01", "action": "report", "season": 2027, "day": "2026-11-01"}
            -> the daily check's summary, sims/daily/<season>/<day>.json and latest.json (scripts/daily_sims.py)
@@ -39,12 +40,17 @@ def _key(run: str, season: int, league: int, group: int) -> str:
     return f"{PREFIX}results/{run}/{season}_{league}_g{group}.json.gz"
 
 
-def _work(season: int, league: int, group: int, run: str, conn) -> None:
+def _work(season: int, league: int, group: int, run: str, study: str | None, conn) -> None:
     from scripts import backtest_sims as B
 
     try:
         B.INPUTS = TMP
-        res = B.run_league(B.load_season(season), league, B.GROUPS[group])
+        if study == "advice":
+            from scripts import backtest_advice as A
+
+            res = A.run_league(B.load_season(season), league)
+        else:
+            res = B.run_league(B.load_season(season), league, B.GROUPS[group])
         boto3.client("s3").put_object(Bucket=BUCKET, Key=_key(run, season, league, group),
                                       Body=gzip.compress(json.dumps(res).encode()))
         conn.send("ok")
@@ -102,13 +108,15 @@ def handler(event, context):
     tasks = [(int(s), int(lg), int(g)) for s, lg, g in event["tasks"] if not _exists(s3, _key(run, s, lg, g))]
     from scripts import backtest_sims as B
 
-    names = {f"inputs_{season}{tag}.json.gz" for season, _, group in tasks for tag in B.input_tags(B.GROUPS[group])}
+    study = event.get("study")
+    names = {f"inputs_{season}{tag}.json.gz" for season, _, group in tasks
+             for tag in ({""} if study == "advice" else B.input_tags(B.GROUPS[group]))}
     for name in names:  # every time: a warm environment keeps /tmp, and this season's inputs change daily
         s3.download_file(BUCKET, f"{PREFIX}inputs/{name}", str(TMP / name))
     procs = []
     for season, league, group in tasks:
         parent, child = multiprocessing.Pipe(duplex=False)
-        p = multiprocessing.Process(target=_work, args=(season, league, group, run, child))
+        p = multiprocessing.Process(target=_work, args=(season, league, group, run, study, child))
         p.start()
         procs.append((season, league, group, p, parent))
     out = []
@@ -137,7 +145,7 @@ def build(out: Path) -> None:
                         "--only-binary=:all:", "numpy==1.26.4", "pydantic==2.12.3", "tzdata"], check=True)
         shutil.copytree(root / "fbb", Path(tmp) / "fbb", ignore=shutil.ignore_patterns("__pycache__"))
         (Path(tmp) / "scripts").mkdir()
-        for name in ("__init__.py", "backtest_sims.py", "sims_lambda.py"):
+        for name in ("__init__.py", "backtest_sims.py", "backtest_advice.py", "sims_lambda.py"):
             shutil.copy(root / "scripts" / name, Path(tmp) / "scripts" / name)
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             for f in sorted(Path(tmp).rglob("*")):

@@ -420,48 +420,70 @@ def draft(season: Season, rng: np.random.Generator) -> dict[int, list[str]]:
     return rosters
 
 
+def free_agents(season: Season, mp: int, rosters, ir) -> list[str]:
+    """Players on no team, best first by _value: the list every manager picks from, kept in that order."""
+    taken = {pid for r in rosters.values() for pid in r} | {p for p in ir.values() if p}
+    return sorted((p for p in season.proj[mp] if p not in taken), key=lambda p: -_value(season, mp, p))
+
+
 def manage(season: Season, mp: int, rosters, ir, rng: np.random.Generator) -> None:
     """Weekly moves: long-term injured players to IR, returning ones back, and up to two pickups each
     (injury replacements first, then free agents clearly better than the worst rostered player)."""
-    status = season.status[mp]
-    taken = {pid for r in rosters.values() for pid in r} | {p for p in ir.values() if p}
-    free = sorted((p for p in season.proj[mp] if p not in taken), key=lambda p: -_value(season, mp, p))
+    free = free_agents(season, mp, rosters, ir)
     for tid in rng.permutation(range(1, TEAMS + 1)):
-        tid = int(tid)
-        roster = rosters[tid]
-        if ir[tid] and status.get(ir[tid]) != "INJURY_RESERVE":  # back from injury
-            worst = min(roster, key=lambda p: _value(season, mp, p))
-            back, ir[tid] = ir[tid], None
-            if _value(season, mp, back) > _value(season, mp, worst):
-                roster.remove(worst)
-                roster.append(back)
-                back = worst
-            free.append(back)
-            free.sort(key=lambda p: -_value(season, mp, p))
-        for pid in sorted(roster, key=lambda p: _value(season, mp, p)):
-            if status.get(pid) == "INJURY_RESERVE" and ir[tid] is None:
-                roster.remove(pid)
-                ir[tid] = pid
-        adds = 0
-        while len(roster) < ROUNDS and free:
-            pick = next((p for p in free if _fills_lineup(season, roster + [p], ROUNDS - len(roster) - 1)), None)
-            if pick is None:
-                break
-            free.remove(pick)
-            roster.append(pick)
-            adds += 1
-        while adds < 2 and free:
-            worst = min(roster, key=lambda p: _value(season, mp, p))
-            rest = [p for p in roster if p != worst]
-            pick = next((p for p in free if _fills_lineup(season, rest + [p], 0)), None)
-            if pick is None or _value(season, mp, pick) < 1.15 * _value(season, mp, worst) + 5:
-                break
-            free.remove(pick)
+        manage_team(season, mp, int(tid), rosters, ir, free)
+
+
+def ir_moves(season: Season, mp: int, tid: int, rosters, ir, free: list[str]) -> None:
+    """A player back from injury leaves the IR slot (for the worst player, if he's better), and a long-term
+    injured one goes in."""
+    status = season.status[mp]
+    roster = rosters[tid]
+    if ir[tid] and status.get(ir[tid]) != "INJURY_RESERVE":  # back from injury
+        worst = min(roster, key=lambda p: _value(season, mp, p))
+        back, ir[tid] = ir[tid], None
+        if _value(season, mp, back) > _value(season, mp, worst):
             roster.remove(worst)
-            roster.append(pick)
-            free.append(worst)
-            free.sort(key=lambda p: -_value(season, mp, p))
-            adds += 1
+            roster.append(back)
+            back = worst
+        free.append(back)
+        free.sort(key=lambda p: -_value(season, mp, p))
+    for pid in sorted(roster, key=lambda p: _value(season, mp, p)):
+        if status.get(pid) == "INJURY_RESERVE" and ir[tid] is None:
+            roster.remove(pid)
+            ir[tid] = pid
+
+
+def manage_team(season: Season, mp: int, tid: int, rosters, ir, free: list[str], value=None) -> list[tuple]:
+    """One manager's moves for the week (manage), taking players from and returning them to ``free``.
+    ``value(pid)`` is what he judges players by, _value unless given. Returns his (added, dropped) pairs."""
+    own = value is not None  # free is already in _value order
+    value = value or (lambda p: _value(season, mp, p))
+    ir_moves(season, mp, tid, rosters, ir, free)
+    roster = rosters[tid]
+    moves = []
+    while len(roster) < ROUNDS and free:
+        cands = sorted(free, key=lambda p: -value(p)) if own else free
+        pick = next((p for p in cands if _fills_lineup(season, roster + [p], ROUNDS - len(roster) - 1)), None)
+        if pick is None:
+            break
+        free.remove(pick)
+        roster.append(pick)
+        moves.append((pick, None))
+    while len(moves) < 2 and free:
+        worst = min(roster, key=value)
+        rest = [p for p in roster if p != worst]
+        cands = sorted(free, key=lambda p: -value(p)) if own else free
+        pick = next((p for p in cands if _fills_lineup(season, rest + [p], 0)), None)
+        if pick is None or value(pick) < 1.15 * value(worst) + 5:
+            break
+        free.remove(pick)
+        roster.remove(worst)
+        roster.append(pick)
+        free.append(worst)
+        free.sort(key=lambda p: -_value(season, mp, p))
+        moves.append((pick, worst))
+    return moves
 
 
 def real_score(season: Season, players, plans) -> tuple[float, float]:
