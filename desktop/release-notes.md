@@ -1,6 +1,14 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.8
+## What's new in 0.5.9
+
+- **League admins can rule on trades.** League admins get a new **Admin** tab to rule trades fair or not fair, with Courtside's numbers beside each one. Everyone sees those rulings under **Trades > League board**, labeled as the admin's call; they don't change Courtside's numbers or anything on ESPN. If the admin's own projection changes went into the numbers shown with a ruling, it says so.
+- **A balanced trade says why.** The trade page used to call a trade **balanced** and leave you to work out why from the tables. It now says so in a sentence: the gap in fantasy points per game and the games left for a plain 1-for-1, and roster spots for anything with drops, pickups or more players.
+- **Projections line up better across years in the league.** Players from their seventh year on have run 2–4% under projection in nearly every season, so their minutes are now projected a little lower. Younger players improve through a season, by 15% for a rookie from game 20 to game 60 and by less each year after, so their projections now start a little lower and climb. Over the last three seasons, the average gap between projected and real scoring across experience groups fell from about 4% to about 2%, and rest-of-season projections got slightly more accurate. Third-year players still run about 4% low.
+- **Weekly and playoff odds barely change.** 300 practice leagues played out each way on AWS, with the old and new projections, against the same real results. Win odds and playoff odds held steady overall: a little better in 2025-26 and a little worse in 2023-24. Real weekly scores ran 2.3% under projection before and 1.4% now.
+- **The daily accuracy check gets a second try.** It also runs at 6:30 p.m. Eastern, in case the morning run failed.
+
+## In 0.5.8
 
 - **The app itself is the same as 0.5.7.** Nothing you see or use changes.
 - **The daily accuracy check runs in the cloud.** Every morning Courtside's matchup simulator is checked against this season's finished weeks: 32 practice leagues play each week with the app's own projections, the real box scores decide every matchup, and the win odds and score ranges are scored against what really happened. That check ran on one home computer, so a morning it was asleep or switched off went unchecked, as on November 1. It now runs on AWS at 7:30 a.m. Eastern every day. The first check, on week 1, found the 80% score ranges held 85% of real scores.

@@ -54,6 +54,17 @@ export function UndoNote() {
   );
 }
 
+/** Each app has its own projection overrides, so nobody else can see that the admin's went into these numbers. */
+export function AdjustedNote({ mine = false }: { mine?: boolean }) {
+  return (
+    <p className="small muted">
+      {mine
+        ? "These numbers include your projection changes, and anyone reading your ruling is told so."
+        : "These numbers include projection changes the admin made in their own app, so they can differ from what yours shows."}
+    </p>
+  );
+}
+
 /** The admin's rulings, for everyone in the league. A separate panel, since they don't change Courtside's numbers. */
 export function LeagueRulings() {
   const { league } = useLeagueCtx();
@@ -76,6 +87,7 @@ export function LeagueRulings() {
               <details className="small">
                 <summary>Courtside's numbers when the admin ruled</summary>
                 {r.numbers.completed && <UndoNote />}
+                {r.numbers.adjusted && <AdjustedNote />}
                 <NumbersTable numbers={r.numbers} />
               </details>
             )}

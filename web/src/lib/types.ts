@@ -290,6 +290,7 @@ export interface RulingNumbers {
   fairness: { label: string; reason: string };
   summary: string;
   completed: boolean; // worked out by undoing a finished trade, not the analyzer's before-and-after
+  adjusted?: boolean; // the admin's projection overrides went into these numbers
 }
 
 export interface RuledTrade {

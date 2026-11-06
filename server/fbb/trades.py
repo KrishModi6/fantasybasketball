@@ -301,6 +301,7 @@ class TradeEvaluator:
             "math": self._math(sides, sends),
             "summary": " ".join(f"{s.team_name}: {s.delta_per_week:+,.1f} pts/week ({s.verdict})." for s in sides),
             "fairness": {**_fairness(sides), "reason": _balanced_reason(sides, ctx.proj, self.values)},
+            "adjusted": bool(ctx.s.overrides),  # scored with this league's projection overrides in it
         }
 
     def evaluate_completed(self, sends: dict[int, dict[str, int]], with_sim: bool = True) -> dict:
