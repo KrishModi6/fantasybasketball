@@ -15,7 +15,7 @@ import numpy as np
 
 from .lineup import SlotModel, solve_day
 from .models import LeagueSnapshot
-from .projections import PlayerProjection, ProjectionEngine, climb_factor, opening_factor, return_factor
+from .projections import PlayerProjection, ProjectionEngine, climb_factors, opening_factor, return_factor
 from .schedule import game_state, period_for_date, period_to_matchup, remaining_days
 from .valuation import CategoryValuer
 
@@ -161,12 +161,14 @@ class AnalysisContext:
         away = pr.games_missed + full_out
         missed, back = (away, 0) if away else (pr.back_from, pr.games_back)
         out: dict[int, float] = {}
-        for k, d in enumerate(days[full_out:]):
+        left = days[full_out:]
+        climbs = climb_factors(pr.games_played, pr.availability, len(left), pr.climb)
+        for k, d in enumerate(left):
             n = pr.games_played + k + 1
             f = opening_factor(n, rookie, pr.rookie_minutes_dip, pr.second_year_dip) * return_factor(back + k + 1, missed)
             if f > 0.999 and not pr.climb:
                 break
-            out[d] = f * climb_factor(n, pr.games_played, pr.climb)
+            out[d] = f * climbs[k]
         self._form[pid] = out
         return out
 

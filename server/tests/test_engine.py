@@ -589,20 +589,44 @@ def test_the_climb_shrinks_with_each_year_in_the_league():
 
 def test_the_climb_counts_only_what_is_still_ahead_of_him():
     c = 0.15
-    assert P.climb_factor(30, 5, 0.0) == 1.0
-    assert P.climb_factor(10, 0, c) == 1.0  # hasn't started
-    assert P.climb_factor(P.CLIMB_FULL_GAME, 0, c) == pytest.approx(1 + c)
-    assert P.climb_factor(P.CLIMB_FULL_GAME + 20, 0, c) == pytest.approx(1 + c)  # levels off
-    mid = (P.CLIMB_START_GAME + P.CLIMB_FULL_GAME) / 2
-    assert P.climb_factor(mid, mid, c) == 1.0  # the update has already read what he's climbed so far
-    assert P.climb_factor(P.CLIMB_FULL_GAME, mid, c) == pytest.approx((1 + c) / (1 + c / 2))
+    assert P.climb_factors(5, 1.0, 3, 0.0) == [1.0, 1.0, 1.0]
+    start, full = P.CLIMB_START_GAME, P.CLIMB_FULL_GAME
+    before = P.climb_factors(0, 1.0, full + 20, c)
+    assert before[start - 1] == 1.0  # hasn't started
+    assert before[full - 1] == pytest.approx(1 + c)
+    assert before[-1] == pytest.approx(1 + c)  # levels off
+    mid = (start + full) // 2
+    later = P.climb_factors(mid, 1.0, full - mid, c)
+    assert later[-1] == pytest.approx(before[-1] / (1 + c * P._climb_read(mid)))
+
+
+def test_the_updates_read_of_his_climb_trails_the_game_hes_on():
+    assert P._climb_read(P.CLIMB_START_GAME) == 0.0
+    for seen in (35, 50, P.CLIMB_FULL_GAME):
+        assert 0 < P._climb_read(seen) < P._climb_ramp(seen)
+    assert P._climb_read(300) == pytest.approx(1.0, abs=0.01)  # long past the top, his recent games are all up there
+
+
+def test_a_player_expected_to_miss_games_climbs_by_the_games_he_plays():
+    c, full = 0.15, P.CLIMB_FULL_GAME
+    every_game = P.climb_factors(0, 1.0, full, c)
+    half_of_them = P.climb_factors(0, 0.5, 2 * full, c)
+    assert half_of_them[2 * full - 1] == pytest.approx(every_game[full - 1])  # the same game of his, twice as far off
+    assert half_of_them[full - 1] < every_game[full - 1]
+
+    pr, ctx = _in_year(1)
+    normal = ctx.form("1")
+    ctx.proj["1"].availability, ctx._form = 0.5, {}
+    sits_more = ctx.form("1")
+    assert pr.climb > 0 and list(sits_more) == list(normal)
+    assert all(a <= b for a, b in zip(sits_more.values(), normal.values()))
+    assert sits_more[max(sits_more)] < normal[max(normal)]
 
 
 def test_a_young_players_preseason_projection_stays_his_season_average(monkeypatch):
-    """The climb moves his season's shape, not its total: he starts below his preseason minutes and ends above."""
+    """The climb moves his season's shape, not its total, however many games he's expected to miss."""
     pr, _ = _in_year(2)
-    n_games = round(pr.availability * season_games(2027))
-    ramp = [P.climb_factor(n, 0, pr.climb) for n in range(1, n_games + 1)]
+    ramp = P.climb_factors(0, pr.availability, season_games(2027), pr.climb)
     flat, _ = _in_year(2, monkeypatch, CLIMB_FIRST_YEAR=0.0)
     assert pr.climb > 0 and pr.mpg < flat.mpg
     assert pr.mpg * float(np.mean(ramp)) == pytest.approx(flat.mpg)
@@ -612,7 +636,8 @@ def test_a_young_players_form_rises_through_the_rest_of_the_season():
     pr, ctx = _in_year(1)
     form = [v for _, v in sorted(ctx.form("1").items())]
     assert len(form) == len(ctx.team_days[ctx.s.players["1"].pro_team])  # every game, not only the opening dip
-    assert form[0] < 1 < form[-1] and form[-1] == pytest.approx(1 + pr.climb, rel=0.01)
+    assert form[0] < 1 < form[-1]
+    assert form[-1] == pytest.approx(P.climb_factors(0, pr.availability, len(form), pr.climb)[-1], rel=0.01)
     _, veteran = _in_year(10)
     assert not veteran.proj["1"].climb
     assert all(v < 1 for v in veteran.form("1").values())  # only his opening dip
@@ -631,6 +656,16 @@ def test_a_players_years_set_his_opening_dip_and_veterans_minutes(monkeypatch):
     assert trim < 1 and trimmed.mpg == pytest.approx(full.mpg * trim)
     assert unknown.mpg == pytest.approx(trimmed.mpg)  # seasons behind him and no first season: established
     assert six.climb > 0 and trimmed.climb == 0.0
+
+
+def test_the_longest_serving_veterans_minutes_are_trimmed_a_little_more(monkeypatch):
+    year = P.LONG_VETERAN_YEARS
+    trim, long_trim = P.VETERAN_MINUTES, P.LONG_VETERAN_MINUTES
+    long_serving, just_short = _in_year(year)[0], _in_year(year - 1)[0]
+    assert long_trim < trim
+    assert long_serving.mpg == pytest.approx(just_short.mpg * long_trim / trim)
+    full, _ = _in_year(year, monkeypatch, LONG_VETERAN_MINUTES=1.0)
+    assert long_serving.mpg == pytest.approx(full.mpg * long_trim)
 
 
 def test_this_seasons_games_count_more_than_last_seasons():

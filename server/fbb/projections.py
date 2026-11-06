@@ -147,9 +147,12 @@ SECOND_YEAR_NO_DIP_MPG = 28.0
 CLIMB_FIRST_YEAR = 0.15
 EARLY_DIP_BY_YEAR = {3: 0.5, 4: 0.25}
 VETERAN_MINUTES = 0.98
+LONG_VETERAN_MINUTES = 0.97
+LONG_VETERAN_YEARS = 11
 CLIMB_YEARS = 6
 CLIMB_START_GAME = 20
 CLIMB_FULL_GAME = 60
+CLIMB_MINUTES_SHARE = 0.6
 POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
 
 INJURY_DEFAULT_GAMES = {
@@ -260,12 +263,29 @@ def _climb_ramp(n: float) -> float:
     return min(1.0, max(0.0, (n - CLIMB_START_GAME) / (CLIMB_FULL_GAME - CLIMB_START_GAME)))
 
 
-def climb_factor(n: float, seen: float, climb: float) -> float:
-    """His output in his n-th game of the season relative to now, after ``seen`` games: the update has already read
-    the climb in those games, so only what's still ahead of him counts."""
+def _climb_read(seen: int) -> float:
+    """How far up the climb the update reads him after ``seen`` games. It weights recent games most, so the read
+    trails the game he's on: minutes fade faster than output per minute, and the climb is about CLIMB_MINUTES_SHARE
+    minutes."""
+    if seen <= CLIMB_START_GAME:
+        return 0.0
+
+    def read(half_life: float) -> float:
+        weights = [_decay(j, half_life) for j in range(seen)]
+        return sum(w * _climb_ramp(seen - j) for j, w in enumerate(weights)) / sum(weights)
+
+    return CLIMB_MINUTES_SHARE * read(MINUTES_HALF_LIFE_GAMES) + (1.0 - CLIMB_MINUTES_SHARE) * read(RATE_HALF_LIFE_GAMES)
+
+
+def climb_factors(seen: int, availability: float, games: int, climb: float) -> list[float]:
+    """His output in each of his team's next ``games`` games relative to his projection after ``seen`` games. The
+    update has already read the climb in those games. He's expected to miss some of what's left, so his own game count
+    rises by ``availability`` per team game. The app and scripts/backtest_recency.py both count this way: a count that
+    used the games he really went on to play would know the future."""
     if not climb:
-        return 1.0
-    return (1.0 + climb * _climb_ramp(n)) / (1.0 + climb * _climb_ramp(seen))
+        return [1.0] * games
+    base = 1.0 + climb * _climb_read(int(seen))
+    return [(1.0 + climb * _climb_ramp(seen + availability * (k + 1))) / base for k in range(games)]
 
 
 def return_factor(j: float, missed: float) -> float:
@@ -497,8 +517,7 @@ class ProjectionEngine:
         # his level before any games is that average over the climb's average.
         climb = climb_for(years)
         if climb:
-            n_games = max(1, round(blend["avail"] * season_games(self.season)))
-            level_mpg /= float(np.mean([1.0 + climb * _climb_ramp(n) for n in range(1, n_games + 1)]))
+            level_mpg /= float(np.mean(climb_factors(0, blend["avail"], season_games(self.season), climb)))
         # Most recent game is index 0 in the decay. His first games of the season and first games back from an
         # absence count their minutes scaled up by their dips.
         for n_back, g in enumerate(reversed(games)):
@@ -558,7 +577,7 @@ class ProjectionEngine:
         k_mpg = 0.0 if season_only else MINUTES_PRIOR_GAMES
         mpg = (k_mpg * level_mpg + w_minutes_sum) / (k_mpg + mins_prior_w)
         if years is None or years > CLIMB_YEARS:
-            mpg *= VETERAN_MINUTES
+            mpg *= LONG_VETERAN_MINUTES if years and years >= LONG_VETERAN_YEARS else VETERAN_MINUTES
         k_avg = float(np.mean([K[k] for k in ("FGM", "REB", "AST")]))
         in_season_weight = season_min / (obs_min + k_avg) if obs_min else 0.0
         carryover_weight = (obs_min - season_min) / (obs_min + k_avg) if obs_min else 0.0

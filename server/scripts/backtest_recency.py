@@ -6,9 +6,10 @@ learned weights, so nothing leaks from the season being tested), feed in his fir
 engine's own in-season update, and compare the projected fantasy points per game with his actual
 average over the rest of that season. Like the app, the update also sees the closing games of the season
 before (his games among his team's last 20), and his team's schedule, so it knows which games he missed.
-As in the app's weekly windows, each game left is projected at the player's level times its opening dip
-(below 1 in his first games of the season) and, when he has just come back from an absence, its return
-dip. Settings are the half-lives, prior strength, the weight of last season's closing games and the
+As in the app's weekly windows, each of his team's games left is projected at the player's level times its
+opening dip (below 1 in his first games of the season), when he has just come back from an absence its
+return dip, and for a young player his climb. How many of those games he goes on to play stays unknown to
+the projection. Settings are the half-lives, prior strength, the weight of last season's closing games and the
 opening and return dips in fbb/projections.py; the first row is what the app uses now. Bias is total
 projected over total actual, minus 1.
 
@@ -21,6 +22,7 @@ import argparse
 import json
 import statistics
 import sys
+from bisect import bisect_right
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,6 +118,10 @@ def run(season: int) -> None:
     for games in all_logs.values():
         for g in games:
             games_by_day.setdefault(g["period"], set()).add(g["team"])
+    team_days: dict[str, list[int]] = {}
+    for day in sorted(games_by_day):
+        for team in games_by_day[day]:
+            team_days.setdefault(team, []).append(day)
     players = {}
     for pid in logs:
         espn = ds.espn.get((pid, season))
@@ -153,10 +159,15 @@ def run(season: int) -> None:
                 rookie = "rookie" in pr.flags
                 back = engine._absences(player, seen[len(seen) - c:], c)[0] if c else []
                 j, missed = back[-1] if back else (0, 0)
+                days = team_days[games[c - 1]["team"] if c else games[0]["team"]]
+                left = len(days) - bisect_right(days, games[c - 1]["period"] if c else -1)
+                if not left:
+                    continue
+                climbs = P.climb_factors(c, pr.availability, left, pr.climb)
                 proj = pr.fp_pg * statistics.fmean(
-                    P.opening_factor(n, rookie, pr.rookie_minutes_dip, pr.second_year_dip)
-                    * P.return_factor(j + n - c, missed) * P.climb_factor(n, c, pr.climb)
-                    for n in range(c + 1, len(games) + 1))
+                    P.opening_factor(c + k + 1, rookie, pr.rookie_minutes_dip, pr.second_year_dip)
+                    * P.return_factor(j + k + 1, missed) * climbs[k]
+                    for k in range(left))
                 err.append(abs(proj - actual))
                 proj_tot += proj * (len(games) - c)
                 act_tot += actual * (len(games) - c)

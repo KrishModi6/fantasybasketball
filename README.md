@@ -176,6 +176,6 @@ AWS also runs the simulator's accuracy check: at 7:30 AM and 6:30 PM Eastern, Ev
 - [User guide](docs/USER_GUIDE.md)
 - [Admin guide](docs/ADMIN_GUIDE.md)
 - [API reference](docs/API.md) (interactive docs at `/docs` on a running server)
-- [AWS: S3 backup, Bedrock evaluation, costs](docs/AWS.md)
+- [AWS: S3 backup, Lambda sims, Bedrock evaluation, costs](docs/AWS.md)
 - [Connectors](docs/CONNECTORS.md)
 - [AI assistant and the Cloudflare proxy](docs/AI.md)
