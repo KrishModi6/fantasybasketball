@@ -345,6 +345,23 @@ Nearly all of the error gain is the veterans': −0.082 (−0.124 to −0.042) i
 
 In the app's rest-of-season backtest (`scripts/backtest_recency.py`, players with 40+ games), error was 4.513 → 4.445 FP/G in 2025‑26, 3.963 → 3.899 in 2024‑25, and slightly worse in 2023‑24, 4.170 → 4.181.
 
+These settings were chosen on 2023‑24 to 2025‑26, so that table flatters them. To check, each of those seasons was held out in turn: the climb size and veterans' minutes were picked on the other two, by closest to 1.00, and scored on the one left out. The picks landed close to what shipped (climb 0.15–0.20, years 7–10 at 0.97–0.99, year 11+ at 0.96–0.97). Alignment beat the old app in all three seasons (average gap 0.033 → 0.026, 0.053 → 0.039, 0.047 → 0.029). Rest-of-season error moved +0.034, −0.041 and −0.034 FP/G, none clearly different from zero alone.
+
+The exact code against the app before these changes, season by season, on a second harness (its next-10 count differs a little from the one above: −0.030 for 2023‑26 where that one has −0.024):
+
+| Season | Rest of season | Next 10 |
+|---|---|---|
+| 2025‑26 | −0.062 (−0.099 to −0.027) | −0.037 (−0.062 to −0.012) |
+| 2024‑25 | −0.040 (−0.077 to +0.001) | −0.033 (−0.057 to −0.007) |
+| 2023‑24 | +0.013 (−0.025 to +0.051) | −0.019 (−0.042 to +0.006) |
+| 2022‑23, not used to choose, no ESPN in the blend | +0.020 (−0.017 to +0.056) | −0.012 (−0.036 to +0.011) |
+| 2021‑22, used only to check settings | −0.044 (−0.082 to −0.005) | −0.052 (−0.077 to −0.028) |
+| 2020‑21, used only to check settings | −0.008 (−0.043 to +0.029) | −0.030 (−0.054 to −0.006) |
+
+Alignment improved in all six seasons (average gap 0.034 → 0.016 pooled). Error was flat in 2020‑21 and 2022‑23 and lower in 2021‑22; among the three recent seasons it was lower in 2024‑25 and 2025‑26 and flat in 2023‑24. Pooled over all six, rest of season −0.021 (−0.036 to −0.006) and next 10 −0.031 (−0.041 to −0.021); over the last four, −0.018 (−0.037 to +0.001) and −0.026 (−0.037 to −0.013).
+
+So the older seasons aren't as clean a win as the recent ones. Year 3 stays about 4% low (0.93 → 0.96 over all six). Veterans' ratios vary by season: in 2022‑23 they weren't running high, and the trim took them too low (years 7–10 0.98 → 0.96, year 11+ 1.01 → 0.98). ESPN's projections for that season fail our audit and aren't in its blend, which may be part of it; that hasn't been checked.
+
 Tried and dropped:
 - **Counting the climb over the games he really played.** This first version looked much better (−0.052 rest of season), but it knows the future: a player who ended with 25 games got almost no climb and one who ended with 80 got all of it. Counted the way the app first did, with him playing every team game left, error rose 0.027 (+0.003 to +0.052) and rookies' went from 4.82 to 4.99. The app and `scripts/backtest_recency.py` now share one count, `climb_factors`.
 - **A flat multiplier by years in the league.** Fitted on two seasons and scored on the third, it brought totals to about 1.00, but error rose (+0.017 rest of season, +0.083 next 10): it pushed early-season projections further above what young players were about to score. Their shortfall is about timing, and partly that players who beat their projection get more games, which a multiplier can't separate. Splitting it by role was worse.
