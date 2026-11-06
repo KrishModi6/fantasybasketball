@@ -94,6 +94,17 @@ def test_enrich_keeps_seasons_from_2024_25():
     assert [h.season for h in players["3112335"].history] == [2025, 2026]
 
 
+def test_enrich_counts_his_first_season_before_trimming_his_history():
+    lines = [make_line(s, 60, 30, 1.0) for s in (2022, 2023, 2024, 2025, 2026)]
+    players = {"x": Player(id="x", name="Not in the dataset", history=lines),
+               "new": Player(id="new", name="Rookie"),
+               "debut": Player(id="debut", name="ESPN says", debut_year=2020)}
+    enrich_players(players, 2027)
+    assert players["x"].first_season == 2022
+    assert players["new"].first_season == 2027
+    assert players["debut"].first_season == 2021  # started in calendar 2020: the 2020-21 season
+
+
 def test_aging_curve_direction():
     assert aging_factor(22, "AST") > 1 > aging_factor(34, "AST")
     assert aging_factor(22, "TO") < 1  # bad stats move the other way
@@ -556,6 +567,105 @@ def test_a_rookie_already_playing_his_minutes_has_no_minutes_dip_left():
     assert full.rookie_minutes_dip == 0.0 and _with_games([2027] * 3).rookie_minutes_dip == 0.0
     m, r = P.opening_factors(5, True, full.rookie_minutes_dip)
     assert m == pytest.approx(P.opening_factors(5)[0]) and r < P.opening_factors(5)[1]  # output per minute still dips
+
+
+def _in_year(years: int | None, monkeypatch=None, **constants):
+    """Player 1's projection and context in his ``years``-th NBA season (None: unknown, with seasons behind him)."""
+    if monkeypatch:
+        for name, value in constants.items():
+            monkeypatch.setattr(P, name, value)
+    snap = make_snapshot()
+    snap.players["1"].first_season = 2027 - years + 1 if years else None
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    return ctx.proj["1"], ctx
+
+
+def test_the_climb_shrinks_with_each_year_in_the_league():
+    climbs = [P.climb_for(y) for y in range(1, 9)]
+    assert climbs[0] == P.CLIMB_FIRST_YEAR
+    assert all(a > b for a, b in zip(climbs[:6], climbs[1:6]))
+    assert climbs[5] > 0 and climbs[6] == climbs[7] == P.climb_for(None) == 0.0
+
+
+def test_the_climb_counts_only_what_is_still_ahead_of_him():
+    c = 0.15
+    assert P.climb_factors(5, 1.0, 3, 0.0) == [1.0, 1.0, 1.0]
+    start, full = P.CLIMB_START_GAME, P.CLIMB_FULL_GAME
+    before = P.climb_factors(0, 1.0, full + 20, c)
+    assert before[start - 1] == 1.0  # hasn't started
+    assert before[full - 1] == pytest.approx(1 + c)
+    assert before[-1] == pytest.approx(1 + c)  # levels off
+    mid = (start + full) // 2
+    later = P.climb_factors(mid, 1.0, full - mid, c)
+    assert later[-1] == pytest.approx(before[-1] / (1 + c * P._climb_read(mid)))
+
+
+def test_the_updates_read_of_his_climb_trails_the_game_hes_on():
+    assert P._climb_read(P.CLIMB_START_GAME) == 0.0
+    for seen in (35, 50, P.CLIMB_FULL_GAME):
+        assert 0 < P._climb_read(seen) < P._climb_ramp(seen)
+    assert P._climb_read(300) == pytest.approx(1.0, abs=0.01)  # long past the top, his recent games are all up there
+
+
+def test_a_player_expected_to_miss_games_climbs_by_the_games_he_plays():
+    c, full = 0.15, P.CLIMB_FULL_GAME
+    every_game = P.climb_factors(0, 1.0, full, c)
+    half_of_them = P.climb_factors(0, 0.5, 2 * full, c)
+    assert half_of_them[2 * full - 1] == pytest.approx(every_game[full - 1])  # the same game of his, twice as far off
+    assert half_of_them[full - 1] < every_game[full - 1]
+
+    pr, ctx = _in_year(1)
+    normal = ctx.form("1")
+    ctx.proj["1"].availability, ctx._form = 0.5, {}
+    sits_more = ctx.form("1")
+    assert pr.climb > 0 and list(sits_more) == list(normal)
+    assert all(a <= b for a, b in zip(sits_more.values(), normal.values()))
+    assert sits_more[max(sits_more)] < normal[max(normal)]
+
+
+def test_a_young_players_preseason_projection_stays_his_season_average(monkeypatch):
+    """The climb moves his season's shape, not its total, however many games he's expected to miss."""
+    pr, _ = _in_year(2)
+    ramp = P.climb_factors(0, pr.availability, season_games(2027), pr.climb)
+    flat, _ = _in_year(2, monkeypatch, CLIMB_FIRST_YEAR=0.0)
+    assert pr.climb > 0 and pr.mpg < flat.mpg
+    assert pr.mpg * float(np.mean(ramp)) == pytest.approx(flat.mpg)
+
+
+def test_a_young_players_form_rises_through_the_rest_of_the_season():
+    pr, ctx = _in_year(1)
+    form = [v for _, v in sorted(ctx.form("1").items())]
+    assert len(form) == len(ctx.team_days[ctx.s.players["1"].pro_team])  # every game, not only the opening dip
+    assert form[0] < 1 < form[-1]
+    assert form[-1] == pytest.approx(P.climb_factors(0, pr.availability, len(form), pr.climb)[-1], rel=0.01)
+    _, veteran = _in_year(10)
+    assert not veteran.proj["1"].climb
+    assert all(v < 1 for v in veteran.form("1").values())  # only his opening dip
+
+
+def test_a_players_years_set_his_opening_dip_and_veterans_minutes(monkeypatch):
+    second = P.SECOND_YEAR_DIP_MINUTES
+    assert _in_year(3)[0].second_year_dip <= second * P.EARLY_DIP_BY_YEAR[3]
+    assert _in_year(5)[0].second_year_dip == 0.0
+    three, four = (P.EARLY_DIP_BY_YEAR[y] for y in (3, 4))
+    assert 0 < four < three < 1
+
+    trimmed, unknown, six = _in_year(7)[0], _in_year(None)[0], _in_year(6)[0]
+    trim = P.VETERAN_MINUTES
+    full, _ = _in_year(7, monkeypatch, VETERAN_MINUTES=1.0)
+    assert trim < 1 and trimmed.mpg == pytest.approx(full.mpg * trim)
+    assert unknown.mpg == pytest.approx(trimmed.mpg)  # seasons behind him and no first season: established
+    assert six.climb > 0 and trimmed.climb == 0.0
+
+
+def test_the_longest_serving_veterans_minutes_are_trimmed_a_little_more(monkeypatch):
+    year = P.LONG_VETERAN_YEARS
+    trim, long_trim = P.VETERAN_MINUTES, P.LONG_VETERAN_MINUTES
+    long_serving, just_short = _in_year(year)[0], _in_year(year - 1)[0]
+    assert long_trim < trim
+    assert long_serving.mpg == pytest.approx(just_short.mpg * long_trim / trim)
+    full, _ = _in_year(year, monkeypatch, LONG_VETERAN_MINUTES=1.0)
+    assert long_serving.mpg == pytest.approx(full.mpg * long_trim)
 
 
 def test_this_seasons_games_count_more_than_last_seasons():

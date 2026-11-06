@@ -68,6 +68,7 @@ def enrich_players(players: dict[str, Player], season: int) -> None:
     for pid, p in players.items():
         known = {h.season for h in p.history}
         extra = [h for h in ds.lines.get(pid, []) if first <= h.season < season and h.season not in known]
+        played = [h.season for h in p.history if h.season < season]
         p.history = sorted((h for h in p.history + extra if h.season >= first), key=lambda h: h.season)
         bio = bios.get(pid) or {}
         if p.age is None and bio.get("age") is not None:
@@ -75,3 +76,8 @@ def enrich_players(players: dict[str, Player], season: int) -> None:
             p.age = float(bio["age"]) - (ds.age_season - season)
         if p.debut_year is None and bio.get("debut_year"):
             p.debut_year = int(bio["debut_year"])
+        # Before the trim above, a debut year or his older seasons still say how long he's been in the league.
+        starts = played + [ds.first_season(pid, season) or season]
+        if p.debut_year:
+            starts.append(p.debut_year + 1)  # the calendar year he started: 2020 is 2020-21, season 2021 here
+        p.first_season = min(starts)

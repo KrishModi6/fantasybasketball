@@ -291,7 +291,87 @@ Tried and dropped:
 - **The same dip for every second-year player.** Established second-year starters have no dip to climb out of: projected 28+ minutes, it put their next 10 games at 0.88 of what they scored after no games seen. Scaling by role keeps them where they were.
 - **Leaving the starting level at the preseason projection.** The dip then lowered every small-role second-year player's rest-of-season projection before the first game, to 0.93 of what they scored.
 - **Fading over 8 games instead of 5** (or 3), and a 0.30 depth. 8 games gained about as much on the wide sample (4.16 / 4.61), but missed more in the weekly windows (second-year per-game error 7.051, weeks 7 and 10 worse); 3 games and 0.30 gave up more of the gain (4.18–4.19 / 4.63–4.66).
-- **A smaller dip for third-year players too** (0.20). It lowered all players' wide-sample error further (4.040 → 4.029), but the app keeps only two seasons of history, so a third-year player looks like a veteran to it. That needs his first season from the bundled history first.
+
+**Years in the league.** Rookies and second-year players were the visible part of a wider pattern. The app now knows each player's first NBA season (`Player.first_season`: the earliest season in the bundled history or his debut year, counted before his history is trimmed to two seasons), and his years in the league shape his whole season. Each player against his own games 21–40, so who keeps playing can't bias it (ESPN's game logs for the 1,000 most-rostered players, 2023‑24 to 2025‑26):
+
+| Fantasy points, games of the season | 1–10 | 11–20 | 21–40 | 41–60 | 61–82 |
+|---|---|---|---|---|---|
+| Year 1 | 0.77 | 0.93 | 1 | 1.11 | 1.17 |
+| Year 2 | 0.83 | 0.95 | 1 | 1.01 | 1.13 |
+| Year 3 | 0.89 | 0.94 | 1 | 1.14 | 1.16 |
+| Year 4 | 0.94 | 0.97 | 1 | 1.04 | 1.09 |
+| Years 5–6 | 0.95 | 1.00 | 1 | 1.02 | 1.05 |
+| Year 7+ | 0.97 | 1.01 | 1 | 0.98 | 1.00 |
+
+Players who drop out of a rotation reach game 61 less often, so these climbs are somewhat overstated. That's part of why the climb below is smaller than the table. Three changes follow, all from the same count of years:
+
+- **A climb.** A player's output rises by *c* from his game 20 to his game 60 and then holds, with *c* = 0.15 × (7 − *y*) / 6 in his *y*-th season: 0.15 for a rookie, 0.025 in year 6, none from year 7. His own game count rises by his availability per team game, so a player expected to miss games climbs later. The climb is relative to the update's read of his games so far, which trails the game he's on because recent games count most: the read is his place on the climb averaged over those games, 60% at the minutes half-life and 40% at the rate half-life (from games 21–40 to games 61+, about 60% of the climb was minutes). It reaches rest-of-season value, weekly windows, matchup odds and trades through the same daily form as the dips. A preseason projection is a season average with the climb in it, so his level before any games is that average over the climb's average across his team's season, and his projection before his first game stays what it was.
+- **An opening dip for years 3 and 4:** half and a quarter of a second-year player's, by role in the same way.
+- **Veterans' minutes × 0.98 from year 7 and × 0.97 from year 11.** Their minutes ran 2–4% below projection in every season, and every minutes role from 15 up ran at or above 1.
+
+Rest of season, projected / actual, for every player with 10 games left (1,485 player-seasons). Each projection is made over his team's games left, knowing nothing about which of them he plays:
+
+| After *c* games | 3 | 10 | 20 | 35 | 50 |
+|---|---|---|---|---|---|
+| Year 1: before | 1.01 | 0.98 | 0.94 | 0.91 | 0.89 |
+| after | 1.02 | 1.00 | 1.00 | 0.99 | 0.95 |
+| Year 2: before | 0.98 | 0.95 | 0.95 | 0.96 | 0.92 |
+| after | 0.99 | 0.98 | 1.02 | 1.03 | 0.98 |
+| Year 3: before | 0.93 | 0.91 | 0.90 | 0.88 | 0.92 |
+| after | 0.95 | 0.94 | 0.96 | 0.93 | 0.97 |
+| Year 4: before | 0.95 | 0.96 | 0.95 | 0.95 | 0.94 |
+| after | 0.96 | 0.98 | 1.00 | 0.99 | 0.97 |
+| Years 5–6: before | 0.97 | 0.97 | 0.98 | 0.97 | 0.97 |
+| after | 0.97 | 0.98 | 0.99 | 0.99 | 0.99 |
+| Years 7–10: before | 1.03 | 1.01 | 1.02 | 1.02 | 1.00 |
+| after | 1.01 | 0.99 | 1.00 | 1.00 | 0.98 |
+| Year 11+: before | 1.05 | 1.03 | 1.03 | 1.03 | 1.02 |
+| after | 1.02 | 1.00 | 0.99 | 1.00 | 0.99 |
+
+They're closer to 1, not all at it. Across these groups, from 0 to 35 games seen, the average gap from 1.00 fell from 0.041 to 0.019 and the widest from 0.122 to 0.069. Year 3 stays the lowest.
+
+Averaged over 0–50 games seen, all players' rest-of-season error fell from 4.212 to 4.181 FP/G (−0.030, 95% interval −0.052 to −0.009) and next-10-game error from 4.820 to 4.801 (−0.024, −0.037 to −0.010). Rest of season by season: +0.012 in 2023‑24, −0.038 in 2024‑25, −0.061 in 2025‑26. For players projected for 20+ minutes, it fell from 4.057 to 4.018.
+
+Each change did a different job, measured alone against the app before them:
+
+| Change | Rest of season | Next 10 | Average gap from 1.00 | Widest |
+|---|---|---|---|---|
+| Veterans' minutes | −0.034 | −0.022 | 0.034 | 0.122 |
+| Year 3–4 dips | −0.003 | +0.003 | 0.038 | 0.118 |
+| Climb | +0.005 | −0.005 | 0.028 | 0.075 |
+| All three | −0.030 | −0.024 | 0.019 | 0.069 |
+
+Nearly all of the error gain is the veterans': −0.082 (−0.124 to −0.042) in years 7–10 and −0.114 (−0.188 to −0.041) from year 11. Young players' error didn't move beyond noise (year 1 +0.004, year 2 +0.039, year 3 −0.037, year 4 +0.007, years 5–6 +0.013, each ±0.03–0.08). The climb is there because their projections ran low as a season went on, and it fixes that without lowering their error.
+
+In the app's rest-of-season backtest (`scripts/backtest_recency.py`, players with 40+ games), error was 4.513 → 4.445 FP/G in 2025‑26, 3.963 → 3.899 in 2024‑25, and slightly worse in 2023‑24, 4.170 → 4.181.
+
+These settings were chosen on 2023‑24 to 2025‑26, so that table flatters them. To check, each of those seasons was held out in turn: the climb size and veterans' minutes were picked on the other two, by closest to 1.00, and scored on the one left out. The picks landed close to what shipped (climb 0.15–0.20, years 7–10 at 0.97–0.99, year 11+ at 0.96–0.97). Alignment beat the old app in all three seasons (average gap 0.033 → 0.026, 0.053 → 0.039, 0.047 → 0.029). Rest-of-season error moved +0.034, −0.041 and −0.034 FP/G, none clearly different from zero alone.
+
+The exact code against the app before these changes, season by season, on a second harness (its next-10 count differs a little from the one above: −0.030 for 2023‑26 where that one has −0.024):
+
+| Season | Rest of season | Next 10 |
+|---|---|---|
+| 2025‑26 | −0.062 (−0.099 to −0.027) | −0.037 (−0.062 to −0.012) |
+| 2024‑25 | −0.040 (−0.077 to +0.001) | −0.033 (−0.057 to −0.007) |
+| 2023‑24 | +0.013 (−0.025 to +0.051) | −0.019 (−0.042 to +0.006) |
+| 2022‑23, not used to choose, no ESPN in the blend | +0.020 (−0.017 to +0.056) | −0.012 (−0.036 to +0.011) |
+| 2021‑22, used only to check settings | −0.044 (−0.082 to −0.005) | −0.052 (−0.077 to −0.028) |
+| 2020‑21, used only to check settings | −0.008 (−0.043 to +0.029) | −0.030 (−0.054 to −0.006) |
+
+Alignment improved in all six seasons (average gap 0.034 → 0.016 pooled). Error was flat in 2020‑21 and 2022‑23 and lower in 2021‑22; among the three recent seasons it was lower in 2024‑25 and 2025‑26 and flat in 2023‑24. Pooled over all six, rest of season −0.021 (−0.036 to −0.006) and next 10 −0.031 (−0.041 to −0.021); over the last four, −0.018 (−0.037 to +0.001) and −0.026 (−0.037 to −0.013).
+
+So the older seasons aren't as clean a win as the recent ones. Year 3 stays about 4% low (0.93 → 0.96 over all six). Veterans' ratios vary by season: in 2022‑23 they weren't running high, and the trim took them too low (years 7–10 0.98 → 0.96, year 11+ 1.01 → 0.98). ESPN's projections for that season fail our audit and aren't in its blend, which may be part of it; that hasn't been checked. In 2020‑21 the worst group got further off (0.048 → 0.068), as year 1 ran high that season and went higher.
+
+Early in a season these changes run a little low by design. Young players' opening level comes down so their season average holds, and veterans' minutes are trimmed, so over the first 17 days all players' projections went from 1.007 to 0.982 of what they scored, across those six seasons. Error there barely moved (−0.022, with no single season's interval clearing zero). The first 17 days of 2026‑27 went from 1.061 to 1.033, with error 5.288 → 5.156 (−0.132, −0.219 to −0.044). That's mostly this season's players running 6% under projection so far, which favors any trim, and the climb hasn't started, so it's weak support at best.
+
+Matchup and playoff odds barely moved. On AWS Lambda, 300 synthetic leagues (100 per season) ran each way, old and new projections forecasting the same rosters and real results, once with managers trusting the old projections and once the new. Weekly win-odds Brier went 0.1864 → 0.1858 and 0.1869 → 0.1869. Playoff Brier went 0.1355 → 0.1359 (+0.0004, −0.0001 to +0.0009) and 0.1360 → 0.1362 (+0.0002, −0.0003 to +0.0007). Projected weekly scores moved about 0.9% closer overall (real against projected, −2.3% → −1.4%), and the 80% range held 79.6% → 79.2% and 79.3% → 79.0% of real scores. By season, 2025‑26 got a little better and 2023‑24 a little worse (playoff Brier +0.0014 and +0.0007; its scores already ran above projection and now run further above). Every league in a season shares the same real games, so these intervals understate the uncertainty: three seasons is the real sample.
+
+Tried and dropped:
+- **Counting the climb over the games he really played.** This first version looked much better (−0.052 rest of season), but it knows the future: a player who ended with 25 games got almost no climb and one who ended with 80 got all of it. Counted the way the app first did, with him playing every team game left, error rose 0.027 (+0.003 to +0.052) and rookies' went from 4.82 to 4.99. The app and `scripts/backtest_recency.py` now share one count, `climb_factors`.
+- **A flat multiplier by years in the league.** Fitted on two seasons and scored on the third, it brought totals to about 1.00, but error rose (+0.017 rest of season, +0.083 next 10): it pushed early-season projections further above what young players were about to score. Their shortfall is about timing, and partly that players who beat their projection get more games, which a multiplier can't separate. Splitting it by role was worse.
+- **Other climb sizes.** A rookie climb of 0.075, 0.1125, 0.15 or 0.20 changed rest-of-season error by −0.038, −0.035, −0.030 or −0.019, close enough to be noise, with average gaps of 0.024, 0.021, 0.019 and 0.018. 0.15 takes nearly all of the alignment; 0.20 adds little and gives back error, most of all in 2023‑24.
+- **A climb table by year** (year 3 at 0.15 instead of 0.10). It lifted year 3 by about a point, and year 3's error got worse in 2020‑21 (4.06 → 4.11). Not worth six separate numbers.
+- **Veterans' minutes × 0.97 from year 7.** About the same error as the split (−0.034), with 2023‑24 worse (+0.017), and no better than 0.98 for years 7–10 in the older seasons.
 
 ### 1.6 Bounded adjustments (the "news" layer)
 
