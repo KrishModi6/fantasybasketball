@@ -15,7 +15,7 @@ import numpy as np
 
 from .lineup import SlotModel, solve_day
 from .models import LeagueSnapshot
-from .projections import PlayerProjection, ProjectionEngine, opening_factor, return_factor
+from .projections import PlayerProjection, ProjectionEngine, climb_factor, opening_factor, return_factor
 from .schedule import game_state, period_for_date, period_to_matchup, remaining_days
 from .valuation import CategoryValuer
 
@@ -148,8 +148,9 @@ class AnalysisContext:
     def form(self, pid: str) -> dict[int, float]:
         """period -> his expected output that day relative to his projection: below 1 in his first games of
         the season and his first games back from an absence (the opening and return dips in fbb/projections.py,
-        the opening dip deeper and longer for a rookie and a second-year player in a small role), counting from
-        the games he has played and after those he's expected to miss. Days not listed are 1."""
+        the opening dip deeper and longer for a rookie and a second-year player in a small role), above 1 later in
+        the season for a young player still climbing, counting from the games he has played and after those he's
+        expected to miss. Days not listed are 1."""
         if pid in self._form:
             return self._form[pid]
         pr = self.proj[pid]
@@ -161,11 +162,11 @@ class AnalysisContext:
         missed, back = (away, 0) if away else (pr.back_from, pr.games_back)
         out: dict[int, float] = {}
         for k, d in enumerate(days[full_out:]):
-            f = (opening_factor(pr.games_played + k + 1, rookie, pr.rookie_minutes_dip, pr.second_year_dip)
-                 * return_factor(back + k + 1, missed))
-            if f > 0.999:
+            n = pr.games_played + k + 1
+            f = opening_factor(n, rookie, pr.rookie_minutes_dip, pr.second_year_dip) * return_factor(back + k + 1, missed)
+            if f > 0.999 and not pr.climb:
                 break
-            out[d] = f
+            out[d] = f * climb_factor(n, pr.games_played, pr.climb)
         self._form[pid] = out
         return out
 

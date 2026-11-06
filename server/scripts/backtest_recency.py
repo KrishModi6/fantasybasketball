@@ -120,6 +120,7 @@ def run(season: int) -> None:
     for pid in logs:
         espn = ds.espn.get((pid, season))
         players[pid] = Player(id=pid, name=ds.names.get(pid, pid), age=ds.age_in(pid, season),
+                              first_season=ds.first_season(pid, season) or season,
                               history=[h for h in ds.lines.get(pid, []) if h.season < season],
                               experts=[espn] if espn else [], adp=ds.adp.get((pid, season)))
     snap = LeagueSnapshot(settings=LeagueSettings(name="backtest", season=season), teams=[], players=players,
@@ -154,7 +155,8 @@ def run(season: int) -> None:
                 j, missed = back[-1] if back else (0, 0)
                 proj = pr.fp_pg * statistics.fmean(
                     P.opening_factor(n, rookie, pr.rookie_minutes_dip, pr.second_year_dip)
-                    * P.return_factor(j + n - c, missed) for n in range(c + 1, len(games) + 1))
+                    * P.return_factor(j + n - c, missed) * P.climb_factor(n, c, pr.climb)
+                    for n in range(c + 1, len(games) + 1))
                 err.append(abs(proj - actual))
                 proj_tot += proj * (len(games) - c)
                 act_tot += actual * (len(games) - c)

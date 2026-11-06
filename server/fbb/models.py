@@ -94,6 +94,7 @@ class Player(BaseModel):
     expected_return: date | None = None
     age: float | None = None
     debut_year: int | None = None
+    first_season: int | None = None  # his first NBA season, counted the way seasons are here (2026-27 is 2027)
     history: list[SeasonLine] = Field(default_factory=list)  # completed seasons
     current: SeasonLine | None = None  # season-to-date
     recent_games: list[GameLog] = Field(default_factory=list)

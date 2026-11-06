@@ -132,6 +132,24 @@ SECOND_YEAR_DIP_MINUTES = 0.40
 SECOND_YEAR_GAMES = 5.0
 SECOND_YEAR_FULL_DIP_MPG = 15.0
 SECOND_YEAR_NO_DIP_MPG = 28.0
+# Years in the league set how a season goes. Against the same player's games 21-40, his fantasy points in games 1-10
+# and 61-82 ran 0.77 and 1.17 for rookies, 0.83 and 1.13 in year two, 0.89 and 1.16 in year three, 0.94 and 1.09 in
+# year four, 0.95 and 1.05 in years five and six, 0.97 and 1.00 from year seven (ESPN's 1,000-player pool, 2023-24 to
+# 2025-26). Three things follow from that, each chosen on rest-of-season and next-10-game FP/G for every player after
+# 0-50 games (docs/METHODOLOGY.md 1.5.2); together error fell 4.178 -> 4.125 and 4.750 -> 4.722 FP/G, in all three seasons:
+# - Climb: a rookie's output rises by CLIMB_FIRST_YEAR from his game CLIMB_START_GAME to CLIMB_FULL_GAME, a sixth less
+#   each year after, none from year seven. It counts forward from now, so the update's reading of his recent games
+#   isn't credited twice. Above 0.20 rookies ran high and error rose.
+# - Third- and fourth-year players have an opening dip too, a share of a second-year player's (EARLY_DIP_BY_YEAR).
+# - From year seven a player's minutes run 2-4% below his projection in every season: he's projected at
+#   VETERAN_MINUTES of them. 0.97 scored about the same, with 2023-24 worse and the groups further from 1.00.
+# These aren't fits to totals: a flat multiplier by years in the league brought totals to 1.00 and raised the error.
+CLIMB_FIRST_YEAR = 0.15
+EARLY_DIP_BY_YEAR = {3: 0.5, 4: 0.25}
+VETERAN_MINUTES = 0.98
+CLIMB_YEARS = 6
+CLIMB_START_GAME = 20
+CLIMB_FULL_GAME = 60
 POPULATION_CV = 0.36  # game-to-game coefficient of variation of fantasy points (prior)
 
 INJURY_DEFAULT_GAMES = {
@@ -198,6 +216,8 @@ class PlayerProjection:
     rookie_minutes_dip: float = 0.0
     # A second-year player's minutes dip in his first game of the season, by his preseason role (0 for everyone else).
     second_year_dip: float = 0.0
+    # How much his output is expected to climb from game CLIMB_START_GAME to CLIMB_FULL_GAME, by years in the league.
+    climb: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -227,6 +247,25 @@ def opening_factor(n: float, rookie: bool = False, rookie_minutes: float = 1.0, 
     """Fantasy output in a player's n-th game of the season relative to his settled level."""
     m, r = opening_factors(n, rookie, rookie_minutes, second_year_dip)
     return m * r
+
+
+def climb_for(years: int | None) -> float:
+    """The climb for a player in his ``years``-th NBA season: largest for a rookie, gone after CLIMB_YEARS seasons."""
+    if years is None or years > CLIMB_YEARS:
+        return 0.0
+    return CLIMB_FIRST_YEAR * (CLIMB_YEARS + 1 - max(years, 1)) / CLIMB_YEARS
+
+
+def _climb_ramp(n: float) -> float:
+    return min(1.0, max(0.0, (n - CLIMB_START_GAME) / (CLIMB_FULL_GAME - CLIMB_START_GAME)))
+
+
+def climb_factor(n: float, seen: float, climb: float) -> float:
+    """His output in his n-th game of the season relative to now, after ``seen`` games: the update has already read
+    the climb in those games, so only what's still ahead of him counts."""
+    if not climb:
+        return 1.0
+    return (1.0 + climb * _climb_ramp(n)) / (1.0 + climb * _climb_ramp(seen))
 
 
 def return_factor(j: float, missed: float) -> float:
@@ -443,13 +482,23 @@ class ProjectionEngine:
         # Minutes last season and none the season before: a second-year player, mostly. His dip goes by his role,
         # and his settled level is above his preseason projection, a season average that includes the dip.
         second_year = not rookie and pre["feats"].get("l2_gp_frac") == 0.0
+        # Without a known first season, the last two seasons still identify a rookie or second-year player; anyone
+        # else counts as established.
+        years = self.season - p.first_season + 1 if p.first_season else 1 if rookie else 2 if second_year else None
+        dip_share = 1.0 if second_year else EARLY_DIP_BY_YEAR.get(years, 0.0)
         second_year_dip, level_mpg = 0.0, prior_mpg
-        if second_year:
+        if dip_share:
             s = (SECOND_YEAR_NO_DIP_MPG - prior_mpg) / (SECOND_YEAR_NO_DIP_MPG - SECOND_YEAR_FULL_DIP_MPG)
-            second_year_dip = SECOND_YEAR_DIP_MINUTES * min(1.0, max(0.0, s))
+            second_year_dip = SECOND_YEAR_DIP_MINUTES * dip_share * min(1.0, max(0.0, s))
             n_games = max(1, round(blend["avail"] * season_games(self.season)))
             level_mpg = prior_mpg / float(np.mean([1.0 - second_year_dip * math.exp(-n / SECOND_YEAR_GAMES)
                                                    for n in range(n_games)]))
+        # His years in the league set his climb. A preseason projection is a season average that includes it, so
+        # his level before any games is that average over the climb's average.
+        climb = climb_for(years)
+        if climb:
+            n_games = max(1, round(blend["avail"] * season_games(self.season)))
+            level_mpg /= float(np.mean([1.0 + climb * _climb_ramp(n) for n in range(1, n_games + 1)]))
         # Most recent game is index 0 in the decay. His first games of the season and first games back from an
         # absence count their minutes scaled up by their dips.
         for n_back, g in enumerate(reversed(games)):
@@ -508,6 +557,8 @@ class ProjectionEngine:
         rates = {k: (K[k] * prior_rates[k] + obs_tot[k]) / (K[k] + obs_min) for k in RATE_STATS}
         k_mpg = 0.0 if season_only else MINUTES_PRIOR_GAMES
         mpg = (k_mpg * level_mpg + w_minutes_sum) / (k_mpg + mins_prior_w)
+        if years is None or years > CLIMB_YEARS:
+            mpg *= VETERAN_MINUTES
         k_avg = float(np.mean([K[k] for k in ("FGM", "REB", "AST")]))
         in_season_weight = season_min / (obs_min + k_avg) if obs_min else 0.0
         carryover_weight = (obs_min - season_min) / (obs_min + k_avg) if obs_min else 0.0
@@ -557,7 +608,7 @@ class ProjectionEngine:
             carryover_games=len(carry) if CARRYOVER_RATE_WEIGHT or CARRYOVER_MINUTES_WEIGHT else 0,
             carryover_weight=carryover_weight, tracked_fp_pg=tracked_fp, xfp_pg=xfp_fp,
             flags=["rookie"] if rookie else ["second_year"] if second_year else [], rookie_minutes_dip=rookie_minutes,
-            second_year_dip=second_year_dip,
+            second_year_dip=second_year_dip, climb=climb,
         )
 
     def explain(self, pr: PlayerProjection) -> list[dict]:
