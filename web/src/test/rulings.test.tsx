@@ -184,6 +184,13 @@ describe("the admin dashboard", () => {
     expect(screen.getByText("These are Courtside's numbers from when you ruled.")).toBeInTheDocument();
   });
 
+  it("tells the admin when their projection changes are in the numbers", async () => {
+    serve({ reach: "league", trades: [row({ numbers: numbers({ adjusted: true }) }), row({ key: "k2", trade: { ...trade, text: "The other one" } })] });
+    show(<AdminPage />);
+    expect(await screen.findByText(/These numbers include your projection changes/)).toBeInTheDocument();
+    expect(screen.getAllByText(/These numbers include your projection changes/)).toHaveLength(1);
+  });
+
   it("copes with a trade scored before these numbers existed", async () => {
     const old: RulingSide = { team_id: 1, team_name: null, delta_per_week: null, delta_pct: null, before_playoff_odds: null,
       after_playoff_odds: null, before_title_odds: null, after_title_odds: null, verdict: null };
@@ -235,6 +242,13 @@ describe("what everyone else sees", () => {
     expect(screen.getByText("Courtside's verdict")).toBeInTheDocument();
     expect(screen.getByText("advantageous")).toBeInTheDocument();
     expect(screen.queryByText(/undoing it/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/projection changes/)).not.toBeInTheDocument();
+  });
+
+  it("says when the admin's projection changes are in the numbers", async () => {
+    serve({ reach: "league", trades: [] }, [ruling({ numbers: numbers({ adjusted: true }) })]);
+    show(<LeagueRulings />);
+    expect(await screen.findByText(/projection changes the admin made in their own app/)).toBeInTheDocument();
   });
 
   it("carries the undo label with a finished trade's numbers", async () => {

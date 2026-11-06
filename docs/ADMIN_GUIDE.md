@@ -68,7 +68,7 @@ Put it behind HTTPS (Caddy, nginx, or your host's TLS). WebSockets must be proxi
 
 ### Trade rulings
 
-A league's admin can rule each trade fair or not fair from the **Admin** tab. A ruling lives in its own table (`trade_rulings`), never changes a trade's evaluation, and can't touch ESPN, which Courtside only reads.
+A league's admin can rule each trade fair or not fair from the **Admin** tab. A ruling lives in its own table (`trade_rulings`), never changes a trade's evaluation, and can't touch ESPN, which Courtside only reads. It keeps a copy of Courtside's numbers from the admin's app. If projection overrides went into them, the copy is flagged `adjusted` and everyone reading the ruling is told, since overrides in one desktop app aren't visible in another.
 
 - **Who the admin is.** The owner of a copy of the league, unless it was joined with an invite code (`shared_by` or `joined_with_code` in its connector config) or the Worker has said someone else holds the league (`admin_elsewhere`). `GET /api/leagues/{id}` reports it as `me.is_admin`, and the routes refuse everyone else with `403`.
 - **On a shared server** every member reads the same database, so nothing else is involved.
