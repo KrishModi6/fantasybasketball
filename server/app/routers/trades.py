@@ -14,6 +14,7 @@ from ..deps import Membership, membership
 from ..orm import Activity, TradePost
 from ..realtime import hub
 from ..schemas import TradeIn, TradePostIn
+from ..services import rulings_share as share
 from ..services.analysis import LeagueAnalysis
 from ..services.board import post_sends
 from ..services.rulings import league_rulings, trade_key
@@ -134,6 +135,7 @@ def _name_rows(a: LeagueAnalysis, rows: list[dict]) -> None:
 
 @router.get("/board")
 def board(m: Membership = Depends(membership), db: Session = Depends(get_db)):
+    share.pull_if_due(db, m.league)
     rows = db.scalars(select(TradePost).where(TradePost.league_id == m.league.id)
                       .order_by(TradePost.created_at.desc()).limit(50)).all()
     rulings = {r.trade_key: r.ruling for r in league_rulings(db, m.league.id)}

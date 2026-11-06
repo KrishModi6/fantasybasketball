@@ -4,6 +4,10 @@
 // model call comes here. The client token is baked into release builds, so it identifies
 // the app, not a person. The per-device, per-minute, per-day and concurrency limits in D1
 // are what actually cap spend.
+//
+// It also carries a league admin's trade rulings between desktop apps, since each app has its own database.
+// Any copy can read a league's rulings. Writing takes the key only the admin's copy holds: the first copy to
+// publish for a league claims it with that key's hash, and every later write has to match.
 
 const OPENAI_URL = 'https://api.openai.com/v1/responses';
 const JOB_TTL_MS = 120_000;
@@ -12,6 +16,9 @@ const MAX_BODY_BYTES = 400_000;
 const DEVICE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RESPONSE_ID = /^resp_[A-Za-z0-9_-]{1,200}$/;
 const TOOL_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
+const RULINGS_ROUTE = /^\/v1\/leagues\/([0-9a-f]{32,64})\/rulings(?:\/([0-9a-f]{32}))?$/;
+const MAX_RULING_BYTES = 16_000;
+const MAX_LEAGUE_RULINGS = 500;
 const securityHeaders = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
 
 export class HttpError extends Error {
@@ -111,6 +118,79 @@ export async function reserveModel(db, env, deviceId, now = Date.now()) {
   throw new HttpError(429, 'The AI assistant is busy right now. Try again in a minute.', 30);
 }
 
+const isObject = v => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+
+export function validateRuling(body) {
+  if (!isObject(body)) throw new HttpError(400, 'Invalid ruling.');
+  const { ruling, note = '', trade, numbers = null, decided_at: decidedAt } = body;
+  if (ruling !== 'fair' && ruling !== 'unfair') throw new HttpError(400, 'A ruling is fair or unfair.');
+  if (!isString(note, 500)) throw new HttpError(400, 'The note must be 500 characters or fewer.');
+  if (!isObject(trade) || (numbers !== null && !isObject(numbers))) throw new HttpError(400, 'Invalid ruling.');
+  if (!isString(decidedAt, 40) || Number.isNaN(Date.parse(decidedAt))) throw new HttpError(400, 'Invalid ruling date.');
+  return { ruling, note, trade, numbers, decided_at: decidedAt };
+}
+
+async function sha256Hex(value) {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// The client token is in every release build, so this keeps a leaked one from filling the database.
+async function spendRulingWrite(db, env, now) {
+  const day = Math.floor(now / 86_400_000);
+  const row = await db.prepare(`INSERT INTO model_budget(bucket, calls, expires_at) VALUES (?, 1, ?)
+    ON CONFLICT(bucket) DO UPDATE SET calls = calls + 1 RETURNING calls`)
+    .bind(`rulings:${day}`, (day + 1) * 86_400_000).first();
+  if (row.calls > limit(env.RULINGS_DAILY_LIMIT, 2000)) throw new HttpError(429, "Courtside's rulings limit for today is used up. It resets at midnight UTC.");
+}
+
+async function handleRulings(request, env, league, tradeKey, now = Date.now()) {
+  const db = env.DB;
+  const adminKey = request.headers.get('x-league-admin') ?? '';
+  if (adminKey.length > 200) throw new HttpError(400, 'Invalid admin key.');
+  const hash = adminKey ? await sha256Hex(adminKey) : null;
+  const admin = await db.prepare('SELECT key_hash FROM league_admins WHERE league = ?').bind(league).first();
+
+  if (!tradeKey) {
+    if (request.method !== 'GET') throw new HttpError(405, 'Use GET.');
+    const { results } = await db.prepare('SELECT trade_key, body FROM league_rulings WHERE league = ? ORDER BY updated_at DESC').bind(league).all();
+    return {
+      status: 200,
+      body: {
+        claimed: Boolean(admin), you: Boolean(admin && hash && admin.key_hash === hash),
+        rulings: results.map(r => ({ ...JSON.parse(r.body), key: r.trade_key })),
+      },
+    };
+  }
+
+  if (request.method !== 'PUT' && request.method !== 'DELETE') throw new HttpError(405, 'Use PUT or DELETE.');
+  if (!hash) throw new HttpError(403, "Only the league's admin can do that.");
+  if (admin && admin.key_hash !== hash) throw new HttpError(403, "Only the league's admin can do that.");
+
+  if (request.method === 'DELETE') {
+    await db.prepare('DELETE FROM league_rulings WHERE league = ? AND trade_key = ?').bind(league, tradeKey).run();
+    return { status: 204 };
+  }
+
+  const ruling = validateRuling(await readJSON(request, MAX_RULING_BYTES));
+  const held = await db.prepare('SELECT COUNT(*) AS total, COALESCE(SUM(trade_key = ?), 0) AS existing FROM league_rulings WHERE league = ?')
+    .bind(tradeKey, league).first();
+  if (!held.existing && held.total >= MAX_LEAGUE_RULINGS) throw new HttpError(429, 'This league has reached the limit on rulings.');
+  await spendRulingWrite(db, env, now);
+  // One transaction, and the write only lands for the key that holds the claim, so two first writes can't both win.
+  const sql = (query, ...args) => db.prepare(query).bind(...args);
+  const result = await db.batch([
+    sql('INSERT OR IGNORE INTO league_admins(league, key_hash, claimed_at) VALUES (?, ?, ?)', league, hash, now),
+    sql(`INSERT INTO league_rulings(league, trade_key, body, updated_at)
+      SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM league_admins WHERE league = ? AND key_hash = ?)
+      ON CONFLICT(league, trade_key) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at`,
+      league, tradeKey, JSON.stringify(ruling), now, league, hash),
+    sql('SELECT key_hash FROM league_admins WHERE league = ?', league),
+  ]);
+  if (result.at(-1).results[0]?.key_hash !== hash) throw new HttpError(403, "Only the league's admin can do that.");
+  return { status: 200, body: { ok: true } };
+}
+
 async function callOpenAI(env, request, maxOutputTokens, signal) {
   let upstream;
   try {
@@ -149,11 +229,16 @@ export default {
         await env.DB.prepare('SELECT bucket FROM model_budget LIMIT 1').first();
         return send(200, { service: 'courtside-ai', version: 1, model: env.MODEL || 'gpt-6-luna', ready: Boolean(env.OPENAI_API_KEY && env.CLIENT_TOKEN) });
       }
-      if (route !== '/v1/responses') return send(404, { error: 'Not found.' });
-      if (request.method !== 'POST') return send(405, { error: 'Use POST.' }, { Allow: 'POST' });
+      const rulings = route.match(RULINGS_ROUTE);
+      if (route !== '/v1/responses' && !rulings) return send(404, { error: 'Not found.' });
+      if (!rulings && request.method !== 'POST') return send(405, { error: 'Use POST.' }, { Allow: 'POST' });
       if (typeof env.CLIENT_TOKEN !== 'string' || env.CLIENT_TOKEN.length < 24) return send(503, { error: 'The AI service is not configured yet.' });
       if (!await matchesToken(request.headers.get('authorization'), env.CLIENT_TOKEN))
         return send(401, { error: 'This copy of Courtside is out of date. Download the latest release.' });
+      if (rulings) {
+        const { status, body } = await handleRulings(request, env, rulings[1], rulings[2]);
+        return status === 204 ? new Response(null, { status, headers }) : send(status, body);
+      }
       const deviceId = request.headers.get('x-device-id') ?? '';
       if (!DEVICE_ID.test(deviceId)) return send(400, { error: 'Missing device id.' });
       if (!env.OPENAI_API_KEY) return send(503, { error: 'The AI service owner still needs to add the OpenAI key.' });

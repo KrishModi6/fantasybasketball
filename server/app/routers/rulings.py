@@ -11,6 +11,7 @@ from ..deps import Membership, admin_membership, membership
 from ..orm import Activity, TradeRuling
 from ..realtime import hub
 from ..schemas import RulingIn
+from ..services import rulings_share as share
 from ..services.analysis import LeagueAnalysis
 from ..services.rulings import TradeNotFound, league_rulings, review_queue, ruling_message, ruling_out, save_ruling
 from .analysis import analysis
@@ -18,14 +19,27 @@ from .analysis import analysis
 router = APIRouter(prefix="/api/leagues/{league_id}/trades", tags=["rulings"])
 
 
+ELSEWHERE = "Someone else is already this league's admin, so this copy can't rule on its trades"
+
+
+def _refused(db: Session, m: Membership) -> HTTPException:
+    """Forget what was about to change and remember what the Worker said, so this copy stops offering to rule."""
+    db.rollback()
+    share.note_admin_elsewhere(m.league, True)
+    db.commit()
+    return HTTPException(403, ELSEWHERE)
+
+
 @router.get("/review")
 def review(m: Membership = Depends(admin_membership), a: LeagueAnalysis = Depends(analysis),
            db: Session = Depends(get_db)):
-    return review_queue(db, a, m.league.id)
+    share.pull_if_due(db, m.league)  # also resends anything that couldn't be sent earlier
+    return {"reach": share.reach(m.league), "trades": review_queue(db, a, m.league.id)}
 
 
 @router.get("/rulings")
 def rulings(m: Membership = Depends(membership), db: Session = Depends(get_db)):
+    share.pull_if_due(db, m.league)
     return [ruling_out(r) for r in league_rulings(db, m.league.id)]
 
 
@@ -33,10 +47,15 @@ def rulings(m: Membership = Depends(membership), db: Session = Depends(get_db)):
 def rule(key: str, body: RulingIn, m: Membership = Depends(admin_membership), a: LeagueAnalysis = Depends(analysis),
          db: Session = Depends(get_db)):
     previous = db.scalar(select(TradeRuling.ruling).where(TradeRuling.league_id == m.league.id, TradeRuling.trade_key == key))
+    if share.reach(m.league) == "league":
+        share.ensure_admin_key(db, m.user.id)
     try:
         row, changed = save_ruling(db, a, m.league.id, m.user.id, key, body.ruling, body.note)
+        share.publish(db, m.league, m.user.id, row)
     except TradeNotFound:
         raise HTTPException(404, "That trade isn't on the board or in the league's recent moves") from None
+    except share.Refused:
+        raise _refused(db, m) from None
     if changed:
         db.add(Activity(league_id=m.league.id, kind="ruling", message=ruling_message(row, previous),
                         payload={"key": key, "ruling": body.ruling}))
@@ -50,6 +69,12 @@ def withdraw(key: str, m: Membership = Depends(admin_membership), db: Session = 
     row = db.scalar(select(TradeRuling).where(TradeRuling.league_id == m.league.id, TradeRuling.trade_key == key))
     if row is None:
         raise HTTPException(404, "There's no ruling on that trade")
+    try:
+        share.unpublish(db, m.league, m.user.id, row)
+    except share.Refused:
+        raise _refused(db, m) from None
+    except share.Unreachable:
+        raise HTTPException(503, "Couldn't reach the rest of the league, so this ruling still stands. Try again.") from None
     db.add(Activity(league_id=m.league.id, kind="ruling",
                     message=f"League admin withdrew a ruling: {row.trade.get('text', '')}"[:500], payload={"key": key}))
     db.delete(row)

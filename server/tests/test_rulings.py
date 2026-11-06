@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import re
 import uuid
+import zlib
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
 from app.db import SessionLocal
 from app.main import app
 from app.orm import Activity, League, LeagueMember, Snapshot, User
 from app.security import create_token, encrypt_json
+from app.services import rulings_share as share
 from app.services.analysis import invalidate, pack_snapshot
 from app.services.board import describe_move, roster_moves
 from app.services.rulings import describe, numbers, trade_key
@@ -35,14 +42,14 @@ def _user(name: str = "Someone") -> tuple[str, dict]:
         return user.id, {"Authorization": f"Bearer {create_token(user.id)}"}
 
 
-def _league(owner_id: str, snap=None, cfg: dict | None = None) -> str:
+def _league(owner_id: str, snap=None, cfg: dict | None = None, source: str = "espn") -> str:
     with SessionLocal() as db:
-        league = League(name="Test", season=2027, source="espn", owner_id=owner_id, last_sync_status="ok",
-                        connector_config=encrypt_json(cfg or {"league_id": 1}))
+        league = League(name="Test", season=2027, source=source, owner_id=owner_id, last_sync_status="ok",
+                        connector_config=encrypt_json(cfg or {"league_id": "1"}))
         db.add(league)
         db.flush()
         db.add(LeagueMember(league_id=league.id, user_id=owner_id, role="owner"))
-        db.add(Snapshot(league_id=league.id, source="espn", data=pack_snapshot(snap or make_snapshot())))
+        db.add(Snapshot(league_id=league.id, source=source, data=pack_snapshot(snap or make_snapshot())))
         db.commit()
         return league.id
 
@@ -124,7 +131,7 @@ def test_a_member_cant_rule_on_a_real_trade(client):
     lid = _league(owner_id, snap)
     _join(lid, member_id)
     assert client.post(f"/api/leagues/{lid}/trades/board", json=_trade_body(x, y, a, b), headers=member).status_code == 201
-    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()[0]["key"]
+    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"][0]["key"]
 
     assert client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=member).status_code == 403
     assert client.get(f"/api/leagues/{lid}/trades/rulings", headers=member).json() == []
@@ -166,7 +173,7 @@ def test_ruling_on_a_board_trade(client):
     _join(lid, member_id)
     assert client.post(f"/api/leagues/{lid}/trades/board", json=_trade_body(x, y, a, b, "thoughts?"), headers=member).status_code == 201
 
-    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()
+    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"]
     assert row["post"]["author"] == "Member" and row["post"]["note"] == "thoughts?"
     assert row["status"] == "open" and row["ruling"] is None and row["on_espn"] is False
     assert row["trade"]["text"] == (f"{snap.team(x).name} sends {snap.players[a].name} to {snap.team(y).name} "
@@ -201,7 +208,7 @@ def test_changing_and_withdrawing_a_ruling(client):
     snap = make_snapshot()
     lid = _league(owner_id, snap)
     assert client.post(f"/api/leagues/{lid}/trades/board", json=_trade_body(*_lopsided(snap)), headers=owner).status_code == 201
-    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()[0]["key"]
+    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"][0]["key"]
     url = f"/api/leagues/{lid}/trades/rulings/{key}"
     feed = lambda: [a["message"] for a in client.get(f"/api/leagues/{lid}/activity", headers=owner).json() if a["kind"] == "ruling"]  # noqa: E731
 
@@ -224,7 +231,7 @@ def test_bad_rulings_are_refused(client):
     snap = make_snapshot()
     lid = _league(owner_id, snap)
     assert client.post(f"/api/leagues/{lid}/trades/board", json=_trade_body(*_lopsided(snap)), headers=owner).status_code == 201
-    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()[0]["key"]
+    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"][0]["key"]
     url = f"/api/leagues/{lid}/trades/rulings"
     assert client.put(f"{url}/{key}", json={"ruling": "maybe"}, headers=owner).status_code == 422
     assert client.put(f"{url}/{key}", json={"ruling": "fair", "note": "x" * 501}, headers=owner).status_code == 422
@@ -237,7 +244,7 @@ def test_a_key_from_another_league_finds_nothing(client):
     lid = _league(owner_id, snap)
     other = _league(owner_id, snap)
     assert client.post(f"/api/leagues/{lid}/trades/board", json=_trade_body(*_lopsided(snap)), headers=owner).status_code == 201
-    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()[0]["key"]
+    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"][0]["key"]
     assert client.put(f"/api/leagues/{other}/trades/rulings/{key}", json={"ruling": "fair"}, headers=owner).status_code == 404
 
 
@@ -246,17 +253,17 @@ def test_a_ruling_outlives_the_post_it_was_made_on(client):
     snap = make_snapshot()
     lid = _league(owner_id, snap)
     r = client.post(f"/api/leagues/{lid}/trades/board", json=_trade_body(*_lopsided(snap)), headers=owner)
-    row = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()[0]
+    row = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"][0]
     url = f"/api/leagues/{lid}/trades/rulings/{row['key']}"
     assert client.put(url, json={"ruling": "unfair"}, headers=owner).status_code == 200
     assert client.delete(f"/api/leagues/{lid}/trades/board/{r.json()['id']}", headers=owner).status_code == 204
 
-    [gone] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()
+    [gone] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"]
     assert gone["status"] == "gone" and gone["numbers"] is None and gone["trade"] == row["trade"]
     changed = client.put(url, json={"ruling": "fair"}, headers=owner).json()
     assert changed["ruling"] == "fair" and changed["numbers"] == row["numbers"]  # nothing new to copy, so the old copy stays
     assert client.delete(url, headers=owner).status_code == 204
-    assert client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json() == []
+    assert client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"] == []
 
 
 # ---- real trades ---------------------------------------------------------------------------------------
@@ -294,7 +301,7 @@ def test_a_real_trade_shows_up_with_its_numbers_labelled(client):
     _move(new, fa, third.id)
     _refresh(lid, snap, new)
 
-    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()
+    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"]
     assert row["on_espn"] is True and row["post"] is None and row["status"] == "done"
     assert row["numbers"]["completed"] is True  # the page says it was worked out by undoing the trade
     assert row["numbers"]["sides"][0]["delta_per_week"] < 0 < row["numbers"]["sides"][1]["delta_per_week"]
@@ -310,11 +317,11 @@ def test_a_trade_on_the_board_and_on_espn_is_one_row_with_one_ruling(client):
     x, y, a, b = _lopsided(snap)
     lid = _league(owner_id, snap)
     assert client.post(f"/api/leagues/{lid}/trades/board", json=_trade_body(x, y, a, b), headers=owner).status_code == 201
-    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()[0]["key"]
+    key = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"][0]["key"]
     assert client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=owner).status_code == 200
 
     _refresh(lid, snap, _traded(snap, x, y, a, b))
-    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()
+    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"]
     assert row["key"] == key and row["on_espn"] is True and row["post"] is not None
     assert row["ruling"]["ruling"] == "fair"
     assert row["numbers"]["completed"] is False  # the analyzer's own score from before the deal
@@ -331,7 +338,7 @@ def test_a_trade_whose_players_have_moved_on_can_still_be_ruled_on(client):
     _move(later, a, None)  # dropped since
     _refresh(lid, new, later)
 
-    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()
+    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"]
     assert row["status"] == "stale" and row["numbers"] is None
     assert later.players[a].name in row["status_note"]
     saved = client.put(f"/api/leagues/{lid}/trades/rulings/{row['key']}", json={"ruling": "fair"}, headers=owner)
@@ -361,3 +368,288 @@ def test_numbers_survive_an_old_evaluation():
     assert numbers(None) is None
     old = numbers({"sides": [{"team_id": 1}], "fairness": {"label": "balanced"}})  # posted before fields were added
     assert old["fairness"] == {"label": "balanced", "reason": ""} and old["sides"][0]["verdict"] is None
+
+
+# ---- reaching other people's desktop apps -----------------------------------------------------------------
+
+
+class FakeWorker:
+    """The rulings routes of cloudflare/ai-proxy/src/worker.mjs, which has its own tests of the same behaviour."""
+
+    def __init__(self):
+        self.admins: dict[str, str] = {}
+        self.rulings: dict[str, dict[str, dict]] = {}
+        self.calls: list[tuple[str, str]] = []
+        self.down = False
+
+    def __call__(self, method, path, admin_key=None, body=None):
+        self.calls.append((method, path))
+        if self.down:
+            return None
+        league, trade = re.fullmatch(r"/v1/leagues/([0-9a-f]{40})/rulings(?:/([0-9a-f]{32}))?", path).groups()
+        holder = self.admins.get(league)
+        if trade is None:
+            return httpx.Response(200, json={
+                "claimed": holder is not None, "you": holder is not None and holder == admin_key,
+                "rulings": [{**v, "key": k} for k, v in self.rulings.get(league, {}).items()]})
+        if not admin_key or (holder and holder != admin_key):
+            return httpx.Response(403, json={"error": "Only the league's admin can do that."})
+        if method == "DELETE":
+            self.rulings.get(league, {}).pop(trade, None)
+            return httpx.Response(204)
+        self.admins.setdefault(league, admin_key)
+        self.rulings.setdefault(league, {})[trade] = json.loads(json.dumps(body))
+        return httpx.Response(200, json={"ok": True})
+
+    def writes(self) -> list[str]:
+        return [method for method, _ in self.calls if method != "GET"]
+
+
+@pytest.fixture
+def worker(monkeypatch):
+    """The desktop app's setup: local mode, with a Worker to talk to."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "local_mode", True)
+    monkeypatch.setattr(settings, "ai_proxy_url", "https://worker.example")
+    monkeypatch.setattr(settings, "ai_proxy_token", "client-token")
+    fake = FakeWorker()
+    monkeypatch.setattr(share, "_call", fake)
+    monkeypatch.setattr(share, "_last_pull", {})
+    return fake
+
+
+ESPN = {"league_id": "777"}
+
+
+def _posted_trade(client, lid: str, who: dict, snap) -> str:
+    """Posts the lopsided trade on this copy's own board. Returns its key."""
+    x, y, a, b = _lopsided(snap)
+    assert client.post(f"/api/leagues/{lid}/trades/board", json=_trade_body(x, y, a, b), headers=who).status_code == 201
+    return trade_key({x: {a: y}, y: {b: x}})
+
+
+def _ruling_feed(client, lid: str, who: dict) -> list[str]:
+    return [a["message"] for a in client.get(f"/api/leagues/{lid}/activity", headers=who).json() if a["kind"] == "ruling"]
+
+
+def test_a_ruling_reaches_a_friends_app(client, worker):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    friend_id, friend = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    fid = _league(friend_id, snap, cfg={**ESPN, "espn_s2": "the-admins", "swid": "{A}", "shared_by": "the league owner"})
+    key = _posted_trade(client, lid, admin, snap)
+    _posted_trade(client, fid, friend, snap)  # the same deal on the friend's own board
+    evaluation = client.get(f"/api/leagues/{fid}/trades/board", headers=friend).json()[0]["evaluation"]
+
+    assert client.get(f"/api/leagues/{lid}/trades/review", headers=admin).json()["reach"] == "league"
+    saved = client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "unfair", "note": "too lopsided"}, headers=admin)
+    assert saved.status_code == 200 and saved.json()["pending"] is False
+
+    # What the friend's app shows: the admin's call, with the numbers as they stood, and its own verdict untouched.
+    share._last_pull.clear()
+    [seen] = client.get(f"/api/leagues/{fid}/trades/rulings", headers=friend).json()
+    assert seen["ruling"] == "unfair" and seen["note"] == "too lopsided" and seen["numbers"] == saved.json()["numbers"]
+    assert seen["trade"]["text"] == saved.json()["trade"]["text"]
+    assert seen["decided_at"] == saved.json()["decided_at"]
+    post = client.get(f"/api/leagues/{fid}/trades/board", headers=friend).json()[0]
+    assert post["ruling"] == "unfair" and post["evaluation"] == evaluation
+    assert _ruling_feed(client, fid, friend)[0].startswith("League admin ruled a trade not fair:")
+    assert worker.writes() == ["PUT"]  # only the admin's copy sent anything
+
+    # Reading again changes nothing, and doesn't repeat itself in the feed.
+    share._last_pull.clear()
+    client.get(f"/api/leagues/{fid}/trades/rulings", headers=friend)
+    assert len(_ruling_feed(client, fid, friend)) == 1
+
+    # A new note arrives quietly; a changed call is news; so is a withdrawn one.
+    client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "unfair", "note": "still lopsided"}, headers=admin)
+    share._last_pull.clear()
+    assert client.get(f"/api/leagues/{fid}/trades/rulings", headers=friend).json()[0]["note"] == "still lopsided"
+    assert len(_ruling_feed(client, fid, friend)) == 1
+    client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=admin)
+    share._last_pull.clear()
+    assert client.get(f"/api/leagues/{fid}/trades/rulings", headers=friend).json()[0]["ruling"] == "fair"
+    assert _ruling_feed(client, fid, friend)[0].startswith("League admin changed a ruling to fair:")
+    assert client.delete(f"/api/leagues/{lid}/trades/rulings/{key}", headers=admin).status_code == 204
+    share._last_pull.clear()
+    assert client.get(f"/api/leagues/{fid}/trades/rulings", headers=friend).json() == []
+    assert client.get(f"/api/leagues/{fid}/trades/board", headers=friend).json()[0]["ruling"] is None
+    assert _ruling_feed(client, fid, friend)[0].startswith("League admin withdrew a ruling:")
+
+
+def test_a_copy_from_an_invite_code_never_writes(client, worker):
+    snap = make_snapshot()
+    friend_id, friend = _user("You")
+    fid = _league(friend_id, snap, cfg={**ESPN, "shared_by": "the league owner"})
+    key = _posted_trade(client, fid, friend, snap)
+    assert client.get(f"/api/leagues/{fid}/trades/review", headers=friend).status_code == 403
+    assert client.put(f"/api/leagues/{fid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=friend).status_code == 403
+    assert client.delete(f"/api/leagues/{fid}/trades/rulings/{key}", headers=friend).status_code == 403
+    assert client.get(f"/api/leagues/{fid}/trades/board", headers=friend).status_code == 200
+    assert worker.writes() == [] and worker.admins == {}
+
+
+def test_connecting_the_league_by_hand_doesnt_get_past_the_admin(client, worker):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    rival_id, rival = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    rid = _league(rival_id, snap, cfg=ESPN)  # looks like any other league on the rival's computer
+    key = _posted_trade(client, lid, admin, snap)
+    rival_key = _posted_trade(client, rid, rival, snap)
+    assert client.get(f"/api/leagues/{rid}", headers=rival).json()["me"]["is_admin"] is True
+
+    assert client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=admin).status_code == 200
+    # The Worker is what stops this: their engine is on their own computer.
+    refused = client.put(f"/api/leagues/{rid}/trades/rulings/{rival_key}", json={"ruling": "unfair"}, headers=rival)
+    assert refused.status_code == 403 and "already this league's admin" in refused.json()["detail"]
+    [held] = next(iter(worker.rulings.values())).values(),
+    assert list(held)[0]["ruling"] == "fair"  # the admin's call stands
+
+    # From then on that copy reads like any friend's.
+    assert client.get(f"/api/leagues/{rid}", headers=rival).json()["me"]["is_admin"] is False
+    assert client.get(f"/api/leagues/{rid}/trades/review", headers=rival).status_code == 403
+    share._last_pull.clear()
+    assert [r["ruling"] for r in client.get(f"/api/leagues/{rid}/trades/rulings", headers=rival).json()] == ["fair"]
+
+
+def test_loading_the_board_is_enough_to_learn_the_league_has_an_admin(client, worker):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    rival_id, rival = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    rid = _league(rival_id, snap, cfg=ESPN)
+    key = _posted_trade(client, lid, admin, snap)
+    client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=admin)
+    share._last_pull.clear()
+    assert client.get(f"/api/leagues/{rid}/trades/board", headers=rival).status_code == 200
+    assert client.get(f"/api/leagues/{rid}", headers=rival).json()["me"]["is_admin"] is False
+    # And the admin's own copy stays the admin's.
+    share._last_pull.clear()
+    assert client.get(f"/api/leagues/{lid}/trades/review", headers=admin).status_code == 200
+    assert client.get(f"/api/leagues/{lid}", headers=admin).json()["me"]["is_admin"] is True
+
+
+def test_a_ruling_made_offline_goes_out_later(client, worker):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    key = _posted_trade(client, lid, admin, snap)
+
+    worker.down = True
+    saved = client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "unfair"}, headers=admin)
+    assert saved.status_code == 200 and saved.json()["pending"] is True
+    share._last_pull.clear()
+    row = client.get(f"/api/leagues/{lid}/trades/review", headers=admin).json()["trades"][0]
+    assert row["ruling"]["pending"] is True
+
+    worker.down = False
+    share._last_pull.clear()
+    row = client.get(f"/api/leagues/{lid}/trades/review", headers=admin).json()["trades"][0]
+    assert row["ruling"]["pending"] is False
+    assert next(iter(worker.rulings.values()))[key]["ruling"] == "unfair"
+
+
+def test_a_worker_without_the_rulings_routes_just_leaves_them_pending(client, worker, monkeypatch):
+    # Rulings ship in the app before or after the Worker deploy: neither order should lose one.
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    key = _posted_trade(client, lid, admin, snap)
+    monkeypatch.setattr(share, "_call", lambda *a, **k: httpx.Response(404, json={"error": "Not found."}))
+    saved = client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=admin)
+    assert saved.status_code == 200 and saved.json()["pending"] is True
+    share._last_pull.clear()
+    assert client.get(f"/api/leagues/{lid}/trades/review", headers=admin).status_code == 200
+    assert client.delete(f"/api/leagues/{lid}/trades/rulings/{key}", headers=admin).status_code == 204  # never left this computer
+
+
+def test_withdrawing_has_to_reach_the_league(client, worker):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    key = _posted_trade(client, lid, admin, snap)
+    assert client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=admin).status_code == 200
+
+    worker.down = True
+    refused = client.delete(f"/api/leagues/{lid}/trades/rulings/{key}", headers=admin)
+    assert refused.status_code == 503 and "still stands" in refused.json()["detail"]
+    assert len(client.get(f"/api/leagues/{lid}/trades/rulings", headers=admin).json()) == 1
+
+    worker.down = False
+    assert client.delete(f"/api/leagues/{lid}/trades/rulings/{key}", headers=admin).status_code == 204
+    assert next(iter(worker.rulings.values())) == {}
+
+
+def test_a_ruling_that_never_left_this_computer_can_always_be_withdrawn(client, worker):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    key = _posted_trade(client, lid, admin, snap)
+    worker.down = True
+    client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=admin)
+    assert client.delete(f"/api/leagues/{lid}/trades/rulings/{key}", headers=admin).status_code == 204
+
+
+def test_a_broken_answer_from_the_worker_doesnt_break_the_page(client, worker, monkeypatch):
+    snap = make_snapshot()
+    owner_id, owner = _user("You")
+    lid = _league(owner_id, snap, cfg=ESPN)
+    _posted_trade(client, lid, owner, snap)
+    monkeypatch.setattr(share, "_call", lambda *a, **k: httpx.Response(200, json={"surprise": True}))
+    share._last_pull.clear()
+    assert client.get(f"/api/leagues/{lid}/trades/board", headers=owner).status_code == 200
+
+
+def test_what_each_kind_of_league_reaches(client, worker, monkeypatch):
+    snap = make_snapshot()
+    owner_id, owner = _user("You")
+    espn = _league(owner_id, snap, cfg=ESPN)
+    other = _league(owner_id, snap, source="file", cfg={"spec": {}})
+    assert client.get(f"/api/leagues/{espn}/trades/review", headers=owner).json()["reach"] == "league"
+    assert client.get(f"/api/leagues/{other}/trades/review", headers=owner).json()["reach"] == "this_copy"
+    key = _posted_trade(client, other, owner, snap)
+    assert client.put(f"/api/leagues/{other}/trades/rulings/{key}", json={"ruling": "fair"}, headers=owner).json()["pending"] is False
+    assert worker.writes() == []  # a file league has no id another copy could match
+
+    monkeypatch.setattr(get_settings(), "local_mode", False)  # a shared server: everyone reads the same database
+    assert client.get(f"/api/leagues/{espn}/trades/review", headers=owner).json()["reach"] == "members"
+    key = _posted_trade(client, espn, owner, snap)
+    worker.calls.clear()
+    assert client.put(f"/api/leagues/{espn}/trades/rulings/{key}", json={"ruling": "fair"}, headers=owner).json()["pending"] is False
+    assert worker.calls == []
+
+
+def test_the_admin_key_stays_on_the_admins_computer(client, worker, monkeypatch):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    key = _posted_trade(client, lid, admin, snap)
+    sent = []
+    real = worker.__call__
+    monkeypatch.setattr(share, "_call", lambda m, p, k=None, b=None: (sent.append((k, b)), real(m, p, k, b))[1])
+    client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=admin)
+    client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "unfair"}, headers=admin)
+
+    with SessionLocal() as db:
+        secret = share._stored_key(db, admin_id)
+    assert secret and [k for k, _ in sent] == [secret, secret]  # the same key each time
+    assert secret not in json.dumps([b for _, b in sent])
+    code = client.post(f"/api/leagues/{lid}/share-code", json={}, headers=admin).json()["code"]
+    assert secret not in zlib.decompress(base64.urlsafe_b64decode(code[4:] + "=" * (-len(code[4:]) % 4))).decode()
+    assert secret not in client.get(f"/api/leagues/{lid}", headers=admin).text
+
+    # It shares a row with the user's OpenAI key, and removing that mustn't lose it.
+    assert client.delete("/api/ai/key", headers=admin).status_code == 200
+    with SessionLocal() as db:
+        assert share._stored_key(db, admin_id) == secret
+
+
+def test_league_key_matches_across_copies_and_hides_the_league():
+    a = League(source="espn", season=2027, connector_config=encrypt_json({"league_id": "12345"}))
+    b = League(source="espn", season=2027, connector_config=encrypt_json({"league_id": "12345", "shared_by": "them"}))
+    assert share.league_key(a) == share.league_key(b) and "12345" not in share.league_key(a)
+    assert re.fullmatch(r"[0-9a-f]{40}", share.league_key(a))
+    assert share.league_key(League(source="espn", season=2028, connector_config=a.connector_config)) != share.league_key(a)
+    assert share.league_key(League(source="demo", season=2027, connector_config=a.connector_config)) is None

@@ -199,6 +199,8 @@ def update_league(body: LeagueUpdate, m: Membership = Depends(owner_membership),
                 new[k] = cfg.get(k)
         if cfg.get("shared_by") or cfg.get("joined_with_code"):
             new["joined_with_code"] = True  # their own cookies make it their login, not their league to run
+        if cfg.get("admin_elsewhere"):
+            new["admin_elsewhere"] = True
         lg.connector_config = encrypt_json(new)
     db.commit()
     return league_out(db, lg, m.member)

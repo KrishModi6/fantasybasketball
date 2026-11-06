@@ -123,3 +123,95 @@ test('maps OpenAI failures to friendly errors', async () => {
   delete env.OPENAI_API_KEY;
   assert.equal((await ask()).status, 503);
 });
+
+// ---- league rulings -------------------------------------------------------------------------------------
+
+const LEAGUE = 'a'.repeat(40);
+const TRADE = 'b'.repeat(32);
+const ADMIN = 'the-admins-key';
+const ruling = { ruling: 'unfair', note: 'too lopsided', trade: { text: 'A sends X to B for Y' }, numbers: { completed: false }, decided_at: '2026-11-06T00:00:00+00:00' };
+
+function rulings(method = 'GET', { trade, payload, admin, token = TOKEN, headers = {} } = {}) {
+  const path = `https://ai.example/v1/leagues/${LEAGUE}/rulings${trade ? `/${trade}` : ''}`;
+  return worker.fetch(new Request(path, {
+    method,
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
+    headers: {
+      ...(payload ? { 'content-type': 'application/json' } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(admin ? { 'x-league-admin': admin } : {}),
+      ...headers,
+    },
+  }), env);
+}
+
+test('rulings need the app token, and browsers stay out', async () => {
+  assert.equal((await rulings('GET', { token: null })).status, 401);
+  assert.equal((await rulings('GET', { token: 'wrong-wrong-wrong-wrong-wrong' })).status, 401);
+  assert.equal((await rulings('GET', { headers: { origin: 'https://evil.example' } })).status, 403);
+});
+
+test('a league with no rulings reads as unclaimed', async () => {
+  const r = await rulings();
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { claimed: false, you: false, rulings: [] });
+});
+
+test('the first ruling claims the league, and every copy can read it', async () => {
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 200);
+  const friend = await (await rulings()).json();
+  assert.equal(friend.claimed, true);
+  assert.equal(friend.you, false);
+  assert.deepEqual(friend.rulings, [{ ...ruling, key: TRADE }]);
+  const admin = await (await rulings('GET', { admin: ADMIN })).json();
+  assert.equal(admin.you, true);
+  assert.equal(env.DB.raw.prepare('SELECT key_hash FROM league_admins').get().key_hash.includes(ADMIN), false, 'only the hash is stored');
+});
+
+test('only the admin key can write once a league is claimed', async () => {
+  await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN });
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: { ...ruling, ruling: 'fair' }, admin: 'someone-else' })).status, 403);
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: { ...ruling, ruling: 'fair' } })).status, 403);
+  assert.equal((await rulings('DELETE', { trade: TRADE, admin: 'someone-else' })).status, 403);
+  assert.equal((await rulings('DELETE', { trade: TRADE })).status, 403);
+  assert.equal((await (await rulings()).json()).rulings[0].ruling, 'unfair', 'nothing changed');
+});
+
+test('the admin can change and withdraw a ruling', async () => {
+  await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN });
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: { ...ruling, ruling: 'fair', note: '' }, admin: ADMIN })).status, 200);
+  const [row] = (await (await rulings()).json()).rulings;
+  assert.equal(row.ruling, 'fair');
+  assert.equal((await rulings('DELETE', { trade: TRADE, admin: ADMIN })).status, 204);
+  const after = await (await rulings()).json();
+  assert.deepEqual(after.rulings, []);
+  assert.equal(after.claimed, true, 'the league stays claimed');
+});
+
+test('bad rulings are refused without claiming the league', async () => {
+  for (const bad of [{ ...ruling, ruling: 'maybe' }, { ...ruling, note: 'x'.repeat(501) }, { ...ruling, trade: 'nope' }, { ...ruling, numbers: [] }, { ...ruling, decided_at: 'soon' }, []]) {
+    assert.equal((await rulings('PUT', { trade: TRADE, payload: bad, admin: ADMIN })).status, 400, JSON.stringify(bad).slice(0, 40));
+  }
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: { ...ruling, note: 'x'.repeat(20_000) }, admin: ADMIN })).status, 413);
+  assert.equal((await (await rulings()).json()).claimed, false);
+});
+
+test('odd routes and methods are refused', async () => {
+  assert.equal((await rulings('POST', { trade: TRADE, admin: ADMIN })).status, 405);
+  assert.equal((await rulings('POST', { admin: ADMIN })).status, 405);
+  const bad = await worker.fetch(new Request('https://ai.example/v1/leagues/NOT-HEX/rulings', { headers: { authorization: `Bearer ${TOKEN}` } }), env);
+  assert.equal(bad.status, 404);
+});
+
+test('writes stop at the daily limit and a league stops at its cap', async () => {
+  env.RULINGS_DAILY_LIMIT = '2';
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 200);
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 200);
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 429);
+
+  env.RULINGS_DAILY_LIMIT = '100000';
+  const add = env.DB.raw.prepare('INSERT INTO league_rulings(league, trade_key, body, updated_at) VALUES (?, ?, ?, 0)');
+  for (let i = 0; i < 500; i++) add.run(LEAGUE, i.toString(16).padStart(32, '0'), '{}');
+  assert.equal((await rulings('PUT', { trade: 'c'.repeat(32), payload: ruling, admin: ADMIN })).status, 429);
+  assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 200, 'changing one is still fine');
+});

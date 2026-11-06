@@ -42,7 +42,7 @@ def trade_key(sends: Sends) -> str:
     return hashlib.sha256("|".join(moves).encode()).hexdigest()[:32]
 
 
-def _iso(dt: datetime) -> str:
+def iso(dt: datetime) -> str:
     return (dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt).isoformat()
 
 
@@ -125,7 +125,7 @@ def _score(a: LeagueAnalysis, item: dict) -> tuple[dict | None, str, str | None]
 
 def ruling_out(r: TradeRuling) -> dict:
     return {"key": r.trade_key, "ruling": r.ruling, "note": r.note, "trade": r.trade, "numbers": r.numbers,
-            "decided_at": _iso(r.decided_at)}
+            "decided_at": iso(r.decided_at), "pending": bool(r.pending)}
 
 
 def league_rulings(db: Session, league_id: str) -> list[TradeRuling]:
@@ -138,17 +138,17 @@ def review_queue(db: Session, a: LeagueAnalysis, league_id: str) -> list[dict]:
     rulings = {r.trade_key: r for r in league_rulings(db, league_id)}
     candidates = _candidates(db, league_id)
     rows = []
-    for key, item in sorted(candidates.items(), key=lambda kv: _iso(kv[1]["at"]), reverse=True):
+    for key, item in sorted(candidates.items(), key=lambda kv: iso(kv[1]["at"]), reverse=True):
         ev, status, status_note = _score(a, item)
         post: TradePost | None = item["post"]
-        rows.append({"key": key, "at": _iso(item["at"]), "on_espn": item["on_espn"],
+        rows.append({"key": key, "at": iso(item["at"]), "on_espn": item["on_espn"],
                      "post": {"id": post.id, "author": post.author.display_name, "note": post.note} if post else None,
                      "status": status, "status_note": status_note, "trade": describe(a.snapshot, item["sends"], ev),
                      "numbers": numbers(ev), "ruling": ruling_out(rulings[key]) if key in rulings else None})
     # A ruling outlives the post or feed entry it was made from, and can still be changed or withdrawn.
     for key, r in rulings.items():
         if key not in candidates:
-            rows.append({"key": key, "at": _iso(r.decided_at), "on_espn": False, "post": None, "status": "gone",
+            rows.append({"key": key, "at": iso(r.decided_at), "on_espn": False, "post": None, "status": "gone",
                          "status_note": None, "trade": r.trade, "numbers": None, "ruling": ruling_out(r)})
     return rows
 

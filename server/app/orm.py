@@ -177,6 +177,9 @@ class TradeRuling(Base):
     numbers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     decided_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Desktop apps only, see services.rulings_share: it has reached the rest of the league, and it has changes that haven't.
+    published: Mapped[bool] = mapped_column(Boolean, default=False)
+    pending: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Activity(Base):
