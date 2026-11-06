@@ -135,14 +135,16 @@ SECOND_YEAR_NO_DIP_MPG = 28.0
 # Years in the league set how a season goes. Against the same player's games 21-40, his fantasy points in games 1-10
 # and 61-82 ran 0.77 and 1.17 for rookies, 0.83 and 1.13 in year two, 0.89 and 1.16 in year three, 0.94 and 1.09 in
 # year four, 0.95 and 1.05 in years five and six, 0.97 and 1.00 from year seven (ESPN's 1,000-player pool, 2023-24 to
-# 2025-26). Three things follow from that, each chosen on rest-of-season and next-10-game FP/G for every player after
-# 0-50 games (docs/METHODOLOGY.md 1.5.2); together error fell 4.178 -> 4.125 and 4.750 -> 4.722 FP/G, in all three seasons:
+# 2025-26). Three things follow from that (docs/METHODOLOGY.md 1.5.2), scored on rest-of-season and next-10-game FP/G
+# for every player after 0-50 games, over his team's games left. Together error fell 4.212 -> 4.181 and 4.820 -> 4.801
+# FP/G, and the average experience group's gap from 1.00 fell from 0.041 to 0.019:
 # - Climb: a rookie's output rises by CLIMB_FIRST_YEAR from his game CLIMB_START_GAME to CLIMB_FULL_GAME, a sixth less
-#   each year after, none from year seven. It counts forward from now, so the update's reading of his recent games
-#   isn't credited twice. Above 0.20 rookies ran high and error rose.
+#   each year after, none from year seven. It's what brings young players toward 1.00, and it doesn't lower error: on
+#   its own the gap fell to 0.028 and error moved +0.005 (-0.008 to +0.018). See climb_factors for how it counts.
 # - Third- and fourth-year players have an opening dip too, a share of a second-year player's (EARLY_DIP_BY_YEAR).
 # - From year seven a player's minutes run 2-4% below his projection in every season: he's projected at
-#   VETERAN_MINUTES of them. 0.97 scored about the same, with 2023-24 worse and the groups further from 1.00.
+#   VETERAN_MINUTES of them, LONG_VETERAN_MINUTES from year LONG_VETERAN_YEARS. Nearly all the error gain is this:
+#   -0.082 FP/G in years 7-10 and -0.114 from year 11.
 # These aren't fits to totals: a flat multiplier by years in the league brought totals to 1.00 and raised the error.
 CLIMB_FIRST_YEAR = 0.15
 EARLY_DIP_BY_YEAR = {3: 0.5, 4: 0.25}

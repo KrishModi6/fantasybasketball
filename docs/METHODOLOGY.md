@@ -305,35 +305,52 @@ Tried and dropped:
 
 Players who drop out of a rotation reach game 61 less often, so these climbs are somewhat overstated. That's part of why the climb below is smaller than the table. Three changes follow, all from the same count of years:
 
-- **A climb.** A player's output rises by *c* from his game 20 to his game 60 and then holds, with *c* = 0.15 × (7 − *y*) / 6 in his *y*-th season: 0.15 for a rookie, 0.025 in year 6, none from year 7. It counts forward from now, relative to the games he's already played, because the update has already read his recent games. It reaches rest-of-season value, weekly windows, matchup odds and trades through the same daily form as the dips. A preseason projection is a season average with the climb in it, so his level before any games is that average over the climb's average, and his projection before his first game stays what it was.
+- **A climb.** A player's output rises by *c* from his game 20 to his game 60 and then holds, with *c* = 0.15 × (7 − *y*) / 6 in his *y*-th season: 0.15 for a rookie, 0.025 in year 6, none from year 7. His own game count rises by his availability per team game, so a player expected to miss games climbs later. The climb is relative to the update's read of his games so far, which trails the game he's on because recent games count most: the read is his place on the climb averaged over those games, 60% at the minutes half-life and 40% at the rate half-life (from games 21–40 to games 61+, about 60% of the climb was minutes). It reaches rest-of-season value, weekly windows, matchup odds and trades through the same daily form as the dips. A preseason projection is a season average with the climb in it, so his level before any games is that average over the climb's average across his team's season, and his projection before his first game stays what it was.
 - **An opening dip for years 3 and 4:** half and a quarter of a second-year player's, by role in the same way.
-- **Veterans' minutes × 0.98 from year 7.** Their minutes ran 2–4% below projection in every season, and every minutes role from 15 up ran at or above 1.
+- **Veterans' minutes × 0.98 from year 7 and × 0.97 from year 11.** Their minutes ran 2–4% below projection in every season, and every minutes role from 15 up ran at or above 1.
 
-Rest of season, projected / actual, for every player with 10 games left (1,485 player-seasons):
+Rest of season, projected / actual, for every player with 10 games left (1,485 player-seasons). Each projection is made over his team's games left, knowing nothing about which of them he plays:
 
 | After *c* games | 3 | 10 | 20 | 35 | 50 |
 |---|---|---|---|---|---|
-| Year 1: before | 0.99 | 0.97 | 0.94 | 0.91 | 0.89 |
-| after | 1.02 | 1.02 | 1.02 | 0.96 | 0.91 |
-| Year 2: before | 0.97 | 0.95 | 0.95 | 0.96 | 0.92 |
-| after | 1.00 | 0.99 | 1.02 | 1.01 | 0.94 |
+| Year 1: before | 1.01 | 0.98 | 0.94 | 0.91 | 0.89 |
+| after | 1.02 | 1.00 | 1.00 | 0.99 | 0.95 |
+| Year 2: before | 0.98 | 0.95 | 0.95 | 0.96 | 0.92 |
+| after | 0.99 | 0.98 | 1.02 | 1.03 | 0.98 |
 | Year 3: before | 0.93 | 0.91 | 0.90 | 0.88 | 0.92 |
-| after | 0.96 | 0.95 | 0.96 | 0.91 | 0.94 |
+| after | 0.95 | 0.94 | 0.96 | 0.93 | 0.97 |
 | Year 4: before | 0.95 | 0.96 | 0.95 | 0.95 | 0.94 |
-| after | 0.96 | 0.98 | 1.00 | 0.98 | 0.95 |
+| after | 0.96 | 0.98 | 1.00 | 0.99 | 0.97 |
 | Years 5–6: before | 0.97 | 0.97 | 0.98 | 0.97 | 0.97 |
-| after | 0.98 | 0.98 | 1.00 | 0.98 | 0.97 |
-| Year 7+: before | 1.03 | 1.02 | 1.02 | 1.02 | 1.01 |
-| after | 1.01 | 1.00 | 1.00 | 1.00 | 0.99 |
+| after | 0.97 | 0.98 | 0.99 | 0.99 | 0.99 |
+| Years 7–10: before | 1.03 | 1.01 | 1.02 | 1.02 | 1.00 |
+| after | 1.01 | 0.99 | 1.00 | 1.00 | 0.98 |
+| Year 11+: before | 1.05 | 1.03 | 1.03 | 1.03 | 1.02 |
+| after | 1.02 | 1.00 | 0.99 | 1.00 | 0.99 |
 
-They're closer to 1, not all at it: year 3 stays the lowest, and the last stretch of the season still runs low for young players. Averaged over 0–50 games seen, all players' rest-of-season error fell from 4.178 to 4.125 FP/G (−0.052, 95% interval −0.072 to −0.033) and next-10-game error from 4.750 to 4.722 (−0.034, −0.047 to −0.023), in every season: rest of season −0.019 in 2023‑24, −0.058 in 2024‑25, −0.079 in 2025‑26. Every experience group's error fell. For players projected for 20+ minutes, it fell from 4.051 to 3.998.
+They're closer to 1, not all at it. Across these groups, from 0 to 35 games seen, the average gap from 1.00 fell from 0.041 to 0.019 and the widest from 0.122 to 0.069. Year 3 stays the lowest.
 
-In the app's rest-of-season backtest (`scripts/backtest_recency.py`), error fell in every season: 4.514 → 4.418 FP/G (2025‑26), 3.962 → 3.876 (2024‑25), 4.174 → 4.148 (2023‑24).
+Averaged over 0–50 games seen, all players' rest-of-season error fell from 4.212 to 4.181 FP/G (−0.030, 95% interval −0.052 to −0.009) and next-10-game error from 4.820 to 4.801 (−0.024, −0.037 to −0.010). Rest of season by season: +0.012 in 2023‑24, −0.038 in 2024‑25, −0.061 in 2025‑26. For players projected for 20+ minutes, it fell from 4.057 to 4.018.
+
+Each change did a different job, measured alone against the app before them:
+
+| Change | Rest of season | Next 10 | Average gap from 1.00 | Widest |
+|---|---|---|---|---|
+| Veterans' minutes | −0.034 | −0.022 | 0.034 | 0.122 |
+| Year 3–4 dips | −0.003 | +0.003 | 0.038 | 0.118 |
+| Climb | +0.005 | −0.005 | 0.028 | 0.075 |
+| All three | −0.030 | −0.024 | 0.019 | 0.069 |
+
+Nearly all of the error gain is the veterans': −0.082 (−0.124 to −0.042) in years 7–10 and −0.114 (−0.188 to −0.041) from year 11. Young players' error didn't move beyond noise (year 1 +0.004, year 2 +0.039, year 3 −0.037, year 4 +0.007, years 5–6 +0.013, each ±0.03–0.08). The climb is there because their projections ran low as a season went on, and it fixes that without lowering their error.
+
+In the app's rest-of-season backtest (`scripts/backtest_recency.py`, players with 40+ games), error was 4.513 → 4.445 FP/G in 2025‑26, 3.963 → 3.899 in 2024‑25, and slightly worse in 2023‑24, 4.170 → 4.181.
 
 Tried and dropped:
-- **A flat multiplier by years in the league.** Fitted on two seasons and scored on the third, it brought totals to about 1.00, but error rose (4.178 → 4.195 rest of season, 4.750 → 4.833 next 10): it pushed early-season projections further above what young players were about to score. Their shortfall is about timing, and partly that players who beat their projection get more games, which a multiplier can't separate. Splitting it by role was worse (4.215).
-- **A larger climb.** A rookie climb of 0.20 scored the same as 0.15 and ran higher for young players after 20 games (1.05 for rookies); by 0.30 error was back near where it started (4.174).
-- **Veterans' minutes × 0.97 or 0.96.** They had about the same error as 0.98, but 2023‑24 got worse as they went (0.96 gave up all of its gain there), and veterans' projections fell below 1.
+- **Counting the climb over the games he really played.** This first version looked much better (−0.052 rest of season), but it knows the future: a player who ended with 25 games got almost no climb and one who ended with 80 got all of it. Counted the way the app first did, with him playing every team game left, error rose 0.027 (+0.003 to +0.052) and rookies' went from 4.82 to 4.99. The app and `scripts/backtest_recency.py` now share one count, `climb_factors`.
+- **A flat multiplier by years in the league.** Fitted on two seasons and scored on the third, it brought totals to about 1.00, but error rose (+0.017 rest of season, +0.083 next 10): it pushed early-season projections further above what young players were about to score. Their shortfall is about timing, and partly that players who beat their projection get more games, which a multiplier can't separate. Splitting it by role was worse.
+- **Other climb sizes.** A rookie climb of 0.075, 0.1125, 0.15 or 0.20 changed rest-of-season error by −0.038, −0.035, −0.030 or −0.019, close enough to be noise, with average gaps of 0.024, 0.021, 0.019 and 0.018. 0.15 takes nearly all of the alignment; 0.20 adds little and gives back error, most of all in 2023‑24.
+- **A climb table by year** (year 3 at 0.15 instead of 0.10). It lifted year 3 by about a point, and year 3's error got worse in 2020‑21 (4.06 → 4.11). Not worth six separate numbers.
+- **Veterans' minutes × 0.97 from year 7.** About the same error as the split (−0.034), with 2023‑24 worse (+0.017), and no better than 0.98 for years 7–10 in the older seasons.
 
 ### 1.6 Bounded adjustments (the "news" layer)
 
