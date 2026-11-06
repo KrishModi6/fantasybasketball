@@ -328,6 +328,8 @@ Rest of season, projected / actual, for every player with 10 games left (1,485 p
 
 They're closer to 1, not all at it: year 3 stays the lowest, and the last stretch of the season still runs low for young players. Averaged over 0–50 games seen, all players' rest-of-season error fell from 4.178 to 4.125 FP/G (−0.052, 95% interval −0.072 to −0.033) and next-10-game error from 4.750 to 4.722 (−0.034, −0.047 to −0.023), in every season: rest of season −0.019 in 2023‑24, −0.058 in 2024‑25, −0.079 in 2025‑26. Every experience group's error fell. For players projected for 20+ minutes, it fell from 4.051 to 3.998.
 
+In the app's rest-of-season backtest (`scripts/backtest_recency.py`), error fell in every season: 4.514 → 4.418 FP/G (2025‑26), 3.962 → 3.876 (2024‑25), 4.174 → 4.148 (2023‑24).
+
 Tried and dropped:
 - **A flat multiplier by years in the league.** Fitted on two seasons and scored on the third, it brought totals to about 1.00, but error rose (4.178 → 4.195 rest of season, 4.750 → 4.833 next 10): it pushed early-season projections further above what young players were about to score. Their shortfall is about timing, and partly that players who beat their projection get more games, which a multiplier can't separate. Splitting it by role was worse (4.215).
 - **A larger climb.** A rookie climb of 0.20 scored the same as 0.15 and ran higher for young players after 20 games (1.05 for rookies); by 0.30 error was back near where it started (4.174).
