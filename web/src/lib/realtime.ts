@@ -96,6 +96,7 @@ export function useLeagueSocket(leagueId: string | undefined) {
         qc.invalidateQueries({ queryKey: ["league", leagueId, "meta"] });
         qc.invalidateQueries({ queryKey: ["league", leagueId, "activity"] });
         qc.invalidateQueries({ queryKey: ["league", leagueId, "board"] });
+        qc.invalidateQueries({ queryKey: ["league", leagueId, "rulings"] });
       }, POLL_MS);
     };
 
@@ -140,6 +141,9 @@ export function useLeagueSocket(leagueId: string | undefined) {
             break;
           case "trade_removed":
             qc.invalidateQueries({ queryKey: [...key, "board"] });
+            break;
+          case "trade_ruled":
+            for (const part of ["board", "activity", "rulings", "review"]) qc.invalidateQueries({ queryKey: [...key, part] });
             break;
           case "roster_moves": {
             qc.invalidateQueries({ queryKey: [...key, "activity"] });

@@ -19,6 +19,7 @@ PER_MINUTE_LIMIT = "120"
 DAILY_LIMIT = "6000"
 DEVICE_DAILY_LIMIT = "450"
 MAX_OUTPUT_TOKENS = "3000"
+RULINGS_DAILY_LIMIT = "2000"
 
 # Secrets (never in this file):
 #   OPENAI_API_KEY  add in the Cloudflare dashboard, or: npx wrangler secret put OPENAI_API_KEY

@@ -23,7 +23,7 @@ Base URL: your server, e.g. `http://localhost:8000`. Interactive docs (Swagger U
 | GET | `/api/leagues` | any | Your leagues, with `member_count` and `team_count` (teams in the latest snapshot; `null` before the first sync) |
 | POST | `/api/leagues` | any | `{source: "espn"\|"demo"\|"flaim", name?, season, espn?: {league_id, espn_s2?, swid?}, flaim?: {flaim_token, platform, league_id}, team_count?}`. Runs the first sync inline; `400` with ESPN's error if the league can't be read |
 | POST | `/api/leagues/import` | any | multipart `file` (.csv/.json, ≤2 MB), `name`, `season` |
-| GET | `/api/leagues/{id}` | member | League, teams (with who claimed them), settings, sync status, your role/team |
+| GET | `/api/leagues/{id}` | member | League, teams (with who claimed them), settings, sync status, your role/team, and `me.is_admin` (whether you can rule on its trades) |
 | PATCH | `/api/leagues/{id}` | owner | `{name?, sync_interval_hours?, espn?}`. Blank cookie fields keep stored values |
 | DELETE | `/api/leagues/{id}` | owner | |
 | PUT | `/api/leagues/{id}/settings` | owner | `{kind, points, categories, roster_slots?}`. Demo/file leagues only |
@@ -70,8 +70,12 @@ A league with no data yet returns `409` from analytics endpoints, with the last 
 | GET | `/api/leagues/{id}/trades/offers?team_id=&target=&target=&give=1,2,3` | What to offer for 1 to 3 players (`target`, repeated) who are all on one other team. `give` lists how many of your players an offer may include. → `{partner_id, partner_name, get, get_names, offers, closest, checked}`: `offers` are the ones the partner's projection accepts (falls 0.4% at most), best for you first; `closest` (only when there are none) are the refusals that came nearest. `422` with a message saying what to fix if the targets are free agents, your own players or on two teams |
 | GET | `/api/leagues/{id}/trades/asks?team_id=&player=&player=&partner_id=&get=1,2,3` | What to ask for 1 to 3 of your own players (`player`, repeated) from `partner_id`, or from every other team without it. `get` lists how many of their players a package may include. → `{partner_id, partner_name, give, give_names, offers, closest, checked}`: `offers` (each with its `partner_id`, `get` and `get_names`) are fair to both teams (neither falls more than 0.4%), the most for you first; `closest` (only when there are none) are the partner's refusals that came nearest. `422` with a message if the players aren't yours |
 | GET | `/api/leagues/{id}/trades/three-team?team_id=&partner_id=` | Three-team rotations: you send one player to a team, it sends one to a third, which sends one back to you. Optional `partner_id` (repeat it to fix both other teams) keeps rotations with those teams. → `{suggestions, checked}`; each has `teams` (you first), `moves` (with `name`), `give`, `get`, your deltas, `partners` (`team_id`, `team_name`, `delta_ros`, `delta_pct`), `fairness`, `summary` |
-| GET / POST | `/api/leagues/{id}/trades/board` | POST = evaluate + share `{…trade, note}`; re-scored after every refresh. GET rows include `teams` and `moves` (`{player_id, from_team, to_team}`) for two- and three-team trades |
+| GET / POST | `/api/leagues/{id}/trades/board` | POST = evaluate + share `{…trade, note}`; re-scored after every refresh. GET rows include `teams` and `moves` (`{player_id, from_team, to_team}`) for two- and three-team trades, and `ruling` (`"fair"`, `"unfair"` or `null`), the league admin's call |
 | DELETE | `/api/leagues/{id}/trades/board/{post_id}` | Author or owner |
+| GET | `/api/leagues/{id}/trades/review` | League admin only (`403` otherwise). → `{reach, trades}`. `reach` is who a ruling reaches: `members` (shared server), `league` (everyone's desktop apps) or `this_copy`. Each trade: `key`, `at`, `on_espn`, `post` (`{id, author, note}` or `null`), `status` (`open`, `done`, `stale` or `gone`), `status_note`, `trade` (`{teams, moves, text}`), `numbers` (`{sides, fairness, summary, completed}`, or `null`; `completed` means they come from undoing a finished trade) and `ruling` |
+| GET | `/api/leagues/{id}/trades/rulings` | Members. The league admin's rulings, newest first: `{key, ruling, note, trade, numbers, decided_at, pending}`. `numbers` is a copy from when the ruling was made; `pending` means it hasn't reached the rest of the league yet |
+| PUT | `/api/leagues/{id}/trades/rulings/{key}` | League admin only. `{ruling: "fair"\|"unfair", note?}` (note up to 500 characters). Makes or changes a ruling and returns it. `404` if the trade isn't on the board or in the recent moves and has no ruling; `403` if the Worker says another copy is the admin |
+| DELETE | `/api/leagues/{id}/trades/rulings/{key}` | League admin only. Withdraws a ruling. `503` if it has reached the rest of the league and the Worker can't be reached, in which case it still stands |
 
 ### `TradeSide`
 ```json
@@ -94,7 +98,7 @@ A league with no data yet returns `409` from analytics endpoints, with the last 
 `GET ws(s)://host/api/ws/leagues/{id}?token=<jwt>`. Members only; the server closes the socket with code `4401` otherwise. The server pushes JSON events; clients may send any text as a keep-alive.
 
 ```json
-{"type": "sync_started" | "sync_completed" | "sync_failed" | "trade_shared" | "trade_removed" |
+{"type": "sync_started" | "sync_completed" | "sync_failed" | "trade_shared" | "trade_removed" | "trade_ruled" |
          "member_joined" | "member_updated" | "override_changed" | "settings_changed",
  "at": "2026-10-21T22:01:00Z", "...": "event-specific fields"}
 ```
