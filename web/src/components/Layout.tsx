@@ -6,7 +6,7 @@ import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { openAppMenu, openWhatsNew } from "../lib/desktop";
 import { count, pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
-import { canGoBack, rememberPath } from "../lib/nav";
+import { canGoBack, leagueTabs, rememberPath } from "../lib/nav";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
 import { useAutoRefresh, useLeagueSocket, useLive, useRefreshOnSync } from "../lib/realtime";
 import { useToast } from "../lib/toast";
@@ -212,16 +212,7 @@ export function LeagueLayout() {
   };
 
   const base = `/l/${leagueId}`;
-  const tabs = [
-    { to: base, label: "Overview", end: true },
-    { to: `${base}/rankings`, label: "Rankings" },
-    { to: `${base}/team`, label: "Team" },
-    { to: `${base}/matchups`, label: "Matchups" },
-    { to: `${base}/players`, label: "Players" },
-    { to: `${base}/trades`, label: "Trades" },
-    { to: `${base}/assistant`, label: "Assistant" },
-    { to: `${base}/league`, label: "League" },
-  ];
+  const tabs = leagueTabs(base, Boolean(league?.me?.is_admin));
   const s = league?.settings;
 
   return (

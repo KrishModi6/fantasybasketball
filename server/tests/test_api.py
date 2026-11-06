@@ -158,7 +158,7 @@ def test_full_flow(client):
     assert prev["league_name"] == "Test League"
     assert client.post(f"/api/invites/{inv['code']}/accept", json={"team_id": other}, headers=member).status_code == 200
     me = client.get(f"/api/leagues/{lid}", headers=member).json()["me"]
-    assert me == {"role": "member", "team_id": other}
+    assert me == {"role": "member", "team_id": other, "is_admin": False}
     # Members can't manage invites
     assert client.post(f"/api/leagues/{lid}/invites", json={}, headers=member).status_code == 403
     # Trade board + activity
@@ -193,7 +193,8 @@ def test_league_code_join(client):
     assert r.status_code == 201, r.text
     joined = r.json()
     assert joined["id"] != lg["id"] and joined["name"] == "Code League" and len(joined["teams"]) == 8
-    assert joined["me"] == {"role": "owner", "team_id": team}  # their own copy, with the team picked for them
+    # Their own copy, with the team picked for them. They own the copy, but that doesn't make them the league's admin.
+    assert joined["me"] == {"role": "owner", "team_id": team, "is_admin": False}
     assert joined["connector"]["shared_by"] == "Code Owner"
 
     # Members can't make codes; damaged codes get a plain message.

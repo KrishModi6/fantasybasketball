@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from .orm import League, LeagueMember, User
-from .security import decode_token
+from .security import decode_token, decrypt_json
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -50,4 +50,23 @@ def membership(league_id: str, user: User = Depends(current_user), db: Session =
 def owner_membership(m: Membership = Depends(membership)) -> Membership:
     if not m.is_owner:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the league owner can do that")
+    return m
+
+
+def is_league_admin(league: League, member: LeagueMember) -> bool:
+    """Whether this member runs the league, rather than just owning a copy of it.
+
+    The owner role alone can't say: whoever joins with an invite code gets their own copy of the league and owns
+    that copy. So a copy that came from a code isn't an admin's, even after its owner pastes in their own cookies,
+    and neither is one whose league turned out to have an admin elsewhere (services.rulings_share).
+    """
+    if member.role != "owner":
+        return False
+    cfg = decrypt_json(league.connector_config)
+    return not (cfg.get("shared_by") or cfg.get("joined_with_code") or cfg.get("admin_elsewhere"))
+
+
+def admin_membership(m: Membership = Depends(membership)) -> Membership:
+    if not is_league_admin(m.league, m.member):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the league's admin can do that")
     return m

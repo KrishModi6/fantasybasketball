@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test --no-warnings test/*.test.mjs",
-    "deploy": "npx wrangler@4 deploy"
+    "deploy": "npx wrangler@4 deploy",
+    "schema": "npx wrangler@4 d1 execute courtside-ai --remote --file schema.sql"
   }
 }

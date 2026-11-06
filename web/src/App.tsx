@@ -19,6 +19,7 @@ const PlayersPage = lazy(() => import("./pages/PlayersPage"));
 const TradesPage = lazy(() => import("./pages/TradesPage"));
 const MatchupsPage = lazy(() => import("./pages/MatchupsPage"));
 const LeagueHubPage = lazy(() => import("./pages/LeagueHubPage"));
+const AdminPage = lazy(() => import("./pages/AdminPage"));
 const MethodologyPage = lazy(() => import("./pages/MethodologyPage"));
 const GlossaryPage = lazy(() => import("./pages/GlossaryPage"));
 const AssistantPage = lazy(() => import("./pages/AssistantPage"));
@@ -67,6 +68,7 @@ export function App() {
               <Route path="matchups" element={page(<MatchupsPage />)} />
               <Route path="assistant" element={page(<AssistantPage />)} />
               <Route path="league" element={page(<LeagueHubPage />)} />
+              <Route path="admin" element={page(<AdminPage />)} />
               <Route path="methodology" element={page(<MethodologyPage />)} />
               <Route path="glossary" element={page(<GlossaryPage />)} />
             </Route>

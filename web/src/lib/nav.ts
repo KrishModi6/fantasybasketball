@@ -23,5 +23,20 @@ export function rememberedPath(): string | null {
   }
 }
 
+/** A league's sections. Admin is only offered to the league's admin; the server refuses everyone else anyway. */
+export function leagueTabs(base: string, isAdmin: boolean): { to: string; label: string; end?: boolean }[] {
+  return [
+    { to: base, label: "Overview", end: true },
+    { to: `${base}/rankings`, label: "Rankings" },
+    { to: `${base}/team`, label: "Team" },
+    { to: `${base}/matchups`, label: "Matchups" },
+    { to: `${base}/players`, label: "Players" },
+    { to: `${base}/trades`, label: "Trades" },
+    { to: `${base}/assistant`, label: "Assistant" },
+    { to: `${base}/league`, label: "League" },
+    ...(isAdmin ? [{ to: `${base}/admin`, label: "Admin" }] : []),
+  ];
+}
+
 /** True when the router has an earlier in-app page to go back to (react-router keeps an index in history.state). */
 export const canGoBack = () => ((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0;

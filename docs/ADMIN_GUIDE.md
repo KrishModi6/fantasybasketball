@@ -66,6 +66,28 @@ Put it behind HTTPS (Caddy, nginx, or your host's TLS). WebSockets must be proxi
 - **Backups:** back up the database (SQLite: copy `app.db` while the app is idle, or use `sqlite3 .backup`) and `FBB_SECRET_KEY`. The model and history in `server/data/` can be regenerated from the scripts.
 - **Retraining by hand:** `python -m scripts.build_history && python -m scripts.fetch_game_logs && python -m scripts.train_model`. Check the printed backtest; the new model is picked up automatically.
 
+### Trade rulings
+
+A league's admin can rule each trade fair or not fair from the **Admin** tab. A ruling lives in its own table (`trade_rulings`), never changes a trade's evaluation, and can't touch ESPN, which Courtside only reads.
+
+- **Who the admin is.** The owner of a copy of the league, unless it was joined with an invite code (`shared_by` or `joined_with_code` in its connector config) or the Worker has said someone else holds the league (`admin_elsewhere`). `GET /api/leagues/{id}` reports it as `me.is_admin`, and the routes refuse everyone else with `403`.
+- **On a shared server** every member reads the same database, so nothing else is involved.
+- **In the desktop app** each copy has its own database, so ESPN leagues send rulings through the same Cloudflare Worker as the AI assistant (`/v1/leagues/{league_key}/rulings`, in `cloudflare/ai-proxy/`). `league_key` is a hash of the ESPN league id and season, so the Worker doesn't learn which league it is. The admin's copy sends; every other copy reads them into its own table at most once a minute, on opening the board or dashboard and after each refresh.
+- **Proving who's the admin.** The client token in release builds identifies the app, not a person. So the admin's copy makes a random key (saved encrypted in `user_settings`, kept when an AI key is removed) and sends it as `X-League-Admin`. The first ruling for a league claims it, the Worker keeps only the key's SHA-256 in `league_admins`, and later writes without the key get `403`.
+- **Ask the real admin to make a first ruling soon after updating.** Until someone claims the league, anyone who connected it by hand could. If the wrong copy claims it, or the admin loses their database, reset the claim:
+  ```bash
+  npx wrangler@4 d1 execute courtside-ai --remote --command "DELETE FROM league_admins WHERE league = '<league_key>'"
+  ```
+  `<league_key>` is the first 40 hex characters of the SHA-256 of `courtside:espn:<league id>:<season>`. The next ruling sent claims the league again, and existing rulings stay in `league_rulings` until replaced.
+- **Deploying.** Apply the tables, then deploy, before the app release that uses them. A copy that reaches an older Worker keeps its rulings pending and sends them later, so the order can't lose any. From `cloudflare/ai-proxy/`:
+  ```bash
+  npm run schema
+  ```
+  ```bash
+  npm run deploy
+  ```
+- **Limits.** 16 KB a ruling, 500 a league, and `RULINGS_DAILY_LIMIT` writes a day across all leagues (`wrangler.toml`).
+
 ## Scaling
 
 - The API is stateless except for the in-memory analysis cache and the WebSocket hub.

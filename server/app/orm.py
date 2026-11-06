@@ -158,6 +158,30 @@ class TradePost(Base):
     author: Mapped[User] = relationship()
 
 
+class TradeRuling(Base):
+    """The league admin's own call on a trade: fair or not fair.
+
+    Apart from TradePost on purpose: a ruling is a person's decision, so making one never touches Courtside's
+    evaluation, verdict or numbers. `numbers` is a copy of what those said when the call was made, and `trade` says
+    who sent whom, so a ruling still reads properly after rosters change or the post is deleted. A separate table,
+    so existing databases pick it up through create_all, with no migration.
+    """
+    __tablename__ = "trade_rulings"
+    __table_args__ = (UniqueConstraint("league_id", "trade_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id", ondelete="CASCADE"), index=True)
+    trade_key: Mapped[str] = mapped_column(String(32))  # see services.rulings.trade_key
+    ruling: Mapped[str] = mapped_column(String(10))  # fair | unfair
+    note: Mapped[str] = mapped_column(String(500), default="")
+    trade: Mapped[dict] = mapped_column(JSON)
+    numbers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    decided_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Desktop apps only, see services.rulings_share: it has reached the rest of the league, and it has changes that haven't.
+    published: Mapped[bool] = mapped_column(Boolean, default=False)
+    pending: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Activity(Base):
     __tablename__ = "activity"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

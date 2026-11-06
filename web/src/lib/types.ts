@@ -43,7 +43,7 @@ export interface League {
   source: LeagueSummary["source"];
   sync: { status: string; error: string | null; last_synced_at: string | null; interval_hours: number };
   connector: { espn_league_id: string | null; has_cookies: boolean | null; shared_by: string | null };
-  me: { role: "owner" | "member"; team_id: number | null } | null;
+  me: { role: "owner" | "member"; team_id: number | null; is_admin: boolean } | null;
   member_count: number;
   teams: TeamRef[];
   settings: {
@@ -270,6 +270,62 @@ export interface TradeMove {
   from_team: number;
   to_team: number;
   name?: string; // set by the three-team finder
+}
+
+/** One team's line of Courtside's numbers beside a ruling. A trade scored by an older version can lack any of them. */
+export interface RulingSide {
+  team_id: number;
+  team_name: string | null;
+  delta_per_week: number | null;
+  delta_pct: number | null;
+  before_playoff_odds: number | null;
+  after_playoff_odds: number | null;
+  before_title_odds: number | null;
+  after_title_odds: number | null;
+  verdict: TradeSide["verdict"] | null;
+}
+
+export interface RulingNumbers {
+  sides: RulingSide[];
+  fairness: { label: string; reason: string };
+  summary: string;
+  completed: boolean; // worked out by undoing a finished trade, not the analyzer's before-and-after
+}
+
+export interface RuledTrade {
+  teams: { id: number; name: string }[];
+  moves: { player_id: string; name: string; from_team: number; to_team: number }[];
+  text: string;
+}
+
+export type RulingCall = "fair" | "unfair";
+
+/** The league admin's call on a trade, with a copy of Courtside's numbers from when it was made. */
+export interface Ruling {
+  key: string;
+  ruling: RulingCall;
+  note: string;
+  trade: RuledTrade;
+  numbers: RulingNumbers | null;
+  decided_at: string;
+  pending: boolean; // saved here, not yet sent to the rest of the league
+}
+
+export interface ReviewTrade {
+  key: string;
+  at: string;
+  on_espn: boolean;
+  post: { id: number; author: string; note: string } | null;
+  status: "open" | "done" | "stale" | "gone";
+  status_note: string | null;
+  trade: RuledTrade;
+  numbers: RulingNumbers | null;
+  ruling: Ruling | null;
+}
+
+export interface TradeReview {
+  reach: "league" | "members" | "this_copy";
+  trades: ReviewTrade[];
 }
 
 export interface TradeEval {

@@ -24,6 +24,7 @@ from ..realtime import hub
 from ..security import decrypt_json
 from .analysis import invalidate, latest_snapshot_row, models, pack_snapshot, unpack_snapshot
 from .board import MOVE_SOURCES, describe_move, refresh_board, roster_moves
+from .rulings_share import pull_if_due
 
 log = logging.getLogger(__name__)
 KEEP_SNAPSHOTS = 20
@@ -132,6 +133,7 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
         if moves:
             hub.publish(league_id, {"type": "roster_moves", "count": len(moves),
                                     "first": describe_move(moves[0], prev, snap)})
+        pull_if_due(db, league)  # the admin's latest rulings, for a desktop app with no page open that would ask
         hub.publish(league_id, {"type": "sync_completed", "reason": reason, "warnings": len(snap.warnings)})
     finally:
         db.close()

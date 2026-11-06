@@ -2,14 +2,15 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
+import { LeagueRulings, RulingTag } from "../components/Rulings";
 import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, Segmented, SubTabs, Tag, Term } from "../components/ui";
 import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { count, fmt0, fmt1, pct, relTime, signed, signedPct } from "../lib/format";
+import { count, fmt0, fmt1, pct, relTime, signed, signedPct, verdictTone } from "../lib/format";
 import { useActivity, useAiStatus, useTeam } from "../lib/queries";
 import { useToast } from "../lib/toast";
-import type { ThreeTeamSuggestion, TradeAsks, TradeEval, TradeMove, TradeOffer, TradeOffers, TradeSide, TradeSuggestion } from "../lib/types";
+import type { RulingCall, ThreeTeamSuggestion, TradeAsks, TradeEval, TradeMove, TradeOffer, TradeOffers, TradeSide, TradeSuggestion } from "../lib/types";
 
 type Tab = "analyze" | "find" | "target" | "shop" | "board";
 type Side = "a" | "b" | "c";
@@ -47,8 +48,6 @@ function tradeBody(d: Draft) {
   const sendTo = Object.fromEntries(sidesOf(d).flatMap((s) => d[GIVES[s]].map((id) => [id, d[destOf(d, s, id)]])));
   return { ...body, team_c: d.c, c_gives: d.cGives, send_to: sendTo };
 }
-
-const verdictTone = (v: TradeSide["verdict"]) => (v === "advantageous" ? "up" : v === "disadvantageous" ? "down" : undefined);
 
 export default function TradesPage() {
   const { myTeamId, teams } = useLeagueCtx();
@@ -841,6 +840,7 @@ interface Post {
   // Re-scored after every refresh; status says whether the trade is still possible.
   evaluation: TradeEval & { status?: "open" | "done" | "stale"; status_note?: string | null; as_of?: string };
   created_at: string;
+  ruling?: RulingCall | null; // the league admin's call, apart from Courtside's numbers above
 }
 
 /** Real trades and waiver moves found in the league's latest refreshes. */
@@ -863,7 +863,7 @@ function RecentMoves() {
   );
 }
 
-function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
+export function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
   const { league, teamName } = useLeagueCtx();
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -881,6 +881,7 @@ function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
     return (
       <div className="stack">
         <RecentMoves />
+        <LeagueRulings />
         <Panel><Empty title="No trades posted yet">Evaluate a trade and post it to share the numbers with the league. They update automatically after every refresh.</Empty></Panel>
       </div>
     );
@@ -889,6 +890,7 @@ function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
   return (
     <div className="stack">
       <RecentMoves />
+      <LeagueRulings />
       <Panel flush note="Numbers update automatically after every refresh, so they always reflect the latest stats and rosters.">
         <div className="table-wrap">
           <table className="data">
@@ -914,6 +916,7 @@ function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
                       <div className="tiny">
                         {status === "done" && <Tag tone="up">Happened</Tag>}
                         {status === "stale" && <Tag tone="warn">No longer possible</Tag>}{" "}
+                        {p.ruling && <><RulingTag ruling={p.ruling} />{" "}</>}
                         <span className="faint">
                           {status === "open" ? `Updated ${relTime(p.evaluation.as_of ?? p.created_at)}` : p.evaluation.status_note}
                         </span>

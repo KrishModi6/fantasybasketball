@@ -18,7 +18,7 @@ from fbb.schedule import live_window
 
 from ..config import get_settings
 from ..db import get_db
-from ..deps import Membership, current_user, membership, owner_membership
+from ..deps import Membership, current_user, is_league_admin, membership, owner_membership
 from ..orm import Activity, Invite, League, LeagueMember, Snapshot, User
 from ..realtime import hub
 from ..schemas import (
@@ -84,7 +84,7 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
         "connector": {"espn_league_id": cfg.get("league_id") if lg.source == "espn" else None,
                       "has_cookies": bool(cfg.get("espn_s2")) if lg.source == "espn" else None,
                       "shared_by": cfg.get("shared_by")},
-        "me": {"role": me.role, "team_id": me.team_id} if me else None,
+        "me": {"role": me.role, "team_id": me.team_id, "is_admin": is_league_admin(lg, me)} if me else None,
         "member_count": len(lg.members),
         "teams": teams,
         "settings": settings,
@@ -197,6 +197,10 @@ def update_league(body: LeagueUpdate, m: Membership = Depends(owner_membership),
         for k in ("espn_s2", "swid"):
             if not new.get(k):
                 new[k] = cfg.get(k)
+        if cfg.get("shared_by") or cfg.get("joined_with_code"):
+            new["joined_with_code"] = True  # their own cookies make it their login, not their league to run
+        if cfg.get("admin_elsewhere"):
+            new["admin_elsewhere"] = True
         lg.connector_config = encrypt_json(new)
     db.commit()
     return league_out(db, lg, m.member)
