@@ -1,10 +1,20 @@
 # Courtside
 
-Fantasy basketball analytics for a whole league: player projections, team power rankings, lineup and add/drop advice, a trade analyzer and trade finder, an AI assistant that explains it all, and a shared league hub with invite links. It runs as a website (mobile-friendly, installable as a PWA) and as a desktop app for Windows and macOS built from the same code.
+**Know whether that trade actually helps you, before you hit accept.** Courtside connects to your ESPN fantasy basketball league and simulates what a move does to your lineups, your weeks and your playoff odds.
 
-**[Download the desktop app](https://github.com/KrishModi6/fantasybasketball/releases/latest)**: Windows installer or Mac app, with everything bundled. No server, no Python, no account.
+![A trade evaluated in Courtside's demo league: change per week, playoff and title odds, and the math step by step](docs/images/trade-verdict.jpg)
 
-**Statistics come first.** Every number starts from box-score statistics and published projections. Machine learning is used only where a rolling backtest shows it reduces error. News, injuries and trades enter only as bounded, labelled adjustments to minutes and games played. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+**[Download the desktop app](https://github.com/KrishModi6/fantasybasketball/releases/latest)** for Windows or Mac, with everything bundled: no server, no Python, no account. **Try a demo league** works without connecting anything.
+
+- **Trades:** both rosters re-simulated day by day for the rest of the season, with the verdict and every step of the math. Or let it find trades, target a player, or shop one.
+- **Waivers and lineups:** add/drop moves tested against your actual lineup, streaming pickups for this week, and who to start each day.
+- **Matchups:** this week's head-to-head played out 10,000 times, with your win odds and each player's range.
+- **Rankings:** every team's power score, projected record, and playoff and title odds from your real schedule and bracket.
+- **Ask in plain English:** an AI assistant answers using Courtside's own numbers and can only state what its tools return.
+
+**Tested on seasons it hadn't seen.** Predicting each season using only earlier ones, its preseason projections were 5% more accurate than ESPN's per game and 12% on season totals, and beat ESPN in all four seasons compared ([the numbers](#backtest-how-much-the-ml-helps)). It also keeps checking itself: the simulator re-runs against real games twice a day. Machine learning is used only where a backtest shows it reduces error, and news, injuries and trades only enter as bounded, labelled adjustments. See [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+
+It also runs as a website (mobile-friendly, installable as a PWA) from the same code, for a league that wants one shared server.
 
 ---
 
@@ -12,12 +22,12 @@ Fantasy basketball analytics for a whole league: player projections, team power 
 
 | Area | What you get |
 |---|---|
-| **Player projections** | Per-minute rates for 14 stats, plus minutes and availability, blended from a statistical baseline (Basketball-Reference SPS), ESPN's projection and a LightGBM model. Blend weights are learned out of sample, then updated in-season with Bayesian shrinkage. Every player shows its sources, weights, adjustments and SHAP factors. |
+| **Player projections** | Per-minute rates for 14 stats, plus minutes and availability, blended from a statistical baseline (Basketball-Reference SPS), ESPN's projection and a LightGBM model. Blend weights are learned out of sample, then updated in-season with Bayesian shrinkage. A player's years in the league set the shape of his season: young players start lower and climb, veterans hold steady. Every player shows its sources, weights, adjustments and SHAP factors. |
 | **Expected fantasy points (xFP)** | The Next Gen Stats idea applied to fantasy. NBA.com tracking prices each player's chances this season: every shot (by a shot model), potential assists, rebound chances, deflections and contests. Projections lean on those chances rather than how many went in, which cut rest-of-season error about 3% in a three-season backtest. Each player shows xFP/G and luck (FP/G minus xFP/G), so the buy-lows and sell-highs stand out. See [METHODOLOGY 1.5.1](docs/METHODOLOGY.md#151-expected-fantasy-points-xfp). |
 | **Team strength model** | A day-by-day optimal-lineup simulation for every team over the rest of the season gives weekly score distributions. Teams are ranked by a power score that counts this season's record for the share of the season played and the projected all-play win rate for the rest, with projected records plus playoff and title odds from 5,000 simulated seasons of your actual schedule and bracket. A week-by-week grid shows every team's projected points (or win odds against that week's opponent) for the rest of the season. Each rank comes with a "why": stat-by-stat edges, top contributors, depth, schedule and injury drag. |
 | **Team improvement** | Weak spots ranked by points at stake. Add/drop moves are simulated against your lineup. Also: streaming pickups for the current week and daily lineups with a confidence score for every start. |
 | **Matchup simulator** | Plays any week's head-to-head out 10,000 times, box score by box score: who suits up, each player's night, bench fill-ins when a starter sits, and points already scored. You get win probability, score and margin distributions, a day-by-day breakdown, each player's range and "swing", and what-if toggles to sit players. Works for points and category leagues. |
-| **Trades** | The analyzer re-simulates both rosters and handles 2-for-1 roster spots. It shows the math step by step: raw value, lineup-adjusted change, playoff weeks, and playoff and title odds before and after. The verdict is advantageous, neutral or disadvantageous. The finder screens 1-for-1, 2-for-2 or give-up-to-2-get-1 packages and fully simulates the best ones. |
+| **Trades** | The analyzer re-simulates both rosters and handles 2-for-1 roster spots. It shows the math step by step: raw value, lineup-adjusted change, playoff weeks, and playoff and title odds before and after. The verdict is advantageous, neutral or disadvantageous, and a balanced trade says why it's balanced. Trades can include three teams. The finder screens 1-for-1, 2-for-2 or give-up-to-2-get-1 packages and fully simulates the best ones; you can also target or shop one player. |
 | **AI assistant** | Ask in plain English: best waiver pickups, a game plan for this week's matchup, trades to pitch, injury impact, season outlook, power-rankings trash talk. The model calls Courtside's own engine (waiver simulation, trade evaluator, matchup simulator, rankings) and may only state numbers those tools return. **Ask AI** buttons on players, trades and matchups. See [docs/AI.md](docs/AI.md). |
 | **League hub** | Accounts, invite links and codes, team claiming, standings, a shared trade board, a live activity feed (WebSockets), injury-change alerts and league-wide projection overrides. |
 | **Data** | An ESPN connector (public, or private with cookies), CSV/JSON import for any platform, an adapter for Flaim (unverified, see below), scheduled refreshes, rate limiting and caching. |
@@ -102,7 +112,9 @@ server/            FastAPI backend + analytics engine
     ml/            feature builder + LightGBM wrapper
   app/             API: auth, leagues, invites, analysis, trades, realtime, scheduler, AI assistant
   engine.py        desktop engine entry point (PyInstaller: courtside-engine.spec)
-  scripts/         build_history, fetch_game_logs, train_model, seed_dev
+  scripts/         data and model (build_history, fetch_game_logs, fetch_tracking, train_model), backtests
+                   (backtest_recency, backtest_sims, backtest_xfp), the daily check (daily_sims, daily_lambda,
+                   sims_lambda), seed_dev
   data/history/    player-season dataset 2017-18 → today (from ESPN)
   data/model/      trained model + metrics.json (the backtest above)
   tests/           engine unit tests + end-to-end API test
@@ -115,9 +127,9 @@ docs/              methodology, API, user guide, admin guide, connectors
 ## Tests
 
 ```bash
-cd server && .venv/Scripts/python -m pytest      # 51 tests (the API test needs internet once; ESPN data is cached)
-cd web && npm test && npm run typecheck           # 11 tests
-cd cloudflare/ai-proxy && npm test                # 7 tests: the AI proxy against SQLite and a stubbed OpenAI
+cd server && .venv/Scripts/python -m pytest      # the API test needs internet once; ESPN data is cached
+cd web && npm test && npm run typecheck
+cd cloudflare/ai-proxy && npm test                # the AI proxy against SQLite and a stubbed OpenAI
 cd server && .venv/Scripts/python engine.py --self-test   # the desktop engine end to end
 ```
 
@@ -154,7 +166,9 @@ aws login --profile courtside                                 # when the 12-hour
 ```
 The same bucket feeds xFP (Courtside 0.5.0): a daily task on the home PC runs `push_tracking_s3 --live`, which publishes this season's tracking file to the bucket's `public/` folder, and every app downloads it through CloudFront (`https://d3n5zp4ghqw542.cloudfront.net`) before asking NBA.com itself. Set `FBB_TRACKING_URL=""` to skip it.
 
-It all costs about $0.01 a month, under a $5 budget alert. [docs/AWS.md](docs/AWS.md) covers what's in the bucket and how it's locked down, the daily feed and its scheduled task, why the AI assistant stays on OpenAI rather than Amazon Bedrock, and which AWS services would be overkill here.
+AWS also runs the simulator's accuracy check: at 7:30 AM and 6:30 PM Eastern, EventBridge Scheduler starts a Lambda function that replays the season so far against real games.
+
+[docs/AWS.md](docs/AWS.md) covers what's in the bucket and how it's locked down, the daily feed and its scheduled task, the Lambda sims and what everything costs, why the AI assistant stays on OpenAI rather than Amazon Bedrock, and which AWS services would be overkill here.
 
 ## Documentation
 
@@ -162,6 +176,6 @@ It all costs about $0.01 a month, under a $5 budget alert. [docs/AWS.md](docs/AW
 - [User guide](docs/USER_GUIDE.md)
 - [Admin guide](docs/ADMIN_GUIDE.md)
 - [API reference](docs/API.md) (interactive docs at `/docs` on a running server)
-- [AWS: S3 backup, Bedrock evaluation, costs](docs/AWS.md)
+- [AWS: S3 backup, Lambda sims, Bedrock evaluation, costs](docs/AWS.md)
 - [Connectors](docs/CONNECTORS.md)
 - [AI assistant and the Cloudflare proxy](docs/AI.md)

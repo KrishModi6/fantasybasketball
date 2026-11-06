@@ -50,6 +50,15 @@ class HistoryDataset:
             return None
         return a - (self.age_season - season)
 
+    def first_season(self, pid: str, season: int) -> int | None:
+        """His first NBA season, as of ``season``: the earliest we have a line for, or his debut year if that's
+        earlier (the calendar year he started, so 2020 is 2020-21, season 2021 here). None if he has neither."""
+        starts = [h.season for h in self.lines.get(pid, []) if h.season < season]
+        debut = self.debut_year.get(pid)
+        if debut and debut < season:
+            starts.append(debut + 1)
+        return min(starts) if starts else None
+
     def seasons(self) -> list[int]:
         return sorted({ln.season for v in self.lines.values() for ln in v})
 
