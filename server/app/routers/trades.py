@@ -16,6 +16,7 @@ from ..realtime import hub
 from ..schemas import TradeIn, TradePostIn
 from ..services.analysis import LeagueAnalysis
 from ..services.board import post_sends
+from ..services.rulings import league_rulings, trade_key
 from .analysis import analysis
 
 router = APIRouter(prefix="/api/leagues/{league_id}/trades", tags=["trades"])
@@ -135,13 +136,15 @@ def _name_rows(a: LeagueAnalysis, rows: list[dict]) -> None:
 def board(m: Membership = Depends(membership), db: Session = Depends(get_db)):
     rows = db.scalars(select(TradePost).where(TradePost.league_id == m.league.id)
                       .order_by(TradePost.created_at.desc()).limit(50)).all()
+    rulings = {r.trade_key: r.ruling for r in league_rulings(db, m.league.id)}
     out = []
     for r in rows:
         sends = post_sends(r)
         out.append({"id": r.id, "author": r.author.display_name, "author_id": r.created_by, "team_a": r.team_a,
                     "team_b": r.team_b, "a_gives": r.a_gives, "b_gives": r.b_gives, "teams": list(sends),
                     "moves": [{"player_id": p, "from_team": t, "to_team": to} for t, o in sends.items() for p, to in o.items()],
-                    "note": r.note, "evaluation": r.evaluation, "created_at": r.created_at.isoformat()})
+                    "note": r.note, "evaluation": r.evaluation, "created_at": r.created_at.isoformat(),
+                    "ruling": rulings.get(trade_key(sends))})
     return out
 
 

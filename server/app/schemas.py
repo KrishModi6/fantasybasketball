@@ -102,6 +102,11 @@ class TradePostIn(TradeIn):
     note: str = Field(default="", max_length=500)
 
 
+class RulingIn(BaseModel):
+    ruling: Literal["fair", "unfair"]
+    note: str = Field(default="", max_length=500)
+
+
 class OverrideIn(BaseModel):
     minutes_pct: float = Field(default=0.0, ge=-0.15, le=0.15)
     out_games: int | None = Field(default=None, ge=0, le=82)

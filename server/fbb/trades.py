@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 from collections import Counter, OrderedDict
 from collections.abc import Collection
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from itertools import combinations, permutations
 
 from .context import IR_STATUSES, AnalysisContext, WindowResult
@@ -178,6 +178,7 @@ class TradeEvaluator:
         self._baselines: dict[int, tuple[list[str], list[str], WindowResult]] = {}
         self._windows: OrderedDict[tuple[int, frozenset], WindowResult] = OrderedDict()
         self._base_sim: dict | None = None
+        self._completed: dict[frozenset, dict] = {}  # finished trades, scored once per set of league data
         cur = ctx.s.current_matchup_period
         self.this_week = ctx.matchup_days(cur)
         reg = ctx.s.settings.regular_season_matchups
@@ -302,6 +303,39 @@ class TradeEvaluator:
             "fairness": {**_fairness(sides), "reason": _balanced_reason(sides, ctx.proj, self.values)},
         }
 
+    def evaluate_completed(self, sends: dict[int, dict[str, int]], with_sim: bool = True) -> dict:
+        """A trade that has already gone through, scored on today's rosters.
+
+        evaluate_multi needs each player on the team giving him, which a finished trade no longer has. So this
+        scores sending everyone back and reads the result the other way round: what undoing the trade would
+        cost a team is what the trade gave it. That's a different calculation from the analyzer's, and rosters
+        and stats have moved on since the deal, so the result carries "completed" for whoever shows it to say so.
+        """
+        key = frozenset((p, to) for out in sends.values() for p, to in out.items())
+        if key in self._completed:
+            return self._completed[key]
+        undo: dict[int, dict[str, int]] = {t: {} for t in sends}
+        for home, out in sends.items():
+            for p, to in out.items():
+                undo[to][p] = home
+        ev = self.evaluate_multi(undo, with_sim)
+        sides = [_reversed_side(TradeSide(**s)) for s in ev["sides"]]
+        fairness = {**_fairness(sides), "reason": _balanced_reason(sides, self.ctx.proj, self.values)}
+        # The drops and pickups so far are what undoing would force, which isn't part of the trade.
+        sides = [replace(s, auto_drops=[], auto_adds=[], open_spot_adds=[], counted_as_pickups=[], return_drops=[])
+                 for s in sides]
+        result = {
+            **ev,
+            "moves": [{"player_id": p, "from_team": t, "to_team": to} for t, out in sends.items() for p, to in out.items()],
+            "sides": [asdict(s) for s in sides],
+            "math": self._math(sides, sends),
+            "summary": " ".join(f"{s.team_name}: {s.delta_per_week:+,.1f} pts/week ({s.verdict})." for s in sides),
+            "fairness": fairness,
+            "completed": True,
+        }
+        self._completed[key] = result
+        return result
+
     def _player_row(self, pid: str) -> dict:
         pr = self.ctx.proj[pid]
         v = self.values[pid]
@@ -364,6 +398,19 @@ class TradeEvaluator:
             lines.append(f"Verdict: {s.verdict} (threshold ±{ADVANTAGE_PCT:.0%} of rest-of-season output).")
             steps.append({"team_id": s.team_id, "team_name": name, "lines": lines})
         return steps
+
+
+def _reversed_side(s: TradeSide) -> TradeSide:
+    """One team's side of a trade read the other way round: what undoing it costs is what it gave."""
+    pct = (s.before_ros - s.after_ros) / s.after_ros if s.after_ros else 0.0
+    return replace(
+        s, gives=s.receives, receives=s.gives, before_ros=s.after_ros, after_ros=s.before_ros,
+        delta_ros=-s.delta_ros, delta_pct=pct, delta_per_week=-s.delta_per_week,
+        delta_vs_roster_per_week=-s.delta_vs_roster_per_week, delta_this_week=-s.delta_this_week,
+        delta_playoffs=-s.delta_playoffs, raw_value_delta=-s.raw_value_delta,
+        before_playoff_odds=s.after_playoff_odds, after_playoff_odds=s.before_playoff_odds,
+        before_title_odds=s.after_title_odds, after_title_odds=s.before_title_odds, verdict=_verdict(pct),
+    )
 
 
 def _fairness(sides: list[TradeSide]) -> dict:
