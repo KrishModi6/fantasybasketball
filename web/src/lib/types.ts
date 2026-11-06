@@ -295,7 +295,8 @@ export interface TradeEval {
   }[];
   math: { team_id: number; team_name: string; lines: string[] }[];
   summary: string;
-  fairness: { label: string; partner_accept_likelihood: number };
+  /** reason: why a balanced trade is balanced, in plain words; empty for any other trade. */
+  fairness: { label: string; partner_accept_likelihood: number; reason: string };
 }
 
 export interface TradeSuggestion {

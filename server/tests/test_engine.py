@@ -6,6 +6,7 @@ import itertools
 import math
 import random
 from datetime import datetime, time, timedelta, timezone
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -24,7 +25,16 @@ from fbb.models import GameLog, Player, RosterEntry, ScoringSettings, SeasonLine
 from fbb.projections import MANUAL_LIMIT, SEASON_ONLY_AFTER_GAMES, ProjectionEngine, games_from_injury_note
 from fbb.schedule import GAME_LENGTH
 from fbb.strength import MatchupModel, TeamStrength, league_strength, round_robin, team_windows
-from fbb.trades import TradeEvaluator, TradeSide, _fairness, _verdict, apply_trade, find_trades, pickup_pool
+from fbb.trades import (
+    TradeEvaluator,
+    TradeSide,
+    _balanced_reason,
+    _fairness,
+    _verdict,
+    apply_trade,
+    find_trades,
+    pickup_pool,
+)
 from fbb.valuation import player_values
 
 from factories import make_line, make_snapshot
@@ -907,6 +917,60 @@ def test_fairness_label_follows_verdicts():
     assert label(0.003, 0.009) == "balanced"
     assert label(0.0, -0.02) == "favors T0"
     assert label(0.006, 0.003, -0.02) == "favors T0 and T1"
+
+
+def _one_for_one(pcts=(0.004, -0.003), **extra) -> list[TradeSide]:
+    return [TradeSide(1, "T1", ["a"], ["b"], delta_pct=pcts[0], verdict=_verdict(pcts[0]), **extra),
+            TradeSide(2, "T2", ["b"], ["a"], delta_pct=pcts[1], verdict=_verdict(pcts[1]))]
+
+
+def _reason_for(a_pg, b_pg, a_games, b_games, sides=None) -> str:
+    proj = {"a": SimpleNamespace(name="A Guy", fp_pg=a_pg), "b": SimpleNamespace(name="B Guy", fp_pg=b_pg)}
+    values = {"a": {"ros_games": a_games}, "b": {"ros_games": b_games}}
+    return _balanced_reason(sides or _one_for_one(), proj, values)
+
+
+ALSO = "After positions and schedules, neither team gains or loses 1% of its rest-of-season points."
+
+
+def test_a_balanced_one_for_one_says_how_close_the_players_are():
+    assert _reason_for(32.6, 31.2, 76.0, 75.4) == f"A Guy projects 1.4 FP/G more than B Guy, with about the same games left. {ALSO}"
+    assert _reason_for(31.2, 32.6, 75.4, 76.0).startswith("B Guy projects 1.4 FP/G more than A Guy,")  # better player first
+    assert _reason_for(30.0, 28.0, 60.0, 50.0) == f"A Guy projects 2.0 FP/G more than B Guy, and has 10 more games left. {ALSO}"
+    assert _reason_for(30.0, 28.0, 50.0, 60.0) == f"A Guy projects 2.0 FP/G more than B Guy, but has 10 fewer games left. {ALSO}"
+    assert _reason_for(30.01, 30.02, 60.0, 60.5).startswith("B Guy and A Guy project the same FP/G, with about the same")
+    assert _reason_for(30.0, 30.0, 50.0, 60.0).startswith("A Guy and B Guy project the same FP/G, and B Guy has 10 more games left.")
+
+
+def test_only_a_balanced_trade_gets_a_reason():
+    assert _reason_for(40.0, 20.0, 60.0, 60.0, _one_for_one((0.03, -0.02))) == ""  # favors one team
+    assert _reason_for(30.0, 28.0, 60.0, 60.0, _one_for_one((0.02, 0.015))) == ""  # win-win
+
+
+def test_roster_moves_keep_the_reason_general():
+    # A drop or pickup is part of why it came out even, so the two players' gap isn't the explanation.
+    general = "After positions, schedules and roster spots, neither team gains or loses 1% of its rest-of-season points."
+    assert _reason_for(32.0, 31.0, 60.0, 60.0, _one_for_one(auto_drops=["c"])) == general
+    assert _reason_for(32.0, 31.0, 60.0, 60.0, _one_for_one(counted_as_pickups=[["a", "c"]])) == general
+    two_for_one = [TradeSide(1, "T1", ["a", "c"], ["b"], verdict="neutral"), TradeSide(2, "T2", ["b"], ["a", "c"], verdict="neutral")]
+    assert _reason_for(32.0, 31.0, 60.0, 60.0, two_for_one) == general
+    three = [TradeSide(t, f"T{t}", ["a"], ["b"], verdict="neutral") for t in (1, 2, 3)]
+    assert _reason_for(32.0, 31.0, 60.0, 60.0, three).endswith("no team gains or loses 1% of its rest-of-season points.")
+
+
+def test_an_evaluated_trade_explains_itself_only_when_balanced(snapshot):
+    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    ev = TradeEvaluator(ctx)
+    a, b = ctx.team_roster(1), ctx.team_roster(2)
+    seen = set()
+    for p, q in itertools.product(a, b):
+        r = ev.evaluate(1, 2, [p], [q], with_sim=False)
+        label, reason = r["fairness"]["label"], r["fairness"]["reason"]
+        seen.add(label == "balanced")
+        assert bool(reason) == (label == "balanced"), (p, q, label, reason)
+        if not r["sides"][0]["auto_drops"] and not r["sides"][1]["auto_drops"] and reason and "roster spots" not in reason:
+            assert ctx.proj[p].name in reason and ctx.proj[q].name in reason
+    assert seen == {True, False}  # the fixture has both kinds, so both branches ran
 
 
 def test_three_team_trade(snapshot):

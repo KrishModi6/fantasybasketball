@@ -299,7 +299,7 @@ class TradeEvaluator:
             "players": players,
             "math": self._math(sides, sends),
             "summary": " ".join(f"{s.team_name}: {s.delta_per_week:+,.1f} pts/week ({s.verdict})." for s in sides),
-            "fairness": _fairness(sides),
+            "fairness": {**_fairness(sides), "reason": _balanced_reason(sides, ctx.proj, self.values)},
         }
 
     def _player_row(self, pid: str) -> dict:
@@ -383,6 +383,32 @@ def _fairness(sides: list[TradeSide]) -> dict:
     # three-team trade both partners have to say yes.
     accept = math.prod(1 / (1 + math.exp(-s.delta_pct / 0.01)) for s in sides[1:])
     return {"label": label, "partner_accept_likelihood": accept}
+
+
+def _balanced_reason(sides: list[TradeSide], proj, values) -> str:
+    """Why a balanced trade is balanced, in plain words ("" for any other trade). A plain 1-for-1 names the
+    gap between the two players, from the numbers the trade page shows. With drops, pickups or more players,
+    roster spots are part of the answer, so comparing players would credit the wrong thing."""
+    if not all(s.verdict == "neutral" for s in sides):
+        return ""
+    moved = f"{'neither team' if len(sides) == 2 else 'no team'} gains or loses {ADVANTAGE_PCT:.0%} of its rest-of-season points."
+    plain = len(sides) == 2 and all(
+        len(s.gives) == 1 and len(s.receives) == 1
+        and not (s.auto_drops or s.auto_adds or s.counted_as_pickups or s.return_drops) for s in sides)
+    if not plain:
+        return f"After positions, schedules and roster spots, {moved}"
+    a, b = sorted((sides[0].gives[0], sides[1].gives[0]), key=lambda p: -proj[p].fp_pg)
+    gap = round(proj[a].fp_pg, 1) - round(proj[b].fp_pg, 1)
+    games = values[a]["ros_games"] - values[b]["ros_games"]
+    players = (f"{proj[a].name} projects {gap:.1f} FP/G more than {proj[b].name}" if gap >= 0.05
+               else f"{proj[a].name} and {proj[b].name} project the same FP/G")
+    if abs(games) < 2:
+        schedule = ", with about the same games left"
+    elif gap < 0.05:
+        schedule = f", and {proj[a if games > 0 else b].name} has {abs(games):.0f} more games left"
+    else:
+        schedule = f", {'and has' if games > 0 else 'but has'} {abs(games):.0f} {'more' if games > 0 else 'fewer'} games left"
+    return f"{players}{schedule}. After positions and schedules, {moved}"
 
 
 def _screen_values(ctx: AnalysisContext, ev: TradeEvaluator) -> tuple[dict[str, float], dict[str, float], float]:

@@ -84,6 +84,7 @@ def test_full_flow(client):
     ev = client.post(f"/api/leagues/{lid}/trades/evaluate", json=body, headers=owner)
     assert ev.status_code == 200, ev.text
     assert len(ev.json()["sides"]) == 2 and ev.json()["math"]
+    assert bool(ev.json()["fairness"]["reason"]) == (ev.json()["fairness"]["label"] == "balanced")
     sug = client.get(f"/api/leagues/{lid}/trades/suggestions?team_id={tid}", headers=owner)
     assert sug.status_code == 200, sug.text
     sug = client.get(f"/api/leagues/{lid}/trades/suggestions?team_id={tid}&max_give=2&max_get=2&exact=true", headers=owner)
