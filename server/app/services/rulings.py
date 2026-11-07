@@ -47,13 +47,18 @@ def iso(dt: datetime) -> str:
 
 
 def numbers(ev: dict | None) -> dict | None:
-    """What the dashboard shows from a full evaluation, and what a ruling keeps a copy of."""
+    """What the dashboard shows from a full evaluation, and what a ruling keeps a copy of.
+
+    `adjusted` travels with the copy because each desktop app has its own projection overrides, so nobody reading
+    the ruling on another computer could otherwise tell that the admin's overrides went into these numbers.
+    """
     if not ev:
         return None
     fairness = ev.get("fairness", {})
     return {"sides": [{k: s.get(k) for k in SIDE_NUMBERS} for s in ev.get("sides", [])],
             "fairness": {"label": fairness.get("label", ""), "reason": fairness.get("reason", "")},
-            "summary": ev.get("summary", ""), "completed": bool(ev.get("completed"))}
+            "summary": ev.get("summary", ""), "completed": bool(ev.get("completed")),
+            "adjusted": bool(ev.get("adjusted"))}
 
 
 def describe(snap: LeagueSnapshot, sends: Sends, ev: dict | None = None) -> dict:

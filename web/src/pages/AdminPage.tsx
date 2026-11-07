@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLeagueCtx } from "../components/Layout";
-import { NumbersTable, RULING_WORDS, RulingTag, UndoNote } from "../components/Rulings";
+import { AdjustedNote, NumbersTable, RULING_WORDS, RulingTag, UndoNote } from "../components/Rulings";
 import { Empty, ErrorBox, LoadingBlock, Notice, PageHead, Panel, Tag, Term } from "../components/ui";
 import { api } from "../lib/api";
 import { relTime } from "../lib/format";
@@ -72,7 +72,8 @@ function TradeCard({ t, reach }: { t: ReviewTrade; reach: TradeReview["reach"] }
               Courtside says: <strong><Term t="fit">{numbers.fairness.label || "no label"}</Term>.</strong> {numbers.fairness.reason} {numbers.summary}
             </p>
             {numbers.completed && <UndoNote />}
-            {!t.numbers && <p className="small muted">These are Courtside's numbers from when you ruled.</p>}
+            {numbers.adjusted && <AdjustedNote mine />}
+            {!t.numbers &&<p className="small muted">These are Courtside's numbers from when you ruled.</p>}
             <NumbersTable numbers={numbers} />
           </>
         ) : (

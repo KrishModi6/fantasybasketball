@@ -203,6 +203,33 @@ def test_ruling_on_a_board_trade(client):
     assert post["evaluation"] == evaluation
 
 
+def test_a_ruling_says_when_the_admins_overrides_are_in_its_numbers(client):
+    owner_id, owner = _user("Owner")
+    member_id, member = _user("Member")
+    snap = make_snapshot()
+    x, y, a, b = _lopsided(snap)
+    lid = _league(owner_id, snap)
+    _join(lid, member_id)
+    board = f"/api/leagues/{lid}/trades/board"
+    assert client.post(board, json=_trade_body(x, y, a, b), headers=owner).status_code == 201
+    [row] = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"]
+    assert row["numbers"]["adjusted"] is False
+
+    override = f"/api/leagues/{lid}/players/{a}/override"
+    assert client.put(override, json={"minutes_pct": 0.15}, headers=owner).status_code == 200
+    assert client.post(board, json=_trade_body(x, y, a, b), headers=owner).status_code == 201
+    r = client.put(f"/api/leagues/{lid}/trades/rulings/{row['key']}", json={"ruling": "fair"}, headers=owner)
+    assert r.status_code == 200, r.text
+    assert r.json()["numbers"]["adjusted"] is True
+
+    # Taking the override away afterward doesn't clean the numbers that were made with it.
+    assert client.delete(override, headers=owner).status_code == 204
+    r = client.put(f"/api/leagues/{lid}/trades/rulings/{row['key']}", json={"ruling": "unfair"}, headers=owner)
+    assert r.json()["numbers"]["adjusted"] is True
+    [seen] = client.get(f"/api/leagues/{lid}/trades/rulings", headers=member).json()
+    assert seen["numbers"]["adjusted"] is True
+
+
 def test_changing_and_withdrawing_a_ruling(client):
     owner_id, owner = _user()
     snap = make_snapshot()
