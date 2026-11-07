@@ -2,21 +2,21 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LeagueRulings } from "../components/Rulings";
+import { AdminCode, LeagueRulings } from "../components/Rulings";
 import { leagueTabs } from "../lib/nav";
 import { ToastProvider } from "../lib/toast";
 import type { ReviewTrade, Ruling, RulingNumbers, RulingSide, TradeReview } from "../lib/types";
 import AdminPage from "../pages/AdminPage";
 import { Board } from "../pages/TradesPage";
 
-const ctx = vi.hoisted(() => ({ isAdmin: true }));
+const ctx = vi.hoisted(() => ({ isAdmin: true, local: true, source: "espn", role: "owner" }));
 const api = vi.hoisted(() => vi.fn());
 
-vi.mock("../lib/api", () => ({ api }));
+vi.mock("../lib/api", () => ({ api, isLocalApp: () => ctx.local }));
 vi.mock("../lib/auth", () => ({ useAuth: () => ({ user: { id: "u1" } }) }));
 vi.mock("../components/Layout", () => ({
   useLeagueCtx: () => ({
-    league: { id: "L1", source: "espn", me: { role: "owner", team_id: 1, is_admin: ctx.isAdmin } },
+    league: { id: "L1", source: ctx.source, me: { role: ctx.role, team_id: 1, is_admin: ctx.isAdmin } },
     openPlayer: () => {},
     teamName: (id: number) => `Team ${id}`,
   }),
@@ -71,9 +71,53 @@ function show(ui: ReactNode) {
   return render(<QueryClientProvider client={client}><ToastProvider>{ui}</ToastProvider></QueryClientProvider>);
 }
 
+describe("entering an admin code", () => {
+  beforeEach(() => {
+    Object.assign(ctx, { isAdmin: false, local: true, source: "espn", role: "owner" });
+    api.mockReset();
+  });
+  afterEach(cleanup);
+
+  it.each([
+    ["the admin's copy already", { isAdmin: true }],
+    ["a shared server", { local: false }],
+    ["a league that isn't on ESPN", { source: "demo" }],
+    ["a member who doesn't own this copy", { role: "member" }],
+  ])("doesn't appear on %s", (_, over) => {
+    Object.assign(ctx, over);
+    show(<AdminCode />);
+    expect(screen.queryByLabelText("Admin code")).not.toBeInTheDocument();
+  });
+
+  it("sends the code, hides it on screen, and clears it once accepted", async () => {
+    api.mockResolvedValue({ is_admin: true });
+    show(<AdminCode />);
+    const box = screen.getByLabelText<HTMLInputElement>("Admin code");
+    expect(box.type).toBe("password");
+    expect(screen.getByRole("button", { name: "Enter code" })).toBeDisabled();
+
+    fireEvent.change(box, { target: { value: "secret-code" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enter code" }));
+
+    await waitFor(() => expect(box.value).toBe(""));
+    expect(api).toHaveBeenCalledWith("/api/leagues/L1/trades/admin-code", { method: "POST", body: { code: "secret-code" } });
+    expect(screen.getByText(/You're the league's admin/)).toBeInTheDocument();
+  });
+
+  it("keeps the code and says so when it's wrong", async () => {
+    api.mockRejectedValue(new Error("That code isn't right for this league."));
+    show(<AdminCode />);
+    const box = screen.getByLabelText<HTMLInputElement>("Admin code");
+    fireEvent.change(box, { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enter code" }));
+    expect(await screen.findByText(/isn't right for this league/)).toBeInTheDocument();
+    expect(box.value).toBe("wrong");
+  });
+});
+
 describe("the admin dashboard", () => {
   beforeEach(() => {
-    ctx.isAdmin = true;
+    Object.assign(ctx, { isAdmin: true, local: true, source: "espn", role: "owner" });
     api.mockReset();
   });
   afterEach(cleanup);

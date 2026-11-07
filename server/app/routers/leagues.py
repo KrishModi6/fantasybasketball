@@ -199,8 +199,9 @@ def update_league(body: LeagueUpdate, m: Membership = Depends(owner_membership),
                 new[k] = cfg.get(k)
         if cfg.get("shared_by") or cfg.get("joined_with_code"):
             new["joined_with_code"] = True  # their own cookies make it their login, not their league to run
-        if cfg.get("admin_elsewhere"):
-            new["admin_elsewhere"] = True
+        for k in ("admin_elsewhere", "admin_key"):  # whose login it is doesn't change who runs the league
+            if cfg.get(k):
+                new[k] = cfg[k]
         lg.connector_config = encrypt_json(new)
     db.commit()
     return league_out(db, lg, m.member)
@@ -490,6 +491,8 @@ def join_with_code(body: JoinCodeIn, user: User = Depends(current_user), db: Ses
                 break
     if lg is not None:
         if shared.espn.espn_s2 and me.role == "owner" and lg.last_sync_status == "error":
+            if admin_key := decrypt_json(lg.connector_config).get("admin_key"):
+                cfg["admin_key"] = admin_key  # whose login it is doesn't change who runs the league
             lg.connector_config = encrypt_json(cfg)
             db.commit()
             _first_sync(db, lg, "joined", keep_on_error=True)

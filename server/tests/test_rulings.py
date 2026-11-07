@@ -16,7 +16,9 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.main import app
 from app.orm import Activity, League, LeagueMember, Snapshot, User
-from app.security import create_token, encrypt_json
+from app.routers import leagues as leagues_router
+from app.schemas import EspnConfig, SharedLeague
+from app.security import create_token, decrypt_json, encrypt_json
 from app.services import rulings_share as share
 from app.services.analysis import invalidate, pack_snapshot
 from app.services.board import describe_move, roster_moves
@@ -671,6 +673,194 @@ def test_the_admin_key_stays_on_the_admins_computer(client, worker, monkeypatch)
     assert client.delete("/api/ai/key", headers=admin).status_code == 200
     with SessionLocal() as db:
         assert share._stored_key(db, admin_id) == secret
+
+
+# ---- admin codes: for an admin whose own copy can't claim the league --------------------------------------
+
+
+CODE = "the-admin-code_0123456789"
+FROM_INVITE = {**ESPN, "espn_s2": "the-admins", "swid": "{A}", "shared_by": "the league owner"}
+
+
+def _locked(worker) -> None:
+    """The league held by a code, before any copy has entered it."""
+    worker.admins[share.league_key(League(source="espn", season=2027, connector_config=encrypt_json(ESPN)))] = CODE
+
+
+def _enter(client, lid: str, who: dict, code: str = CODE):
+    return client.post(f"/api/leagues/{lid}/trades/admin-code", json={"code": code}, headers=who)
+
+
+def _is_admin(client, lid: str, who: dict) -> bool:
+    return client.get(f"/api/leagues/{lid}", headers=who).json()["me"]["is_admin"]
+
+
+def test_the_admin_code_makes_a_copy_from_an_invite_code_the_admin(client, worker):
+    snap = make_snapshot()
+    _locked(worker)
+    admin_id, admin = _user("You")
+    friend_id, friend = _user("You")
+    lid = _league(admin_id, snap, cfg=FROM_INVITE)
+    fid = _league(friend_id, snap, cfg=FROM_INVITE)
+    key = _posted_trade(client, lid, admin, snap)
+
+    # What 0.5.9 left behind on the admin's copy: told someone else holds the league.
+    share._last_pull.clear()
+    client.get(f"/api/leagues/{lid}/trades/rulings", headers=admin)
+    assert _is_admin(client, lid, admin) is False
+
+    assert _enter(client, lid, admin, f"  {CODE}\n").json() == {"is_admin": True}  # pasted with stray whitespace
+    assert _is_admin(client, lid, admin) is True
+    assert client.get(f"/api/leagues/{lid}/trades/review", headers=admin).status_code == 200
+
+    # It rules under the code, and stays the admin after the Worker's next answer.
+    saved = client.put(f"/api/leagues/{lid}/trades/rulings/{key}", json={"ruling": "unfair"}, headers=admin)
+    assert saved.status_code == 200 and saved.json()["pending"] is False
+    share._last_pull.clear()
+    client.get(f"/api/leagues/{lid}/trades/rulings", headers=admin)
+    assert _is_admin(client, lid, admin) is True
+    assert len(client.get(f"/api/leagues/{lid}/trades/rulings", headers=admin).json()) == 1
+
+    # Everyone else just reads it.
+    share._last_pull.clear()
+    assert [r["ruling"] for r in client.get(f"/api/leagues/{fid}/trades/rulings", headers=friend).json()] == ["unfair"]
+    assert _is_admin(client, fid, friend) is False
+    assert client.put(f"/api/leagues/{fid}/trades/rulings/{key}", json={"ruling": "fair"}, headers=friend).status_code == 403
+
+    assert client.delete(f"/api/leagues/{lid}/trades/rulings/{key}", headers=admin).status_code == 204
+    share._last_pull.clear()
+    assert client.get(f"/api/leagues/{fid}/trades/rulings", headers=friend).json() == []
+
+
+@pytest.mark.parametrize("wrong", ["not-the-code", "  ", "two words", "café", "with\nnewline"])
+def test_a_wrong_code_changes_nothing(client, worker, wrong):
+    _locked(worker)
+    owner_id, owner = _user("You")
+    lid = _league(owner_id, cfg=FROM_INVITE)
+    refused = _enter(client, lid, owner, wrong)
+    assert refused.status_code == 403 and "isn't right" in refused.json()["detail"]
+    assert _is_admin(client, lid, owner) is False
+    with SessionLocal() as db:
+        assert "admin_key" not in decrypt_json(db.get(League, lid).connector_config)
+
+
+def test_an_unclaimed_league_has_no_right_code(client, worker):
+    # Otherwise any string would "work", and hold the league with it on the first ruling.
+    owner_id, owner = _user("You")
+    lid = _league(owner_id, cfg=FROM_INVITE)
+    assert _enter(client, lid, owner).status_code == 403
+    assert worker.admins == {} and _is_admin(client, lid, owner) is False
+
+
+def test_a_code_cant_be_checked_while_the_worker_is_down(client, worker):
+    _locked(worker)
+    worker.down = True
+    owner_id, owner = _user("You")
+    lid = _league(owner_id, cfg=FROM_INVITE)
+    answer = _enter(client, lid, owner)
+    assert answer.status_code == 503 and "Try again" in answer.json()["detail"]
+    assert _is_admin(client, lid, owner) is False
+
+
+def test_only_a_copys_owner_can_enter_a_code_and_only_where_it_can_reach_the_league(client, worker, monkeypatch):
+    _locked(worker)
+    owner_id, owner = _user("You")
+    member_id, member = _user()
+    lid = _league(owner_id, cfg=FROM_INVITE)
+    _join(lid, member_id)
+    assert _enter(client, lid, member).status_code == 403
+    assert client.post(f"/api/leagues/{lid}/trades/admin-code", json={"code": CODE}).status_code == 401
+
+    other = _league(owner_id, source="file", cfg={"spec": {}})
+    assert _enter(client, other, owner).status_code == 400
+    monkeypatch.setattr(get_settings(), "local_mode", False)
+    assert _enter(client, lid, owner).status_code == 400
+
+
+def test_the_code_survives_new_cookies_and_never_leaves_the_copy(client, worker):
+    _locked(worker)
+    owner_id, owner = _user("You")
+    lid = _league(owner_id, cfg=FROM_INVITE)
+    assert _enter(client, lid, owner).status_code == 200
+
+    body = {"espn": {"league_id": "777", "espn_s2": "my-own", "swid": "{ME}"}}
+    assert client.patch(f"/api/leagues/{lid}", json=body, headers=owner).status_code == 200
+    assert _is_admin(client, lid, owner) is True
+
+    shared = client.post(f"/api/leagues/{lid}/share-code", json={}, headers=owner).json()["code"]
+    assert CODE not in zlib.decompress(base64.urlsafe_b64decode(shared[4:] + "=" * (-len(shared[4:]) % 4))).decode()
+    assert CODE not in client.get(f"/api/leagues/{lid}", headers=owner).text
+    with SessionLocal() as db:
+        assert decrypt_json(db.get(League, lid).connector_config)["admin_key"] == CODE
+        assert CODE.encode() not in db.get(League, lid).connector_config  # encrypted at rest
+
+
+def test_the_code_survives_reconnecting_with_an_invite_code(client, worker, monkeypatch):
+    # A copy that can't read ESPN switches to the login in any code pasted into it. That mustn't cost the admin the league.
+    _locked(worker)
+    owner_id, owner = _user("You")
+    lid = _league(owner_id, cfg=FROM_INVITE)
+    assert _enter(client, lid, owner).status_code == 200
+    with SessionLocal() as db:
+        db.get(League, lid).last_sync_status = "error"
+        db.commit()
+    monkeypatch.setattr(leagues_router, "_first_sync", lambda *a, **k: None)
+    login = EspnConfig(league_id=ESPN["league_id"], espn_s2="fresh", swid="{F}")
+    invite = leagues_router._pack_code(SharedLeague(source="espn", name="Test", season=2027, espn=login))
+
+    assert client.post("/api/join-code", json={"code": invite}, headers=owner).status_code == 201
+    with SessionLocal() as db:
+        cfg = decrypt_json(db.get(League, lid).connector_config)
+    assert cfg["espn_s2"] == "fresh" and cfg["admin_key"] == CODE
+    assert _is_admin(client, lid, owner) is True
+
+
+def test_a_code_doesnt_touch_this_copys_key_for_other_leagues(client, worker):
+    # The key a copy makes for itself covers every league it connected by hand, so the code can't replace it.
+    snap = make_snapshot()
+    _locked(worker)
+    owner_id, owner = _user("You")
+    mine = _league(owner_id, snap, cfg={"league_id": "888"})
+    key = _posted_trade(client, mine, owner, snap)
+    assert client.put(f"/api/leagues/{mine}/trades/rulings/{key}", json={"ruling": "fair"}, headers=owner).status_code == 200
+    with SessionLocal() as db:
+        own_key = share._stored_key(db, owner_id)
+    lid = _league(owner_id, snap, cfg=FROM_INVITE)
+    assert _enter(client, lid, owner).status_code == 200
+
+    with SessionLocal() as db:
+        assert share._stored_key(db, owner_id) == own_key
+    assert client.put(f"/api/leagues/{mine}/trades/rulings/{key}", json={"ruling": "unfair"}, headers=owner).status_code == 200
+    assert sorted(worker.admins.values()) == sorted([CODE, own_key])
+
+
+def test_a_new_computer_takes_on_the_rulings_already_made(client, worker):
+    snap = make_snapshot()
+    _locked(worker)
+    old_id, old = _user("You")
+    new_id, new = _user("You")
+    was = _league(old_id, snap, cfg=FROM_INVITE)
+    assert _enter(client, was, old).status_code == 200
+    key = _posted_trade(client, was, old, snap)
+    assert client.put(f"/api/leagues/{was}/trades/rulings/{key}", json={"ruling": "fair"}, headers=old).status_code == 200
+
+    now = _league(new_id, snap, cfg=FROM_INVITE)
+    assert _enter(client, now, new).status_code == 200
+    assert [r["ruling"] for r in client.get(f"/api/leagues/{now}/trades/rulings", headers=new).json()] == ["fair"]
+
+
+def test_a_code_that_stops_holding_the_league_stops_counting(client, worker):
+    _locked(worker)
+    owner_id, owner = _user("You")
+    lid = _league(owner_id, cfg=FROM_INVITE)
+    assert _enter(client, lid, owner).status_code == 200
+    for league in worker.admins:
+        worker.admins[league] = "a-newer-code"
+    share._last_pull.clear()
+    client.get(f"/api/leagues/{lid}/trades/rulings", headers=owner)
+    assert _is_admin(client, lid, owner) is False
+    assert _enter(client, lid, owner, "a-newer-code").status_code == 200
+    assert _is_admin(client, lid, owner) is True
 
 
 def test_league_key_matches_across_copies_and_hides_the_league():

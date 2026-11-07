@@ -51,8 +51,8 @@ The limits count model calls, not questions; one question usually takes 2 to 4 c
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DEVICE_DAILY_LIMIT` | 450 | Calls per computer per UTC day (about 110-220 questions) |
-| `DAILY_LIMIT` | 6000 | Calls per UTC day across everyone |
+| `DEVICE_DAILY_LIMIT` | 450 | Calls per computer per day (about 110-220 questions). Days roll over at 7 PM Eastern in winter and 8 PM in summer |
+| `DAILY_LIMIT` | 6000 | Calls per day across everyone |
 | `PER_MINUTE_LIMIT` | 120 | Calls per minute across everyone |
 | `MAX_CONCURRENCY` | 12 | Calls in flight at once |
 | `MAX_OUTPUT_TOKENS` | 3000 | Cap per model call |

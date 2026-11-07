@@ -3,7 +3,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import worker from '../src/worker.mjs';
+import worker, { inEastern } from '../src/worker.mjs';
 
 const schema = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8');
 const TOKEN = 'test-client-token-0123456789abcdef';
@@ -96,7 +96,7 @@ test('per-device daily allowance', async () => {
   assert.equal((await ask()).status, 200);
   const r = await ask();
   assert.equal(r.status, 429);
-  assert.match((await r.json()).error, /This computer has used today's 2 AI calls/);
+  assert.match((await r.json()).error, /This computer has used today's 2 AI calls\. The allowance resets at [78]:00 PM Eastern\./);
   assert.ok(Number(r.headers.get('retry-after')) > 0);
   const other = await ask(body, { 'x-device-id': '1f8fad5b-d9cb-469f-a165-70867728950e' });
   assert.equal(other.status, 200, 'other devices are unaffected');
@@ -112,7 +112,12 @@ test('concurrency and global limits', async () => {
   env.DAILY_LIMIT = '1';
   assert.equal((await ask()).status, 200);
   const spent = await ask(body, { 'x-device-id': '1f8fad5b-d9cb-469f-a165-70867728950e' });
-  assert.match((await spent.json()).error, /shared AI budget/);
+  assert.match((await spent.json()).error, /shared AI budget for today is used up\. It resets at [78]:00 PM Eastern\./);
+});
+
+test('limit messages give the reset time in Eastern, whichever the season', () => {
+  assert.equal(inEastern(Date.UTC(2027, 0, 16)), '7:00 PM Eastern');
+  assert.equal(inEastern(Date.UTC(2027, 6, 16)), '8:00 PM Eastern');
 });
 
 test('maps OpenAI failures to friendly errors', async () => {
@@ -207,7 +212,9 @@ test('writes stop at the daily limit and a league stops at its cap', async () =>
   env.RULINGS_DAILY_LIMIT = '2';
   assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 200);
   assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 200);
-  assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 429);
+  const over = await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN });
+  assert.equal(over.status, 429);
+  assert.match((await over.json()).error, /rulings limit for today is used up\. It resets at [78]:00 PM Eastern\./);
 
   env.RULINGS_DAILY_LIMIT = '100000';
   const add = env.DB.raw.prepare('INSERT INTO league_rulings(league, trade_key, body, updated_at) VALUES (?, ?, ?, 0)');

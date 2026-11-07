@@ -58,12 +58,15 @@ def is_league_admin(league: League, member: LeagueMember) -> bool:
 
     The owner role alone can't say: whoever joins with an invite code gets their own copy of the league and owns
     that copy. So a copy that came from a code isn't an admin's, even after its owner pastes in their own cookies,
-    and neither is one whose league turned out to have an admin elsewhere (services.rulings_share).
+    until they enter the league's admin code. Neither is one whose league turned out to have an admin elsewhere
+    (services.rulings_share).
     """
     if member.role != "owner":
         return False
     cfg = decrypt_json(league.connector_config)
-    return not (cfg.get("shared_by") or cfg.get("joined_with_code") or cfg.get("admin_elsewhere"))
+    if cfg.get("admin_elsewhere"):
+        return False
+    return bool(cfg.get("admin_key")) or not (cfg.get("shared_by") or cfg.get("joined_with_code"))
 
 
 def admin_membership(m: Membership = Depends(membership)) -> Membership:

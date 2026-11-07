@@ -70,7 +70,7 @@ Put it behind HTTPS (Caddy, nginx, or your host's TLS). WebSockets must be proxi
 
 A league's admin can rule each trade fair or not fair from the **Admin** tab. A ruling lives in its own table (`trade_rulings`), never changes a trade's evaluation, and can't touch ESPN, which Courtside only reads. It keeps a copy of Courtside's numbers from the admin's app. If projection overrides went into them, the copy is flagged `adjusted` and everyone reading the ruling is told, since overrides in one desktop app aren't visible in another.
 
-- **Who the admin is.** The owner of a copy of the league, unless it was joined with an invite code (`shared_by` or `joined_with_code` in its connector config) or the Worker has said someone else holds the league (`admin_elsewhere`). `GET /api/leagues/{id}` reports it as `me.is_admin`, and the routes refuse everyone else with `403`.
+- **Who the admin is.** The owner of a copy of the league, unless it was joined with an invite code (`shared_by` or `joined_with_code` in its connector config) and has no admin code (`admin_key`), or the Worker has said someone else holds the league (`admin_elsewhere`). `GET /api/leagues/{id}` reports it as `me.is_admin`, and the routes refuse everyone else with `403`.
 - **On a shared server** every member reads the same database, so nothing else is involved.
 - **In the desktop app** each copy has its own database, so ESPN leagues send rulings through the same Cloudflare Worker as the AI assistant (`/v1/leagues/{league_key}/rulings`, in `cloudflare/ai-proxy/`). `league_key` is a hash of the ESPN league id and season, so the Worker doesn't learn which league it is. The admin's copy sends; every other copy reads them into its own table at most once a minute, on opening the board or dashboard and after each refresh.
 - **Proving who's the admin.** The client token in release builds identifies the app, not a person. So the admin's copy makes a random key (saved encrypted in `user_settings`, kept when an AI key is removed) and sends it as `X-League-Admin`. The first ruling for a league claims it, the Worker keeps only the key's SHA-256 in `league_admins`, and later writes without the key get `403`.
@@ -79,6 +79,11 @@ A league's admin can rule each trade fair or not fair from the **Admin** tab. A 
   npx wrangler@4 d1 execute courtside-ai --remote --command "DELETE FROM league_admins WHERE league = '<league_key>'"
   ```
   `<league_key>` is the first 40 hex characters of the SHA-256 of `courtside:espn:<league id>:<season>`. The next ruling sent claims the league again, and existing rulings stay in `league_rulings` until replaced.
+- **Admin codes.** A copy that joined with an invite code can't claim a league, so if the real admin's copy came from one, or they've moved computer, lock the league to a code they enter under **League admin** on the League tab. Make a long random code, then store only its SHA-256 as the league's `key_hash`:
+  ```bash
+  npx wrangler@4 d1 execute courtside-ai --remote --command "INSERT INTO league_admins(league, key_hash, claimed_at) VALUES ('<league_key>', '<sha256 of the code>', <now in ms>) ON CONFLICT(league) DO UPDATE SET key_hash = excluded.key_hash, claimed_at = excluded.claimed_at"
+  ```
+  The app checks a code by asking the Worker whether it holds the league, and keeps it encrypted with that league (`admin_key`), apart from the key it makes for itself. An unclaimed league has no right code, so lock the league first. The code covers one season, since `league_key` includes it: each new season's first ruling claims that season's league under the same code.
 - **Deploying.** Apply the tables, then deploy, before the app release that uses them. A copy that reaches an older Worker keeps its rulings pending and sends them later, so the order can't lose any. From `cloudflare/ai-proxy/`:
   ```bash
   npm run schema

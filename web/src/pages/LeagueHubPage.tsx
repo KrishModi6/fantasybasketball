@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { InvitePanel } from "../components/Invite";
 import { leagueSize, useLeagueCtx } from "../components/Layout";
+import { AdminCode } from "../components/Rulings";
 import { Dialog, ErrorBox, Notice, PageHead, Panel } from "../components/ui";
 import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -25,6 +26,7 @@ export default function LeagueHubPage() {
         <div className="stack">
           {isOwner ? <InvitePanel league={league} /> : <Panel title="Invites"><p className="small muted">Only the league owner can invite people.</p></Panel>}
           <Members />
+          <AdminCode />
           {isOwner && <OwnerSettings />}
           <Leave />
         </div>

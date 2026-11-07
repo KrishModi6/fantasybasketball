@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, isLocalApp } from "../lib/api";
 import { pct, relTime, verdictTone } from "../lib/format";
+import { useToast } from "../lib/toast";
 import type { Ruling, RulingCall, RulingNumbers } from "../lib/types";
 import { useLeagueCtx } from "./Layout";
 import { Delta, Panel, Tag, Term } from "./ui";
@@ -62,6 +64,38 @@ export function AdjustedNote({ mine = false }: { mine?: boolean }) {
         ? "These numbers include your projection changes, and anyone reading your ruling is told so."
         : "These numbers include projection changes the admin made in their own app, so they can differ from what yours shows."}
     </p>
+  );
+}
+
+/** How the league's admin takes charge from a desktop copy that can't claim the league: it came from an invite code, or a new computer. */
+export function AdminCode() {
+  const { league } = useLeagueCtx();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [code, setCode] = useState("");
+  const redeem = useMutation({
+    mutationFn: () => api(`/api/leagues/${league.id}/trades/admin-code`, { method: "POST", body: { code } }),
+    onSuccess: () => {
+      toast("You're the league's admin. Rule on trades from the Admin tab.");
+      setCode("");
+      qc.invalidateQueries({ queryKey: ["league", league.id, "meta"] });
+    },
+    onError: (e: Error) => toast(e.message, "err"),
+  });
+  if (!isLocalApp() || league.source !== "espn" || league.me?.role !== "owner" || league.me.is_admin) return null;
+  return (
+    <Panel title="League admin">
+      <form className="form" onSubmit={(e) => { e.preventDefault(); redeem.mutate(); }}>
+        <p className="small muted">Only whoever runs this league has an admin code. It turns on the Admin tab, where they rule on trades.</p>
+        <div className="field">
+          <label htmlFor="admin-code">Admin code</label>
+          <input id="admin-code" type="password" className="input mono" value={code} onChange={(e) => setCode(e.target.value)} maxLength={200} autoComplete="off" />
+        </div>
+        <div className="row">
+          <button className="btn primary" disabled={!code.trim() || redeem.isPending}>Enter code</button>
+        </div>
+      </form>
+    </Panel>
   );
 }
 
