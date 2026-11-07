@@ -36,6 +36,10 @@ export function limits(env) {
   };
 }
 
+// The budgets roll over at midnight UTC, but people read the limit messages in Eastern.
+export const inEastern = ms =>
+  `${new Date(ms).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} Eastern`;
+
 async function matchesToken(header, expected) {
   if (!header?.startsWith('Bearer ') || header.length > 1024) return false;
   const hash = value => crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
@@ -112,9 +116,9 @@ export async function reserveModel(db, env, deviceId, now = Date.now()) {
   if (result[2].results.length) return { job: id, quota };
   const untilMidnight = Math.ceil((dayEnd - now) / 1000);
   if ((used[device] ?? 0) >= l.perDeviceDay)
-    throw new HttpError(429, `This computer has used today's ${l.perDeviceDay} AI calls. The allowance resets at midnight UTC.`, untilMidnight);
+    throw new HttpError(429, `This computer has used today's ${l.perDeviceDay} AI calls. The allowance resets at ${inEastern(dayEnd)}.`, untilMidnight);
   if ((used[day] ?? 0) >= l.perDay)
-    throw new HttpError(429, "Courtside's shared AI budget for today is used up. It resets at midnight UTC.", untilMidnight);
+    throw new HttpError(429, `Courtside's shared AI budget for today is used up. It resets at ${inEastern(dayEnd)}.`, untilMidnight);
   throw new HttpError(429, 'The AI assistant is busy right now. Try again in a minute.', 30);
 }
 
@@ -138,10 +142,11 @@ async function sha256Hex(value) {
 // The client token is in every release build, so this keeps a leaked one from filling the database.
 async function spendRulingWrite(db, env, now) {
   const day = Math.floor(now / 86_400_000);
+  const dayEnd = (day + 1) * 86_400_000;
   const row = await db.prepare(`INSERT INTO model_budget(bucket, calls, expires_at) VALUES (?, 1, ?)
     ON CONFLICT(bucket) DO UPDATE SET calls = calls + 1 RETURNING calls`)
-    .bind(`rulings:${day}`, (day + 1) * 86_400_000).first();
-  if (row.calls > limit(env.RULINGS_DAILY_LIMIT, 2000)) throw new HttpError(429, "Courtside's rulings limit for today is used up. It resets at midnight UTC.");
+    .bind(`rulings:${day}`, dayEnd).first();
+  if (row.calls > limit(env.RULINGS_DAILY_LIMIT, 2000)) throw new HttpError(429, `Courtside's rulings limit for today is used up. It resets at ${inEastern(dayEnd)}.`);
 }
 
 async function handleRulings(request, env, league, tradeKey, now = Date.now()) {

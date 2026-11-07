@@ -1,6 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.9
+## What's new in 0.5.10
+
+- **The Admin tab now reaches whoever runs the league.** In 0.5.9 a copy of the league that came from an invite code could never be the admin's, so some admins never saw the tab. Whoever runs the league now enters their admin code under **League admin** on the **League** tab, and the tab appears right away. Nobody else needs to do anything.
+- **Limit messages use Eastern time.** The AI assistant's and the rulings' daily limits now say when they reset in Eastern, at 7 p.m. in winter and 8 p.m. in summer, in place of midnight UTC.
+
+## In 0.5.9
 
 - **League admins can rule on trades.** League admins get a new **Admin** tab to rule trades fair or not fair, with Courtside's numbers beside each one. Everyone sees those rulings under **Trades > League board**, labeled as the admin's call; they don't change Courtside's numbers or anything on ESPN. If the admin's own projection changes went into the numbers shown with a ruling, it says so.
 - **A balanced trade says why.** The trade page used to call a trade **balanced** and leave you to work out why from the tables. It now says so in a sentence: the gap in fantasy points per game and the games left for a plain 1-for-1, and roster spots for anything with drops, pickups or more players.

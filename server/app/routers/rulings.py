@@ -7,10 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..deps import Membership, admin_membership, membership
+from ..deps import Membership, admin_membership, membership, owner_membership
 from ..orm import Activity, TradeRuling
 from ..realtime import hub
-from ..schemas import RulingIn
+from ..schemas import AdminCodeIn, RulingIn
 from ..services import rulings_share as share
 from ..services.analysis import LeagueAnalysis
 from ..services.rulings import TradeNotFound, league_rulings, review_queue, ruling_message, ruling_out, save_ruling
@@ -28,6 +28,20 @@ def _refused(db: Session, m: Membership) -> HTTPException:
     share.note_admin_elsewhere(m.league, True)
     db.commit()
     return HTTPException(403, ELSEWHERE)
+
+
+@router.post("/admin-code")
+def admin_code(body: AdminCodeIn, m: Membership = Depends(owner_membership), db: Session = Depends(get_db)):
+    """For the league's admin when their copy can't claim the league itself: it came from an invite code, or a new computer."""
+    if share.reach(m.league) != "league":
+        raise HTTPException(400, "Admin codes only work for ESPN leagues in the desktop app.")
+    try:
+        share.redeem_code(db, m.league, body.code.strip())
+    except share.Refused:
+        raise HTTPException(403, "That code isn't right for this league.") from None
+    except share.Unreachable:
+        raise HTTPException(503, "Couldn't check that code just now. Try again in a minute.") from None
+    return {"is_admin": True}
 
 
 @router.get("/review")

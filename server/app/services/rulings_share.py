@@ -9,6 +9,9 @@ A random key that only the admin's copy holds does that. The first copy to publi
 that key, and from then on the Worker refuses writes without it. Copies that joined with an invite code never
 send anything, and a copy someone connected by hand finds out from the Worker that the league already has an admin.
 
+An admin whose own copy can't claim the league (it came from an invite code, or they've moved computer) enters an
+admin code instead. It's a key like any other: the Worker holds its hash, and this copy keeps it with the league.
+
 A shared server needs none of this: every member reads the same database. ESPN leagues only, since their league
 id is what lets separate copies recognize each other.
 """
@@ -18,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import re
 import secrets
 import time
 from datetime import datetime
@@ -82,6 +86,11 @@ def ensure_admin_key(db: Session, user_id: str) -> None:
     db.commit()
 
 
+def _key_for(db: Session, league: League, user_id: str) -> str | None:
+    """What this copy shows the Worker for this league: the admin code entered for it, or else the key it made."""
+    return decrypt_json(league.connector_config).get("admin_key") or _stored_key(db, user_id)
+
+
 def _call(method: str, path: str, admin_key: str | None = None, body: dict | None = None) -> httpx.Response | None:
     s = get_settings()
     headers = {"Authorization": f"Bearer {s.ai_proxy_token}"}
@@ -94,9 +103,9 @@ def _call(method: str, path: str, admin_key: str | None = None, body: dict | Non
         return None
 
 
-def _send(db: Session, league_path: str, user_id: str, row: TradeRuling) -> None:
+def _send(league_path: str, admin_key: str | None, row: TradeRuling) -> None:
     """Leaves the ruling pending if the Worker can't take it now; the next pull tries again."""
-    r = _call("PUT", f"{league_path}/{row.trade_key}", _stored_key(db, user_id),
+    r = _call("PUT", f"{league_path}/{row.trade_key}", admin_key,
               {"ruling": row.ruling, "note": row.note, "trade": row.trade, "numbers": row.numbers,
                "decided_at": iso(row.decided_at)})
     if r is None:
@@ -115,7 +124,7 @@ def publish(db: Session, league: League, user_id: str, row: TradeRuling) -> None
     if not enabled() or key is None:
         return
     row.pending = True
-    _send(db, f"/v1/leagues/{key}/rulings", user_id, row)
+    _send(f"/v1/leagues/{key}/rulings", _key_for(db, league, user_id), row)
 
 
 def unpublish(db: Session, league: League, user_id: str, row: TradeRuling) -> None:
@@ -123,7 +132,7 @@ def unpublish(db: Session, league: League, user_id: str, row: TradeRuling) -> No
     key = league_key(league)
     if not enabled() or key is None or not row.published:
         return
-    r = _call("DELETE", f"/v1/leagues/{key}/rulings/{row.trade_key}", _stored_key(db, user_id))
+    r = _call("DELETE", f"/v1/leagues/{key}/rulings/{row.trade_key}", _key_for(db, league, user_id))
     if r is None or (not r.is_success and r.status_code != 403):
         raise Unreachable
     if r.status_code == 403:
@@ -179,18 +188,20 @@ def pull(db: Session, league: League) -> bool:
     key = league_key(league)
     if not enabled() or key is None:
         return False
-    r = _call("GET", f"/v1/leagues/{key}/rulings", _stored_key(db, league.owner_id))
+    path = f"/v1/leagues/{key}/rulings"
+    admin_key = _key_for(db, league, league.owner_id)
+    r = _call("GET", path, admin_key)
     if r is None or not r.is_success:
         return False
     data = r.json()
     cfg = decrypt_json(league.connector_config)
-    if data["you"] or not (data["claimed"] or cfg.get("shared_by") or cfg.get("joined_with_code")):
+    only_reads = (cfg.get("shared_by") or cfg.get("joined_with_code")) and not cfg.get("admin_key")
+    if data["you"] or not (data["claimed"] or only_reads):
         note_admin_elsewhere(league, False)
-        path = f"/v1/leagues/{key}/rulings"
         try:
             for row in league_rulings(db, league.id):
                 if row.pending:
-                    _send(db, path, league.owner_id, row)
+                    _send(path, admin_key, row)
         except Refused:
             note_admin_elsewhere(league, True)
         db.commit()
@@ -201,6 +212,29 @@ def pull(db: Session, league: League) -> bool:
     if changed:
         hub.publish(league.id, {"type": "trade_ruled"})
     return changed
+
+
+def redeem_code(db: Session, league: League, code: str) -> None:
+    """Makes this copy the league's admin, if the Worker says this code is what holds the league.
+
+    Raises Refused if it isn't. Takes on the league's rulings as they stand, since this may be a new computer.
+    """
+    if not re.fullmatch(r"[!-~]+", code):  # nothing else can be sent as a header, or was ever issued as a code
+        raise Refused
+    r = _call("GET", f"/v1/leagues/{league_key(league)}/rulings", code)
+    if r is None or not r.is_success:
+        raise Unreachable
+    data = r.json()
+    if not data["you"]:
+        raise Refused
+    cfg = decrypt_json(league.connector_config)
+    cfg["admin_key"] = code
+    cfg.pop("admin_elsewhere", None)
+    league.connector_config = encrypt_json(cfg)
+    changed = _mirror(db, league, data["rulings"])
+    db.commit()
+    if changed:
+        hub.publish(league.id, {"type": "trade_ruled"})
 
 
 def pull_if_due(db: Session, league: League) -> None:

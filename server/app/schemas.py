@@ -107,6 +107,10 @@ class RulingIn(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+class AdminCodeIn(BaseModel):
+    code: str = Field(min_length=1, max_length=200)
+
+
 class OverrideIn(BaseModel):
     minutes_pct: float = Field(default=0.0, ge=-0.15, le=0.15)
     out_games: int | None = Field(default=None, ge=0, le=82)

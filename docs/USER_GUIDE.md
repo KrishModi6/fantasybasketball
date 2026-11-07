@@ -66,7 +66,7 @@ Uncheck a player to see the odds if he sits, e.g. to decide on a questionable st
 - **Finished trades:** the players have already moved, so the numbers come from undoing the trade on today's rosters. The row says so.
 - **Who sees rulings:** everyone in the league, under **Trades > League board** and in the league feed. In the desktop app, everyone needs a version with rulings, and it only works for ESPN leagues (a demo or file league's rulings stay on your computer). A ruling made while you're offline goes out when you're back; withdrawing one needs a connection, and says so if it can't reach the league.
 - **What a ruling does:** it's only a label. Courtside reads from ESPN and never writes to it, so a real veto still happens on ESPN, and Courtside's numbers and verdict stay as they are.
-- **Who the admin is:** whoever connected the league with their own ESPN details. A copy joined with an invite code is never the admin. If two people connected the same ESPN league by hand, the first one to make a ruling becomes the admin, and the other copy stops showing this tab.
+- **Who the admin is:** whoever connected the league with their own ESPN details. A copy joined with an invite code isn't the admin, unless its owner runs the league and enters their admin code under **League admin** on the League tab. The tab appears right after. If two people connected the same ESPN league by hand, the first one to make a ruling becomes the admin, and the other copy stops showing this tab.
 
 **Glossary.** Not sure what a number means? Point at any label with a dotted underline to see its definition, or open the **Glossary** tab (top right) for the full list in plain English.
 
