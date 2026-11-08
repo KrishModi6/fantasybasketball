@@ -6,7 +6,7 @@
 
 **[Download the desktop app](https://github.com/KrishModi6/fantasybasketball/releases/latest)** for Windows or Mac, with everything bundled: no server, no Python, no account. **Try a demo league** works without connecting anything.
 
-- **Trades:** both rosters re-simulated day by day for the rest of the season, with the verdict and every step of the math. Or let it find trades, target a player, or shop one.
+- **Trades:** both rosters re-simulated day by day for the rest of the season, with the verdict and every step of the math. Or let it find trades, target a player, or shop one. A league's admin can rule each trade fair or not fair, with Courtside's numbers beside it, and the whole league sees the call.
 - **Waivers and lineups:** add/drop moves tested against your actual lineup, streaming pickups for this week, and who to start each day.
 - **Matchups:** this week's head-to-head played out 10,000 times, with your win odds and each player's range.
 - **Rankings:** every team's power score, projected record, and playoff and title odds from your real schedule and bracket.
@@ -22,14 +22,15 @@ It also runs as a website (mobile-friendly, installable as a PWA) from the same 
 
 | Area | What you get |
 |---|---|
-| **Player projections** | Per-minute rates for 14 stats, plus minutes and availability, blended from a statistical baseline (Basketball-Reference SPS), ESPN's projection and a LightGBM model. Blend weights are learned out of sample, then updated in-season with Bayesian shrinkage. A player's years in the league set the shape of his season: young players start lower and climb, veterans hold steady. Every player shows its sources, weights, adjustments and SHAP factors. |
+| **Player projections** | Per-minute rates for 14 stats, plus minutes and availability, blended from a statistical baseline (Basketball-Reference SPS), ESPN's projection and a LightGBM model. Blend weights are learned out of sample, then updated in-season with Bayesian shrinkage. A player's years in the league set the shape of his season: young players start lower and climb, by less each year, and from year 7 veterans are projected for 2–3% fewer minutes. Every player shows its sources, weights, adjustments and SHAP factors. |
 | **Expected fantasy points (xFP)** | The Next Gen Stats idea applied to fantasy. NBA.com tracking prices each player's chances this season: every shot (by a shot model), potential assists, rebound chances, deflections and contests. Projections lean on those chances rather than how many went in, which cut rest-of-season error about 3% in a three-season backtest. Each player shows xFP/G and luck (FP/G minus xFP/G), so the buy-lows and sell-highs stand out. See [METHODOLOGY 1.5.1](docs/METHODOLOGY.md#151-expected-fantasy-points-xfp). |
 | **Team strength model** | A day-by-day optimal-lineup simulation for every team over the rest of the season gives weekly score distributions. Teams are ranked by a power score that counts this season's record for the share of the season played and the projected all-play win rate for the rest, with projected records plus playoff and title odds from 5,000 simulated seasons of your actual schedule and bracket. A week-by-week grid shows every team's projected points (or win odds against that week's opponent) for the rest of the season. Each rank comes with a "why": stat-by-stat edges, top contributors, depth, schedule and injury drag. |
 | **Team improvement** | Weak spots ranked by points at stake. Add/drop moves are simulated against your lineup. Also: streaming pickups for the current week and daily lineups with a confidence score for every start. |
 | **Matchup simulator** | Plays any week's head-to-head out 10,000 times, box score by box score: who suits up, each player's night, bench fill-ins when a starter sits, and points already scored. You get win probability, score and margin distributions, a day-by-day breakdown, each player's range and "swing", and what-if toggles to sit players. Works for points and category leagues. |
 | **Trades** | The analyzer re-simulates both rosters and handles 2-for-1 roster spots. It shows the math step by step: raw value, lineup-adjusted change, playoff weeks, and playoff and title odds before and after. The verdict is advantageous, neutral or disadvantageous, and a balanced trade says why it's balanced. Trades can include three teams. The finder screens 1-for-1, 2-for-2 or give-up-to-2-get-1 packages and fully simulates the best ones; you can also target or shop one player. |
 | **AI assistant** | Ask in plain English: best waiver pickups, a game plan for this week's matchup, trades to pitch, injury impact, season outlook, power-rankings trash talk. The model calls Courtside's own engine (waiver simulation, trade evaluator, matchup simulator, rankings) and may only state numbers those tools return. **Ask AI** buttons on players, trades and matchups. See [docs/AI.md](docs/AI.md). |
-| **League hub** | Accounts, invite links and codes, team claiming, standings, a shared trade board, an admin dashboard for ruling trades fair or not fair, a live activity feed (WebSockets), injury-change alerts and league-wide projection overrides. |
+| **League hub** | Accounts, invite links and codes, team claiming, standings, a shared trade board, a live activity feed (WebSockets), injury-change alerts and league-wide projection overrides. |
+| **Trade rulings** | The league's admin gets an **Admin** tab listing real trades and board posts, each with Courtside's change per week, playoff and title odds, and verdict for every team, and rules each one **Fair** or **Not fair** with a note. Everyone sees the rulings on the league board, labelled as the admin's call. A ruling is only a label: it never changes Courtside's numbers, and Courtside never writes to ESPN, so a real veto still happens there. See [ADMIN_GUIDE: Trade rulings](docs/ADMIN_GUIDE.md#trade-rulings). |
 | **Data** | An ESPN connector (public, or private with cookies), CSV/JSON import for any platform, an adapter for Flaim (unverified, see below), scheduled refreshes, rate limiting and caching. |
 
 ## Quick start (local)
@@ -69,9 +70,10 @@ npm start
 - **Windows:** `npm run dist:win` → `desktop/release/Courtside-Setup-<version>.exe` (builds and self-tests the engine first).
 - **macOS:** `npm run dist:mac` on a Mac → `Courtside-<version>-mac-arm64.zip`, ad-hoc signed. Without an Apple Developer ID, friends approve it once: the release notes walk through moving it to Applications and clearing the download flag (`xattr -cr /Applications/Courtside.app`) or using System Settings > Privacy & Security > Open Anyway.
 - **Release notes:** `desktop/release-notes.md` becomes the release page. To fix the notes of a published release without rebuilding, run the **Update release notes** workflow from the Actions tab.
-- **Releases:** bump the version in `desktop/package.json`, then push a matching tag like `v0.2.0`. `.github/workflows/release.yml` builds both, self-tests a real Windows install, and publishes a GitHub release with [these notes](desktop/release-notes.md) and the update feed (`latest.yml`, `latest-mac.yml`, `.blockmap` files).
+- **Releases:** bump the version in `desktop/package.json`, then push a matching tag like `v0.2.0`. `.github/workflows/release.yml` builds both, self-tests a real Windows install, and publishes a GitHub release with [these notes](desktop/release-notes.md) and the update feed (`latest.yml`, `latest-mac.yml`, `.blockmap` files). It refuses a tag that doesn't match `desktop/package.json`. Each release needs a `## What's new in X.Y.Z` section in the notes, or the app's What's new shows nothing for it. To build and self-test without publishing (the check before merging), run it with `-f publish=false`. After each published release, `update-test.yml` installs the two releases before it and checks that each updates itself to the new one.
 - **Auto-update:** installed apps check the newest GitHub release shortly after launch, every 15 minutes, and when the computer wakes up or Courtside comes back to the front after 15+ minutes, so a laptop that mostly sleeps still checks (`electron-updater`). The update downloads in the background; people get an "Update now" prompt, or it installs the next time they close the app. On Windows electron-updater installs it. The Mac app is only ad-hoc signed, and electron-updater can only install Mac updates signed with an Apple Developer ID, so `desktop/mac-update.js` does it there: it downloads the zip itself (macOS only flags browser downloads, so no `xattr` step), checks it against the SHA-512 in `latest-mac.yml`, unzips it with `ditto`, and swaps the new app in after Courtside quits. If macOS refuses the swap, the old copy stays and shows the downloaded one in Finder to drag over. The release workflow runs that whole path on the macOS build (`desktop/scripts/test-mac-update.mjs`). The top bar shows the installed version and whether it's current; clicking it, or Help > Check for updates…, checks on demand. Logs: `updates.log` next to the engine log.
 - **Window and What's new:** the window has no system title bar. Each page's top bar is the title bar (`-webkit-app-region: drag`). Windows and Linux draw their window buttons over its right end in the theme's colors (`titleBarOverlay`, recolored when the theme changes), and the app menu opens from a ☰ button there. A Mac keeps its traffic lights at the left. The first launch of a new version shows the release notes since the last version opened on that computer, read from `desktop/release-notes.md` (bundled with the app, and the same text as the GitHub release). Help > What's new in Courtside, or the version in the status bar, shows them all.
+- **Trade rulings between desktop apps:** each copy of the app has its own database, so for ESPN leagues the admin's copy sends rulings through the same Cloudflare Worker as the AI assistant, and every other copy reads them in at most once a minute. The Worker only sees a hash of the league ID and season. The first copy to make a ruling claims the league with a random key only it holds; an admin whose copy came from an invite code (or who moved computer) enters an admin code under **League admin** on the League tab instead. Demo and file leagues keep their rulings on the one computer.
 
 Without a bundled engine (plain `npm start` before `npm run build:engine`), the app connects to a Courtside server instead: `COURTSIDE_SERVER`, or `http://localhost:8000`.
 
@@ -112,15 +114,16 @@ server/            FastAPI backend + analytics engine
     ml/            feature builder + LightGBM wrapper
   app/             API: auth, leagues, invites, analysis, trades, realtime, scheduler, AI assistant
   engine.py        desktop engine entry point (PyInstaller: courtside-engine.spec)
-  scripts/         data and model (build_history, fetch_game_logs, fetch_tracking, train_model), backtests
-                   (backtest_recency, backtest_sims, backtest_xfp), the daily check (daily_sims, daily_lambda,
-                   sims_lambda), seed_dev
+  scripts/         data and model (build_history, fetch_game_logs, fetch_tracking, train_model, xfp_report),
+                   backtests (backtest_recency, backtest_sims, backtest_xfp), AWS (push_tracking_s3, and the
+                   daily check: daily_sims, daily_lambda, sims_lambda), seed_dev
   data/history/    player-season dataset 2017-18 → today (from ESPN)
   data/model/      trained model + metrics.json (the backtest above)
   tests/           engine unit tests + end-to-end API test
 web/               React + TypeScript + Vite client (also the desktop UI)
 desktop/           Electron shell; starts the bundled engine; installers in desktop/release
-cloudflare/ai-proxy/  Worker + D1 that holds the OpenAI key and meters AI calls for the desktop app
+cloudflare/ai-proxy/  Worker + D1 that holds the OpenAI key and meters AI calls for the desktop app, and
+                   carries league admins' trade rulings between desktop apps
 docs/              methodology, API, user guide, admin guide, connectors
 ```
 
@@ -129,7 +132,7 @@ docs/              methodology, API, user guide, admin guide, connectors
 ```bash
 cd server && .venv/Scripts/python -m pytest      # the API test needs internet once; ESPN data is cached
 cd web && npm test && npm run typecheck
-cd cloudflare/ai-proxy && npm test                # the AI proxy against SQLite and a stubbed OpenAI
+cd cloudflare/ai-proxy && npm test                # the Worker (AI proxy and rulings) against SQLite and a stubbed OpenAI
 cd server && .venv/Scripts/python engine.py --self-test   # the desktop engine end to end
 ```
 
@@ -140,7 +143,7 @@ Everyone in a league needs to reach one server. The simplest option is the inclu
 docker build -t courtside .
 docker run -p 8000:8000 -v courtside-data:/app/server/data/db -e FBB_SECRET_KEY=... -e FBB_PUBLIC_URL=https://your.host courtside
 ```
-Free hosting (Cloud Run + Neon, or Render): see [docs/DEPLOY.md](docs/DEPLOY.md). Environment variables, backups and scaling: [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md).
+Free hosting (Cloud Run + Neon, or Render): see [docs/DEPLOY.md](docs/DEPLOY.md). Hosts that scale to zero stop the built-in refresh scheduler while idle, so `.github/workflows/sync.yml` asks the server to refresh due leagues every 3 hours once `COURTSIDE_URL` and `COURTSIDE_CRON_TOKEN` are set as repository secrets. Environment variables, backups and scaling: [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md).
 
 ## Retraining
 
@@ -174,7 +177,8 @@ AWS also runs the simulator's accuracy check: at 7:30 AM and 6:30 PM Eastern, Ev
 
 - [Methodology & model card](docs/METHODOLOGY.md)
 - [User guide](docs/USER_GUIDE.md)
-- [Admin guide](docs/ADMIN_GUIDE.md)
+- [Admin guide](docs/ADMIN_GUIDE.md) (including trade rulings and admin codes)
+- [Deploying a shared server](docs/DEPLOY.md)
 - [API reference](docs/API.md) (interactive docs at `/docs` on a running server)
 - [AWS: S3 backup, Lambda sims, Bedrock evaluation, costs](docs/AWS.md)
 - [Connectors](docs/CONNECTORS.md)
