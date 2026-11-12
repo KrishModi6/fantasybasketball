@@ -1,6 +1,17 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.10
+## What's new in 0.5.11
+
+- **Breakouts.** A new **Breakouts** tab lists the players most likely to have a breakout season: fantasy points per game up by 5 or more over last season, to at least 20. Each player has a chance set before the season, the evidence behind it (minutes, usage, efficiency, age and experience, ESPN's projection), the FP/G that would make it a breakout for him, and how his season is going. A player already past that line over 8 or more games is marked **on pace**. Filter to free agents to find the ones you can still add. It was checked on five past seasons it hadn't seen: it ranked breakouts better than ESPN's own projected gains in all four seasons that have an ESPN projection to compare with, and players it gave a 20–35% chance broke out 26% of the time.
+- **Playoff and title odds keep the points already scored.** The season simulation gives every team a good or a bad run for the rest of the season, and it was applying that run to points already on the board. Late in a week, or on a Monday before ESPN posts the results, a team that had finished a week 100 points ahead still lost it in 30% of the simulated seasons. Now only the points still to be played can change. Projected records, playoff and title odds, and a trade's odds before and after all come from that simulation.
+- **Title odds follow the real bracket.** During the fantasy playoffs Courtside used to seed and replay the whole bracket from the start, so a team already knocked out could still show title odds. Once ESPN sets the bracket, the odds now start from where it stands: the teams still in it, the games as paired, and the results so far. This is tested on practice brackets; the first real one comes in March.
+- **A refresh can't get stuck.** If something went wrong after Courtside read your league from ESPN, the league stayed on "refreshing" and kept showing old data until you restarted the app. It now reports the error and tries again at the next refresh. A change in the format of ESPN's injury report or news no longer stops a refresh either.
+- **Players still listed as out stay out.** A player listed OUT whose expected return date had already passed was projected to miss no games. He now gets the usual number for his status (4 games for OUT), or what his injury note says.
+- **Category leagues: double-doubles and triple-doubles add up.** The Matchups simulator counted at most one a week for a whole team, so those categories nearly always came out tied. Each player can now get one a game.
+- **Courtside's engine only answers this computer.** The part of Courtside that runs in the background could be reached by a web page built to look for it. It now refuses any request that isn't addressed to this computer. Nothing you do changes.
+- **Smaller fixes.** Two trade searches running at once can't trip each other up, and a league file keeps its schedule settings and says what is wrong when it can't be read.
+
+## In 0.5.10
 
 - **The Admin tab now reaches whoever runs the league.** In 0.5.9 a copy of the league that came from an invite code could never be the admin's, so some admins never saw the tab. Whoever runs the league now enters their admin code under **League admin** on the **League** tab, and the tab appears right away. Nobody else needs to do anything.
 - **Limit messages use Eastern time.** The AI assistant's and the rulings' daily limits now say when they reset in Eastern, at 7 p.m. in winter and 8 p.m. in summer, in place of midnight UTC.
