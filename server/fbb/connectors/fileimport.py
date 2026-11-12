@@ -54,12 +54,22 @@ def parse_upload(filename: str, content: bytes) -> dict:
             raise ConnectorError('JSON must contain a "teams" list (see docs/CONNECTORS.md).')
         teams = []
         for i, t in enumerate(data["teams"], 1):
+            if not isinstance(t, dict) or not isinstance(t.get("players", []), list):
+                raise ConnectorError(f'Team {i} must be an object with a "players" list (see docs/CONNECTORS.md).')
             players = []
             for p in t.get("players", []):
-                players.append(p if isinstance(p, dict) else {"name": str(p)})
-            teams.append({"name": t.get("name") or f"Team {i}", "owner": t.get("owner"), "players": players})
-        return {"name": data.get("name"), "season": data.get("season"), "scoring": data.get("scoring"),
+                entry = p if isinstance(p, dict) else {"name": str(p)}
+                if not (entry.get("name") or entry.get("player_id")):
+                    raise ConnectorError(f'A player on team {i} has no "name".')
+                players.append({**entry, "name": str(entry.get("name") or entry["player_id"])})
+            teams.append({"name": str(t.get("name") or f"Team {i}"), "owner": t.get("owner"), "players": players})
+        spec = {"name": data.get("name"), "season": data.get("season"), "scoring": data.get("scoring"),
                 "roster_slots": data.get("roster_slots"), "teams": teams}
+        # Optional league settings FileConnector reads; they used to be dropped here, so a file could not set them.
+        for key in ("regular_season_matchups", "playoff_teams", "playoff_round_weeks", "records"):
+            if data.get(key) is not None:
+                spec[key] = data[key]
+        return spec
     if name.endswith(".csv"):
         reader = csv.DictReader(io.StringIO(text))
         cols = {c.lower().strip(): c for c in (reader.fieldnames or [])}
@@ -147,9 +157,11 @@ class FileConnector(LeagueConnector):
         matchups = [Matchup(matchup_period=mp, home_team_id=a, away_team_id=b)
                     for mp in range(1, settings.regular_season_matchups + 1)
                     for a, b in rr[(mp - 1) % len(rr)]]
-        records = self.spec.get("records") or {}
+        records = self.spec.get("records")
+        records = records if isinstance(records, dict) else {}
         for t in teams:
-            rec = records.get(t.name) or {}
+            rec = records.get(t.name)
+            rec = rec if isinstance(rec, dict) else {}
             t.wins, t.losses, t.ties = int(rec.get("wins", 0)), int(rec.get("losses", 0)), int(rec.get("ties", 0))
         current_mp = next((mp for mp, days in settings.matchup_periods.items() if base.current_period in days), 1)
         return LeagueSnapshot(

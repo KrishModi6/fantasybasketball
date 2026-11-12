@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, update
 
@@ -45,9 +45,38 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Courtside Analytics API", version="0.1.0", lifespan=lifespan,
               description="Fantasy basketball projections, team strength, trade analysis and league hub.")
+LOCAL_HOSTS = {"127.0.0.1", "localhost"}
+
+
+class LocalHostOnly:
+    """Desktop engine only: answer requests addressed to this computer, nothing else.
+
+    The engine signs its one local user in without a password (routers/auth.py) because it listens on
+    127.0.0.1. A web page can still reach that address through a domain it points there (DNS rebinding),
+    and the browser then lets it read the answers: the sign-in token, then a league code with the ESPN
+    cookies in it. Such a request names the page's domain in its Host header, so it stops here.
+    """
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket") and get_settings().local_mode:
+            host = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
+            if host and host.rsplit(":", 1)[0].lower() not in LOCAL_HOSTS:
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                else:
+                    await JSONResponse({"detail": "Courtside's engine only answers this computer."},
+                                       status_code=403)(scope, receive, send)
+                return
+        await self.inner(scope, receive, send)
+
+
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(CORSMiddleware, allow_origins=get_settings().origins(), allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(LocalHostOnly)  # added last, so it runs first
 
 for r in (auth.router, leagues.router, analysis.router, matchups.router, trades.router, rulings.router, meta.router,
           cron.router, ai.router):

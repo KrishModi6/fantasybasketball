@@ -32,7 +32,7 @@ from fbb.trades import TradeEvaluator
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1") as c:  # the desktop engine answers only local addresses
         yield c
 
 

@@ -17,6 +17,7 @@ for one good player buys nothing.
 from __future__ import annotations
 
 import math
+import threading
 from collections import Counter, OrderedDict
 from collections.abc import Collection
 from dataclasses import asdict, dataclass, field, replace
@@ -179,6 +180,9 @@ class TradeEvaluator:
         self._windows: OrderedDict[tuple[int, frozenset], WindowResult] = OrderedDict()
         self._base_sim: dict | None = None
         self._completed: dict[frozenset, dict] = {}  # finished trades, scored once per set of league data
+        # One evaluator serves every request for a league, from several threads at once (the trade pages, the
+        # board refresh, the assistant): the caches above are read and changed under this lock.
+        self._lock = threading.RLock()
         cur = ctx.s.current_matchup_period
         self.this_week = ctx.matchup_days(cur)
         reg = ctx.s.settings.regular_season_matchups
@@ -186,29 +190,36 @@ class TradeEvaluator:
 
     def baseline(self, team_id: int) -> tuple[list[str], list[str], WindowResult]:
         """A team's comparison roster (open spots filled from free agents), those pickups, and its lineup window."""
-        if team_id not in self._baselines:
-            roster, fills = baseline_roster(self.ctx, team_id, self.pool)
-            self._baselines[team_id] = (roster, fills, self._window(team_id, roster) if fills else self.base[team_id])
-        return self._baselines[team_id]
+        with self._lock:
+            if team_id not in self._baselines:
+                roster, fills = baseline_roster(self.ctx, team_id, self.pool)
+                self._baselines[team_id] = (roster, fills, self._window(team_id, roster) if fills else self.base[team_id])
+            return self._baselines[team_id]
 
     def _window(self, team_id: int, roster: list[str]) -> WindowResult:
         # Keyed by team too: who can stay in an IR slot depends on whose slot he's in.
         key = (team_id, frozenset(roster))
-        if key in self._windows:
+        with self._lock:
+            hit = self._windows.get(key)
+            if hit is not None:
+                self._windows.move_to_end(key)
+                return hit
+        window = self.ctx.project_window(roster, team_id=team_id)  # outside the lock: other searches go on
+        with self._lock:
+            self._windows[key] = window
             self._windows.move_to_end(key)
-        else:
-            self._windows[key] = self.ctx.project_window(roster, team_id=team_id)
-            if len(self._windows) > self.WINDOW_CACHE:
+            while len(self._windows) > self.WINDOW_CACHE:
                 self._windows.popitem(last=False)
-        return self._windows[key]
+        return window
 
     def _baseline_windows(self) -> dict[int, WindowResult]:
         return {t.id: self.baseline(t.id)[2] for t in self.ctx.s.teams}
 
     def base_sim(self) -> dict:
-        if self._base_sim is None:
-            self._base_sim = simulate_season(self.ctx, MatchupModel(self.ctx, self._baseline_windows()), n=SIM_RUNS)
-        return self._base_sim
+        with self._lock:
+            if self._base_sim is None:
+                self._base_sim = simulate_season(self.ctx, MatchupModel(self.ctx, self._baseline_windows()), n=SIM_RUNS)
+            return self._base_sim
 
     def _side(self, team_id: int, gives: list[str], receives: list[str]) -> tuple[TradeSide, WindowResult, WindowResult]:
         ctx = self.ctx

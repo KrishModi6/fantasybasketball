@@ -69,7 +69,8 @@ def events_to_stats(ev: np.ndarray) -> dict[str, np.ndarray]:
         "FGM": fgm, "FGA": fgm + two_x + tpx, "3PM": tpm, "3PA": tpm + tpx, "FTM": ftm, "FTA": ftm + ftx,
         "PTS": 2 * two_m + 3 * tpm + ftm, "REB": reb, "OREB": 0.23 * reb, "DREB": 0.77 * reb,
         "AST": ev[..., _E["AST"]], "STL": ev[..., _E["STL"]], "BLK": ev[..., _E["BLK"]], "TO": ev[..., _E["TO"]],
-        "DD": np.minimum(ev[..., _E["DD"]], 1), "TD": np.minimum(ev[..., _E["TD"]], 1), "PF": ev[..., _E["PF"]],
+        # At most one a game, which _simulate_team sees to as it draws each game: these may be a week's totals.
+        "DD": ev[..., _E["DD"]], "TD": ev[..., _E["TD"]], "PF": ev[..., _E["PF"]],
     }
     out["FGMI"] = out["FGA"] - out["FGM"]
     out["FTMI"] = out["FTA"] - out["FTM"]
@@ -190,6 +191,10 @@ class MatchupSimulator:
             if team is not None:
                 shock *= team[:, None]
             counts = self.rng.poisson(lam[None, :, :] * shock[:, :, None])  # (n, k, E)
+            # A double-double or triple-double happens once a game or not at all, at the projected rate (a Poisson
+            # count capped at one would fall short of it: 0.39 a game for a player projected at 0.5).
+            for e in (_E["DD"], _E["TD"]):
+                counts[:, :, e] = self.rng.random((n, k)) < np.minimum(lam[:, e] * day.form, 1.0)
             use = np.zeros((n, k), dtype=bool)
             for pos, _ in day.starters:
                 use[:, pos] = plays[:, pos]

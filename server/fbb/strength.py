@@ -33,6 +33,7 @@ def normal_cdf(z: float) -> float:
 
 
 N_SIMS = 5000
+WINNERS_BRACKET = "WINNERS_BRACKET"  # ESPN's playoffTierType for a championship-bracket game
 # Points leagues: how far a team's projected level can be off for the whole rest of the season (injuries,
 # trades and form that the weekly spread treats as independent). Each simulated season draws one level
 # per team. Without it playoff odds were far too sure (calibration slope 0.49); at 0.10 the slope is 0.93
@@ -96,9 +97,15 @@ class MatchupModel:
                     if m.away_team_id is not None:
                         self.partial[(m.away_team_id, m.matchup_period)] = m.away_score
 
-    def dist(self, team_id: int, mp: int) -> tuple[float, float]:
+    def parts(self, team_id: int, mp: int) -> tuple[float, float, float]:
+        """A week's score in two parts, and its variance: the points still to come (projected) and the points
+        already scored (fixed). Only the first can still turn out differently."""
         m, v = self.results[team_id].by_mp.get(mp, [0.0, 0.0])
-        return m + self.partial.get((team_id, mp), 0.0), v
+        return m, self.partial.get((team_id, mp), 0.0), v
+
+    def dist(self, team_id: int, mp: int) -> tuple[float, float]:
+        m, scored, v = self.parts(team_id, mp)
+        return m + scored, v
 
     def cat_probs(self, a: int, b: int, mp: int) -> dict[str, float]:
         cats = self.ctx.scoring.categories
@@ -247,16 +254,25 @@ def simulate_season(ctx: AnalysisContext, mm: MatchupModel, n: int = N_SIMS, see
     tiebreak = strength / (strength.std() + 1e-9) * 0.01 + rng.random((n, T)) * 0.02
     order = np.argsort(-(pct + tiebreak * 1e-3), axis=1)
     k = min(ctx.s.settings.playoff_teams, T)
-    seeds = order[:, :k]  # (n, k) team columns by seed
     playoff_mps = sorted(mp for mp in ctx.s.settings.matchup_periods if mp > ctx.s.settings.regular_season_matchups)
-    champion = _simulate_bracket(seeds, ids, mm, playoff_mps, rng, level)
+    # Once the league has its playoff bracket, the playoffs are played from where they stand: the teams still
+    # in it, the games as paired, and the results so far. Before that, the bracket is seeded from each
+    # simulated season's standings.
+    live = league_bracket(ctx, col, playoff_mps)
+    if live is None:
+        seeds = order[:, :k]  # (n, k) team columns by seed
+        champion = _simulate_bracket(seeds, ids, mm, playoff_mps, rng, level)
+    else:
+        seeds = np.tile(np.array(live.field), (n, 1))  # the real field, best record first
+        champion = _play_bracket(np.tile(np.array(live.slots), (n, 1)), ids, mm, playoff_mps[live.round:], rng,
+                                 level, live.decided)
 
     out = {}
     reg = ctx.s.settings.regular_season_matchups
     for t in ctx.s.teams:
         c = col[t.id]
         made = (seeds == c).any(axis=1)
-        seed_pos = np.where(seeds == c, np.arange(1, k + 1), 0).sum(axis=1)
+        seed_pos = np.where(seeds == c, np.arange(1, seeds.shape[1] + 1), 0).sum(axis=1)
         games = t.wins + t.losses + t.ties + left[t.id]
         exp_wins = t.wins + float(won[:, c].mean())
         out[t.id] = {
@@ -272,6 +288,65 @@ def simulate_season(ctx: AnalysisContext, mm: MatchupModel, n: int = N_SIMS, see
     return out
 
 
+@dataclass
+class LiveBracket:
+    """The championship bracket as the league has it (team columns, as in simulate_season)."""
+    field: list[int]  # every team that made the playoffs, best record first
+    round: int  # index of the round being played (0 = the first)
+    slots: list[int]  # that round's pairings, two slots a game; -1 is a bye
+    decided: dict[tuple[int, frozenset], int]  # (matchup period, the two teams) -> winner, for games with a result
+
+
+def league_bracket(ctx: AnalysisContext, col: dict[int, int], playoff_mps: list[int]) -> LiveBracket | None:
+    """The playoffs as they stand, from the bracket games the league lists (ESPN marks them WINNERS_BRACKET;
+    consolation games don't count). None before the bracket exists, for sources that don't say which games are
+    bracket games, or when the listing isn't one this can read, so the caller seeds its own.
+
+    The newest round listed is the one being played: its teams are the ones still alive, and the next round is
+    listed only once this one has results. A first-round bye has no game, so teams missing from a first round
+    that is short of the playoff field are the best records not in it.
+    """
+    s = ctx.s
+    k = min(s.settings.playoff_teams, len(s.teams))
+    games = [m for m in s.matchups if m.playoff_tier == WINNERS_BRACKET and m.matchup_period in playoff_mps]
+    if not games or k < 2:
+        return None
+    current = max(m.matchup_period for m in games)
+    rnd = playoff_mps.index(current)
+    rounds = (k - 1).bit_length()
+    if rnd >= rounds:
+        return None
+    units: list[tuple[int, int | None]] = [(m.home_team_id, m.away_team_id) for m in games
+                                           if m.matchup_period == current]
+    alive = [t for u in units for t in u if t is not None]
+    expected = min(k, 2 ** (rounds - rnd))
+
+    def record(tid: int) -> tuple[float, float]:
+        t = s.team(tid)
+        return (-(t.wins + 0.5 * t.ties) / max(t.wins + t.losses + t.ties, 1), -t.points_for)
+
+    if rnd == 0 and len(alive) < expected:
+        byes = sorted((t.id for t in s.teams if t.id not in alive), key=record)[: expected - len(alive)]
+        units += [(t, None) for t in byes]
+        alive += byes
+    if len(alive) != expected or len(set(alive)) != len(alive) or len(units) != 2 ** (rounds - rnd - 1):
+        return None
+    if any(t not in col for t in alive):
+        return None
+    # Games in bracket order: the game with the best record's team meets the winner of the game with the worst.
+    units.sort(key=lambda u: min(record(t) for t in u if t is not None))
+    slots: list[int] = []
+    for rank in _bracket_order(len(units)):
+        a, b = units[rank - 1]
+        slots += [col[a], col[b] if b is not None else -1]
+    made = {t for m in games for t in (m.home_team_id, m.away_team_id) if t is not None} | set(alive)
+    decided = {(m.matchup_period, frozenset((m.home_team_id, m.away_team_id))):
+               m.home_team_id if m.winner == "HOME" else m.away_team_id
+               for m in games if m.away_team_id is not None and m.winner in ("HOME", "AWAY")}
+    return LiveBracket(field=[col[t] for t in sorted(made, key=record) if t in col], round=rnd, slots=slots,
+                       decided=decided)
+
+
 def _bracket_order(k: int) -> list[int]:
     """Standard seeding order for a bracket of size k (power of two): 1 v k, ..."""
     order = [1]
@@ -282,10 +357,13 @@ def _bracket_order(k: int) -> list[int]:
 
 
 def _margin(mm: MatchupModel, a: int, b: int, mp: int, level_a, level_b, rng: np.random.Generator):
-    """Simulated points margin of a over b with each team's projection scaled by its season level."""
-    ma, va = mm.dist(a, mp)
-    mb, vb = mm.dist(b, mp)
-    return ma * level_a - mb * level_b + math.sqrt(max(va + vb, 1.0)) * rng.standard_normal(np.shape(level_a))
+    """Simulated points margin of a over b with each team's projection scaled by its season level. Points
+    already scored are fixed: scaling them too replayed a finished week (1,400-1,300 came out a loss in 30% of
+    seasons) and blurred a week in progress."""
+    ma, sa, va = mm.parts(a, mp)
+    mb, sb, vb = mm.parts(b, mp)
+    noise = math.sqrt(max(va + vb, 1.0)) * rng.standard_normal(np.shape(level_a))
+    return (ma * level_a + sa) - (mb * level_b + sb) + noise
 
 
 def _simulate_bracket(seeds: np.ndarray, ids: list[int], mm: MatchupModel, playoff_mps: list[int],
@@ -299,6 +377,15 @@ def _simulate_bracket(seeds: np.ndarray, ids: list[int], mm: MatchupModel, playo
     for pos, sd in enumerate(order):
         if sd <= k:
             slots[:, pos] = seeds[:, sd - 1]
+    return _play_bracket(slots, ids, mm, playoff_mps, rng, level)
+
+
+def _play_bracket(slots: np.ndarray, ids: list[int], mm: MatchupModel, playoff_mps: list[int],
+                  rng: np.random.Generator, level: np.ndarray | None = None,
+                  decided: dict[tuple[int, frozenset], int] | None = None) -> np.ndarray:
+    """Plays a bracket out from ``slots`` (simulations x slots of team columns, -1 a bye), one round per entry
+    of ``playoff_mps``. A game in ``decided`` goes to its real winner."""
+    col = {tid: c for c, tid in enumerate(ids)}
     rnd = 0
     pc: dict[tuple, float] = {}
     while slots.shape[1] > 1:
@@ -308,6 +395,10 @@ def _simulate_bracket(seeds: np.ndarray, ids: list[int], mm: MatchupModel, playo
         need = winner == -1
         for i, j in zip(*np.nonzero(need)):
             ta, tb = ids[a[i, j]], ids[b[i, j]]
+            real = decided.get((mp, frozenset((ta, tb)))) if decided else None
+            if real is not None:
+                winner[i, j] = col[real]
+                continue
             if level is not None and mp is not None:
                 a_won = _margin(mm, ta, tb, mp, level[i, a[i, j]], level[i, b[i, j]], rng) > 0
                 winner[i, j] = a[i, j] if a_won else b[i, j]
