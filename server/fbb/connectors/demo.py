@@ -109,7 +109,8 @@ class DemoConnector(LeagueConnector):
                     cand = ranked[idx]
                     idx += 1
                     centers = sum(1 for e in t.roster if players[e.player_id].positions == ["C"])
-                    if cand.positions == ["C"] and centers >= 4:
+                    # Only while someone else is left to take: with nothing but centres the loop never ended.
+                    if cand.positions == ["C"] and centers >= 4 and any(p.positions != ["C"] for p in ranked[idx:]):
                         ranked.append(cand)  # push back for someone else
                         continue
                     t.roster.append(RosterEntry(player_id=cand.id, slot="BE"))

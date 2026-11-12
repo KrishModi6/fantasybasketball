@@ -134,6 +134,9 @@ class Matchup(BaseModel):
     away_score: float = 0
     winner: Literal["HOME", "AWAY", "TIE", "UNDECIDED"] = "UNDECIDED"
     is_playoff: bool = False
+    # ESPN's playoffTierType: "WINNERS_BRACKET" for a championship-bracket game, a consolation ladder otherwise
+    # ("NONE" in the regular season). None when the source doesn't say.
+    playoff_tier: str | None = None
     # Category leagues: totals accrued so far this matchup (stat key -> value), when the source provides them.
     home_stats: dict[str, float] = Field(default_factory=dict)
     away_stats: dict[str, float] = Field(default_factory=dict)

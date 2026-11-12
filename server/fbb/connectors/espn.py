@@ -483,6 +483,7 @@ def parse_matchups(data: dict, regular_season_matchups: int) -> list[Matchup]:
                 away_stats=_side_stats(away),
                 winner=m.get("winner", "UNDECIDED") if m.get("winner") in ("HOME", "AWAY", "TIE") else "UNDECIDED",
                 is_playoff=mp > regular_season_matchups,
+                playoff_tier=m.get("playoffTierType") if isinstance(m.get("playoffTierType"), str) else None,
             )
         )
     return out
@@ -535,11 +536,16 @@ class EspnConnector(LeagueConnector):
             matchups = parse_matchups(data, settings.regular_season_matchups)
             raw_players = self.client.league_players(self.season, self.league_id, self.player_limit)
             sched = parse_pro_schedule(self.client.pro_schedule(self.season), self.season)
+            # Secondary data: never block a sync on it, whether ESPN can't be reached or has changed its format.
+            injuries, news = {}, []
             try:
                 injuries = parse_injury_report(self.client.injuries())
+            except Exception as exc:  # noqa: BLE001
+                log.warning("ESPN injury report skipped: %s", exc)
+            try:
                 news = parse_news(self.client.news())
-            except (ConnectorError, httpx.HTTPError):
-                injuries, news = {}, []  # secondary data: never block a sync on it
+            except Exception as exc:  # noqa: BLE001
+                log.warning("ESPN news skipped: %s", exc)
         finally:
             self.client.close()
 

@@ -172,7 +172,11 @@ async def import_league(file: UploadFile = File(...), name: str = Form("Imported
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(422, f"Couldn't read that file: {exc}") from exc
-    lg = _create(db, user, (spec.get("name") or name)[:120], int(spec.get("season") or season), "file", {"spec": spec})
+    try:
+        league_season = int(spec.get("season") or season)
+    except (TypeError, ValueError):
+        raise HTTPException(422, 'The file\'s "season" must be a year, such as 2027.') from None
+    lg = _create(db, user, str(spec.get("name") or name)[:120], league_season, "file", {"spec": spec})
     _first_sync(db, lg, "imported", fallback_error="Import failed")
     me = db.scalar(select(LeagueMember).where(LeagueMember.league_id == lg.id, LeagueMember.user_id == user.id))
     return league_out(db, lg, me)
@@ -308,6 +312,8 @@ def update_member(user_id: str, body: MemberUpdate, m: Membership = Depends(owne
             clash.team_id = None
         target.team_id = body.team_id
     if body.role:
+        if user_id == m.league.owner_id and body.role != "owner":
+            raise HTTPException(400, "The league creator stays its owner; a league always has one")
         target.role = body.role
     db.commit()
     hub.publish(m.league.id, {"type": "member_updated"})

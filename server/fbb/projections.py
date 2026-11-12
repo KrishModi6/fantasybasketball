@@ -709,11 +709,12 @@ class ProjectionEngine:
         elif status in INJURY_DEFAULT_GAMES:
             games_out = INJURY_DEFAULT_GAMES[status]
             detail = f"ESPN status {status.replace('_', ' ').title()}: default {games_out:g} games missed."
-            if p.expected_return:
-                ret_p = period_for_date(self.s.schedule, p.expected_return)
-                if ret_p is not None:
-                    games_out = float(self.s.schedule.team_games_between(p.pro_team, self.s.current_period, ret_p - 1))
-                    detail = f"Expected return {p.expected_return.isoformat()}: {games_out:.0f} team games."
+            # A return date that has already passed says nothing about a player who is still listed: counting
+            # the team's games up to it gave an OUT player zero games missed. He gets the default, or his note.
+            ret_p = period_for_date(self.s.schedule, p.expected_return) if p.expected_return else None
+            if ret_p is not None and ret_p >= self.s.current_period:
+                games_out = float(self.s.schedule.team_games_between(p.pro_team, self.s.current_period, ret_p - 1))
+                detail = f"Expected return {p.expected_return.isoformat()}: {games_out:.0f} team games."
             elif status in ("OUT", "INJURY_RESERVE"):
                 parsed = games_from_injury_note(p.injury_note, games_left)
                 if parsed and parsed[0] > games_out:

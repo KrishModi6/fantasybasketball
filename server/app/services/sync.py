@@ -88,55 +88,70 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
             _fail(db, league, f"Unexpected error while syncing: {exc}")
             return
 
-        prev_row = latest_snapshot_row(db, league_id)
-        prev = unpack_snapshot(prev_row.data) if prev_row else None
-        # Keep league-specific overrides of settings that the source can't express (file leagues).
-        if league.name and snap.source in ("demo", "file"):
-            snap.settings.name = league.name
         try:
-            fetch_missing_bios([pid for pid in snap.players], max_fetch=60)
-        except Exception:  # noqa: BLE001 - bios are optional
-            pass
-        try:
-            attach_tracking(snap.players, snap.settings.season)
-        except Exception as exc:  # noqa: BLE001 - xFP is optional, and NBA.com does not answer cloud servers
-            log.info("xFP tracking unavailable for %s: %s", league_id, exc)
-        snap.data_version = DATA_VERSION
-        db.add(Snapshot(league_id=league_id, source=snap.source, data=pack_snapshot(snap)))
-        _prune(db, league_id)
-
-        for pid, name, old, new in _injury_changes(prev, snap):
-            _log(db, league_id, "injury", f"{name}: {old.replace('_', ' ').title()} → {new.replace('_', ' ').title()}",
-                 {"player_id": pid, "from": old, "to": new})
-        for w in snap.warnings[:20]:
-            _log(db, league_id, "warning", w)
-        moves = roster_moves(prev, snap) if league.source in MOVE_SOURCES else []
-        for move in moves:
-            _log(db, league_id, "transaction", describe_move(move, prev, snap), move)
-
-        _record_projection_history(db, league_id, snap)
-        claim_own_team(db, league, snap)
-        league.season = snap.settings.season
-        db.commit()
-        invalidate(league_id)
-        # Re-score the board before marking the refresh done, so anyone who sees the new sync time (by
-        # push or by polling) also gets the new board. This also warms the analysis cache for page loads.
-        try:
-            refresh_board(db, league)
-        except Exception:  # noqa: BLE001 - a stale board must never fail the refresh itself
-            log.exception("board refresh failed for %s", league_id)
+            _store(db, league, snap, reason)
+        except Exception as exc:  # noqa: BLE001
+            # Without this the league stayed "running", which every later refresh (scheduled or by hand)
+            # skips, so it showed old data until the app was restarted.
+            log.exception("sync failed after fetching %s", league_id)
             db.rollback()
-        league.last_synced_at = datetime.now(timezone.utc)
-        league.last_sync_status = "ok"
-        league.last_sync_error = None
-        db.commit()
-        if moves:
-            hub.publish(league_id, {"type": "roster_moves", "count": len(moves),
-                                    "first": describe_move(moves[0], prev, snap)})
-        pull_if_due(db, league)  # the admin's latest rulings, for a desktop app with no page open that would ask
-        hub.publish(league_id, {"type": "sync_completed", "reason": reason, "warnings": len(snap.warnings)})
+            league = db.get(League, league_id)
+            if league is not None:
+                _fail(db, league, f"Unexpected error while saving the refresh: {exc}")
     finally:
         db.close()
+
+
+def _store(db, league: League, snap: LeagueSnapshot, reason: str) -> None:
+    """Save a fetched snapshot and everything that follows from it: the feed, projection history, the board."""
+    league_id = league.id
+    prev_row = latest_snapshot_row(db, league_id)
+    prev = unpack_snapshot(prev_row.data) if prev_row else None
+    # Keep league-specific overrides of settings that the source can't express (file leagues).
+    if league.name and snap.source in ("demo", "file"):
+        snap.settings.name = league.name
+    try:
+        fetch_missing_bios([pid for pid in snap.players], max_fetch=60)
+    except Exception:  # noqa: BLE001 - bios are optional
+        pass
+    try:
+        attach_tracking(snap.players, snap.settings.season)
+    except Exception as exc:  # noqa: BLE001 - xFP is optional, and NBA.com does not answer cloud servers
+        log.info("xFP tracking unavailable for %s: %s", league_id, exc)
+    snap.data_version = DATA_VERSION
+    db.add(Snapshot(league_id=league_id, source=snap.source, data=pack_snapshot(snap)))
+    _prune(db, league_id)
+
+    for pid, name, old, new in _injury_changes(prev, snap):
+        _log(db, league_id, "injury", f"{name}: {old.replace('_', ' ').title()} → {new.replace('_', ' ').title()}",
+             {"player_id": pid, "from": old, "to": new})
+    for w in snap.warnings[:20]:
+        _log(db, league_id, "warning", w)
+    moves = roster_moves(prev, snap) if league.source in MOVE_SOURCES else []
+    for move in moves:
+        _log(db, league_id, "transaction", describe_move(move, prev, snap), move)
+
+    _record_projection_history(db, league_id, snap)
+    claim_own_team(db, league, snap)
+    league.season = snap.settings.season
+    db.commit()
+    invalidate(league_id)
+    # Re-score the board before marking the refresh done, so anyone who sees the new sync time (by
+    # push or by polling) also gets the new board. This also warms the analysis cache for page loads.
+    try:
+        refresh_board(db, league)
+    except Exception:  # noqa: BLE001 - a stale board must never fail the refresh itself
+        log.exception("board refresh failed for %s", league_id)
+        db.rollback()
+    league.last_synced_at = datetime.now(timezone.utc)
+    league.last_sync_status = "ok"
+    league.last_sync_error = None
+    db.commit()
+    if moves:
+        hub.publish(league_id, {"type": "roster_moves", "count": len(moves),
+                                "first": describe_move(moves[0], prev, snap)})
+    pull_if_due(db, league)  # the admin's latest rulings, for a desktop app with no page open that would ask
+    hub.publish(league_id, {"type": "sync_completed", "reason": reason, "warnings": len(snap.warnings)})
 
 
 def _swid(value: str | None) -> str:

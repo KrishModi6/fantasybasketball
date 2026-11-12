@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from datetime import date
 from pathlib import Path
 
 from .baseline import first_season_used
@@ -32,6 +33,12 @@ def _read(path: Path) -> dict[str, dict]:
     return {}
 
 
+def _season_now() -> int:
+    """The app's id for the season in progress (2027 = 2026-27); a new one starts in August."""
+    today = date.today()
+    return today.year + (today.month >= 8)
+
+
 def _load_bios() -> dict[str, dict]:
     return {**_read(BIO_BUNDLED), **_read(BIO_EXTRA)}
 
@@ -50,7 +57,8 @@ def fetch_missing_bios(player_ids: list[str], max_fetch: int = 120) -> int:
             for pid in todo:
                 try:
                     a = client.athlete(pid).get("athlete", {})
-                    bios[pid] = {"age": a.get("age"), "debut_year": a.get("debutYear")}
+                    # "season" dates the age: ESPN gives it as of today, and enrich_players shifts it from there.
+                    bios[pid] = {"age": a.get("age"), "debut_year": a.get("debutYear"), "season": _season_now()}
                 except Exception as exc:  # noqa: BLE001 - a missing bio must never break a sync
                     bios[pid] = {"age": None, "debut_year": None, "error": str(exc)[:60]}
         finally:
@@ -72,8 +80,9 @@ def enrich_players(players: dict[str, Player], season: int) -> None:
         p.history = sorted((h for h in p.history + extra if h.season >= first), key=lambda h: h.season)
         bio = bios.get(pid) or {}
         if p.age is None and bio.get("age") is not None:
-            # Bios record age "now" (start of the 2026-27 season); shift to the projected season.
-            p.age = float(bio["age"]) - (ds.age_season - season)
+            # A bio records his age in one season (the bundled ones at the start of 2026-27, one fetched later in
+            # the season it was fetched); shift to the projected season.
+            p.age = float(bio["age"]) - (int(bio.get("season") or ds.age_season) - season)
         if p.debut_year is None and bio.get("debut_year"):
             p.debut_year = int(bio["debut_year"])
         # Before the trim above, a debut year or his older seasons still say how long he's been in the league.

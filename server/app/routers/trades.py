@@ -59,7 +59,9 @@ async def suggestions(team_id: int, a: LeagueAnalysis = Depends(analysis),
                                                 description="Package sizes to search, e.g. 1-1,2-2 (give-get)")):
     if team_id not in {t.id for t in a.snapshot.teams}:
         raise HTTPException(404, "Team not found")
-    partners = [partner_id] if partner_id else None
+    if partner_id is not None and (partner_id == team_id or partner_id not in {t.id for t in a.snapshot.teams}):
+        raise HTTPException(422, "Pick another team in this league")
+    partners = [partner_id] if partner_id is not None else None
     allowed = frozenset(tuple(int(n) for n in s.split("-")) for s in sizes.split(",")) if sizes else None
     checked: Counter = Counter()
     rows = await run_in_threadpool(find_trades, a.ctx, team_id, a.evaluator(), max_give, max_get, partners,
