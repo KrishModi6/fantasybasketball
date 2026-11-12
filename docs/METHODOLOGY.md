@@ -537,6 +537,35 @@ The same check runs every morning on this season's finished weeks (`scripts/dail
 - **Points leagues.** Rest-of-season value = FP/G × expected games, with a player's first games of the season and first games back from an absence each counted at its opening and return dips (§1.5.2). VORP uses the replacement level: the median FP/G of the five best healthy free agents in *your* league.
 - **Category leagues.** G-scores [8]: `(x − μ) / √(σ² + τ²/G)`, where σ is the spread of per-game means across rosterable players and τ² is the per-game variance (overdispersed Poisson; binomial for percentages). G ≈ 3.5 games per week. Percentages use volume-weighted impact: makes − attempts × league %.
 
+### 7.1 Breakout candidates
+
+The **Breakouts** page ranks players by their chance of a breakout season (`fbb/breakout.py`).
+
+- **What counts.** A season where a player's fantasy points per game rise by at least 5 over his last season, to at least 20, over at least 30 games, in ESPN default points. Only players with 20+ games the season before can have one: a rookie has no level to break out from. About one qualifying player in nine has one each year (390 of 3,441 player-seasons, 2018‑19 to 2025‑26).
+- **The model.** A LightGBM classifier over what is known before the season starts, in five kinds of evidence:
+  - *minutes*: last season's minutes, the change from the season before, and the minutes ESPN and the stat baseline project;
+  - *usage*: shots, free throws and turnovers used per 36 minutes, and their change;
+  - *efficiency*: true shooting and fantasy points per 36 minutes, and their change;
+  - *development*: age, years in the league, and how far last season fell short of his best before it;
+  - *projections*: the FP/G ESPN and the stat baseline (§1.1) project against last season's.
+
+  Its scores are turned into probabilities by a logistic fit on out-of-fold predictions. The page shows the kinds of evidence that move each player's odds most (TreeSHAP [9], summed within each kind).
+- **Backtest.** Rolling origin, as in §2: the model for season *T* is trained on seasons before *T*. Over 2021‑22 to 2025‑26 it is compared with ranking the same players by youth, by the minutes ESPN adds, and by the gain the stat baseline or ESPN projects. Seasons whose stored ESPN projection was refreshed in-season (§2, data audit) have their ESPN features left blank.
+
+  | Ranking | AUC | Average precision | Breakouts in its top 25 |
+  |---|---|---|---|
+  | Youngest first | 0.669 | 0.211 | 6.0 |
+  | Biggest gain the stat baseline projects | 0.600 | 0.155 | 4.2 |
+  | Most minutes added by ESPN | 0.638 | 0.248 | 7.0 |
+  | Biggest gain ESPN projects | 0.656 | 0.268 | 9.0 |
+  | **Breakout model** (same players as the ESPN rows) | **0.751** | **0.337** | **9.8** |
+
+  It ordered players better than ESPN's projected gains in each of the four seasons with a genuine ESPN projection (AUC 0.742 vs 0.696, 0.785 vs 0.618, 0.729 vs 0.615, 0.749 vs 0.696). At the very top the two are close: 9.8 against 9.0 breakouts in the top 25, with ESPN ahead in one of the four seasons and level in another. The probabilities mean what they say: players given 20–35% broke out 26% of the time, those given under 5%, 3% (Brier score 0.0875 against 0.0959 for always saying the base rate).
+- **During the season.** The chance is a preseason number and doesn't move. Beside it the page shows this season's FP/G against the player's breakout line, and marks him **on pace** once he is past it over 8 or more games.
+- **Limits.** Five test seasons is a small sample. The model sees box-score seasons only: no depth charts, coaching changes or trades. It is trained in ESPN default points, so in a league with very different scoring it ranks the right kind of player but the 5 and 20 FP/G lines are in default points.
+
+Retrain with `python -m scripts.train_breakout` (writes `data/model/breakout_model.joblib` and `breakout_metrics.json`).
+
 ## 8. Limitations
 
 - Lineups assume an attentive manager who sets the optimal lineup daily.

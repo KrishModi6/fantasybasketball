@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+from fbb import breakout
 from fbb.baseline import RATE_STATS
 from fbb.constants import season_label
 from fbb.strength import MatchupModel
@@ -123,6 +124,31 @@ def _xfp_detail(p, season: int) -> dict | None:
     return {"games": int(xt.gp), "per_game": {
         k: {"actual": _r(xt.actual.get(k, 0) / xt.gp), "expected": _r(xt.expected.get(k, 0) / xt.gp)}
         for k in ("PTS", "FGM", "3PM", "FTM", "AST", "REB", "STL", "BLK")}}
+
+
+def breakout_rows(a: LeagueAnalysis) -> list[dict]:
+    """Breakout candidates (fbb/breakout.py), worked out once per analysis."""
+    if not hasattr(a, "_breakouts"):
+        a._breakouts = breakout.candidates(a.snapshot, a.proj)  # type: ignore[attr-defined]
+    return a._breakouts  # type: ignore[attr-defined]
+
+
+def breakout_model_card() -> dict | None:
+    """What the page says about the model: what counts as a breakout and how the backtest went."""
+    model = breakout.BreakoutModel.load()
+    if model is None:
+        return None
+    m = model.metrics
+    summary = m.get("summary", {})
+    ours, espn = summary.get("model") or {}, summary.get("espn") or {}
+    same = espn.get("model_same_players") or {}
+    return {
+        "definition": m.get("definition"), "base_rate": m.get("base_rate"), "backtest_seasons": m.get("backtest_seasons"),
+        "auc": ours.get("auc"), "top_n": 25, "top_hits": ours.get("top_hits"),
+        "espn_auc": espn.get("auc"), "espn_top_hits": espn.get("top_hits"),
+        "auc_same_players": same.get("auc"), "top_hits_same_players": same.get("top_hits"),
+        "brier": m.get("brier"), "brier_base_rate": m.get("brier_base_rate"), "calibration": m.get("calibration"),
+    }
 
 
 def strength_rows(a: LeagueAnalysis) -> list[dict]:

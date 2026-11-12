@@ -555,3 +555,50 @@ export interface AiAnswer {
   seconds: number;
   quota: { device_used: number; device_limit: number; resets_at: string } | null;
 }
+
+export interface BreakoutRow {
+  id: string;
+  rank: number;
+  name: string;
+  pro_team: string;
+  positions: string[];
+  injury_status: string;
+  fantasy_team_id: number | null;
+  on_waivers: boolean;
+  age: number | null;
+  years: number | null; // seasons in the league, counting this one
+  probability: number; // chance of a breakout season, set before the season
+  last_fp_pg: number;
+  last_mpg: number;
+  breakout_line: number; // the FP/G that would make this a breakout season
+  espn_fp_pg: number | null;
+  proj_fp_pg: number | null; // Courtside's rest-of-season projection
+  season_fp_pg: number | null;
+  season_mpg: number | null;
+  games_played: number;
+  on_pace: boolean; // past his breakout line over 8+ games this season
+  reasons: { factor: string; effect: number; direction: "up" | "down" }[];
+}
+
+export interface BreakoutModelCard {
+  definition: { min_prior_games: number; min_games: number; min_gain: number; min_level: number; scoring: string };
+  base_rate: number;
+  backtest_seasons: number[];
+  auc: number;
+  top_n: number;
+  top_hits: number;
+  espn_auc: number | null;
+  espn_top_hits: number | null;
+  auc_same_players: number | null;
+  top_hits_same_players: number | null;
+  brier: number;
+  brier_base_rate: number;
+}
+
+export interface Breakouts {
+  season: number;
+  players: BreakoutRow[];
+  total: number;
+  on_pace: number;
+  model: BreakoutModelCard | null;
+}

@@ -15,7 +15,8 @@ from ..orm import Activity, PlayerOverrideRow, ProjectionHistory
 from ..realtime import hub
 from ..schemas import OverrideIn
 from ..services.analysis import LeagueAnalysis, get_analysis, invalidate
-from ..services.present import player_detail, player_rows, strength_rows, team_detail, weekly_points
+from ..services.present import (breakout_model_card, breakout_rows, player_detail, player_rows, strength_rows,
+                                team_detail, weekly_points)
 
 router = APIRouter(prefix="/api/leagues/{league_id}", tags=["analysis"])
 
@@ -93,6 +94,17 @@ def players(a: LeagueAnalysis = Depends(analysis),
     reverse = key != "rank"
     rows.sort(key=lambda r: (r.get(key) is None, -(r.get(key) or 0) if reverse else (r.get(key) or 0)))
     return {"players": rows[:limit], "total": len(rows), "as_of": _as_of(a)}
+
+
+@router.get("/breakouts")
+async def breakouts(a: LeagueAnalysis = Depends(analysis), status: str = Query("all", pattern="^(all|fa|rostered)$"),
+                    limit: int = Query(60, ge=1, le=300)):
+    """Players most likely to have a breakout season (fbb/breakout.py), with how this season is going."""
+    rows = await run_in_threadpool(breakout_rows, a)
+    if status != "all":
+        rows = [r for r in rows if (r["fantasy_team_id"] is None) == (status == "fa")]
+    return {"season": a.snapshot.settings.season, "players": rows[:limit], "total": len(rows),
+            "on_pace": sum(1 for r in rows if r["on_pace"]), "model": breakout_model_card(), "as_of": _as_of(a)}
 
 
 @router.get("/players/{player_id}")
