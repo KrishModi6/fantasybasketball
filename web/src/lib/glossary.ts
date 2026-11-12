@@ -7,6 +7,7 @@ export interface GlossaryEntry {
 export const GLOSSARY_SECTIONS: { title: string; keys: TermKey[] }[] = [
   { title: "Players", keys: ["fp_pg", "value_pg", "fp_sd", "season", "last10", "mpg", "ros", "ros_games", "over_repl", "next7", "availability", "rostered", "today"] },
   { title: "Advanced stats", keys: ["xfp", "luck", "team_luck", "xfp_expected"] },
+  { title: "Breakouts", keys: ["breakout", "breakout_chance", "breakout_last", "breakout_line", "breakout_backtest"] },
   { title: "How a projection is built", keys: ["source_weight", "games_pct", "preseason_blend"] },
   { title: "Your team", keys: ["pts_wk_team", "pts_wk_player", "vs_avg", "starts_wk", "confidence", "move_wk", "this_week", "move_ros", "ros_cost", "week_sd"] },
   { title: "Rankings and the season", keys: ["power", "proj_record", "playoffs", "title", "share", "starts_ros", "player_games_wk", "empty_slots", "bench_games", "pts_lost", "stat_diff"] },
@@ -33,6 +34,12 @@ export const GLOSSARY = {
   luck: { term: "Luck", def: "Fantasy points per game this season minus xFP/G. Well above zero means he's scoring more than his chances were worth (a sell-high candidate); well below means less (a buy-low). The projection already expects part of the gap to close." },
   team_luck: { term: "Team luck", def: "Points a week a team's players have been scoring above (+) or below (−) what their chances were worth this season, counting each player's Luck as often as its best lineups will start him. Well above zero means the roster is running hot and likelier to cool off; well below, likelier to pick up. The projection already expects part of the gap to close." },
   xfp_expected: { term: "Expected", def: "A stat as his chances were worth: made shots from the shots he took, assists from his potential assists, rebounds from his rebound chances, steals from deflections and blocks from contested shots." },
+
+  breakout: { term: "Breakout season", def: "A season where a player's fantasy points per game rise by at least 5 over his last season, to at least 20, over at least 30 games (ESPN default points). About one player in nine has one each year." },
+  breakout_chance: { term: "Chance", def: "The chance he has a breakout season, from what was known before it started: his minutes, usage, efficiency, age and years in the league, and what ESPN and the stat baseline project. It doesn't change during the season, and it is the same in every league." },
+  breakout_last: { term: "Last season", def: "His fantasy points per game last season, in ESPN default points: the level he would be breaking out from." },
+  breakout_line: { term: "Line", def: "The fantasy points per game that would make this a breakout season for him: 5 more than last season, and at least 20." },
+  breakout_backtest: { term: "Backtest", def: "How many of the model's 25 most likely players really broke out, on average, in past seasons it had not seen. It ranked breakouts better than ESPN's own projected gains in every season tested, and its chances matched how often players broke out." },
 
   source_weight: { term: "Weight", def: "How much each source counts in his preseason projection. The weights come from testing which mix predicted past seasons best." },
   games_pct: { term: "Games %", def: "The share of his team's games that source expects him to play." },

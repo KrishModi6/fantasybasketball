@@ -16,6 +16,7 @@ import { OverviewPage } from "./pages/OverviewPage";
 const RankingsPage = lazy(() => import("./pages/RankingsPage"));
 const TeamPage = lazy(() => import("./pages/TeamPage"));
 const PlayersPage = lazy(() => import("./pages/PlayersPage"));
+const BreakoutsPage = lazy(() => import("./pages/BreakoutsPage"));
 const TradesPage = lazy(() => import("./pages/TradesPage"));
 const MatchupsPage = lazy(() => import("./pages/MatchupsPage"));
 const LeagueHubPage = lazy(() => import("./pages/LeagueHubPage"));
@@ -64,6 +65,7 @@ export function App() {
               <Route path="team" element={page(<TeamPage />)} />
               <Route path="team/:teamId" element={page(<TeamPage />)} />
               <Route path="players" element={page(<PlayersPage />)} />
+              <Route path="breakouts" element={page(<BreakoutsPage />)} />
               <Route path="trades" element={page(<TradesPage />)} />
               <Route path="matchups" element={page(<MatchupsPage />)} />
               <Route path="assistant" element={page(<AssistantPage />)} />

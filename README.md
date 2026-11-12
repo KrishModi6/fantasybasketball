@@ -110,6 +110,7 @@ The ensemble is 5% more accurate than ESPN per game and 12% more accurate on sea
 server/            FastAPI backend + analytics engine
   fbb/             engine (no web deps): projections, lineup optimiser, strength, trades, valuation
     matchup_sim.py Monte Carlo matchup simulator
+    breakout.py    breakout candidates: who is likely to take a big step up this season
     connectors/    espn, file import, flaim (MCP), demo
     ml/            feature builder + LightGBM wrapper
   app/             API: auth, leagues, invites, analysis, trades, realtime, scheduler, AI assistant
@@ -121,6 +122,7 @@ server/            FastAPI backend + analytics engine
   data/model/      trained model + metrics.json (the backtest above)
   tests/           engine unit tests + end-to-end API test
 web/               React + TypeScript + Vite client (also the desktop UI)
+game-predictor/    a separate program: NBA game win odds, scores and lineup what-ifs (its own README and environment)
 desktop/           Electron shell; starts the bundled engine; installers in desktop/release
 cloudflare/ai-proxy/  Worker + D1 that holds the OpenAI key and meters AI calls for the desktop app, and
                    carries league admins' trade rulings between desktop apps
@@ -152,6 +154,7 @@ cd server
 .venv/Scripts/python -m scripts.build_history     # refresh player seasons + ages from ESPN
 .venv/Scripts/python -m scripts.fetch_game_logs   # game logs for the overdispersion estimate
 .venv/Scripts/python -m scripts.train_model       # backtest, learn blend weights, save model + metrics
+.venv/Scripts/python -m scripts.train_breakout    # breakout model: backtest against ESPN's projected gains, save model + metrics
 .venv/Scripts/python -m scripts.fetch_tracking    # NBA.com shots + tracking (home connection; NBA.com blocks cloud hosts)
 .venv/Scripts/python -m scripts.backtest_xfp      # shot model, xFP weights and established rates -> xfp_model.joblib
 .venv/Scripts/python -m scripts.xfp_report        # this season's luck board: who is running hot or cold

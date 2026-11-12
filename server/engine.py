@@ -70,6 +70,9 @@ def self_test() -> int:
         from app.services.analysis import models
 
         assert models.get() is not None, "projection model failed to load"
+        from fbb.breakout import BreakoutModel
+
+        assert BreakoutModel.load() is not None, "breakout model failed to load"
         print("Courtside engine self-test passed")
         return 0
     except Exception as exc:  # noqa: BLE001 - report any failure as a non-zero exit

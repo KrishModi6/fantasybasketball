@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import type {
   AiStatus,
+  Breakouts,
   ActivityItem,
   League,
   LeagueSummary,
@@ -96,3 +97,10 @@ export function useClaimTeam(id: string) {
 
 export const useAiStatus = () =>
   useQuery({ queryKey: ["ai-status"], queryFn: () => api<AiStatus>("/api/ai/status"), staleTime: 300_000 });
+
+export const useBreakouts = (id: string, status: "all" | "fa" | "rostered" = "all") =>
+  useQuery({
+    queryKey: L(id, "breakouts", status),
+    queryFn: () => api<Breakouts>(`/api/leagues/${id}/breakouts?status=${status}&limit=100`),
+    placeholderData: (prev) => prev,
+  });

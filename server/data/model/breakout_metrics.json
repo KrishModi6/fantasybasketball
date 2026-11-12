@@ -1,0 +1,480 @@
+{
+  "trained_at": "2026-11-10T22:07:24",
+  "definition": {
+    "min_prior_games": 20,
+    "min_games": 30,
+    "min_gain": 5.0,
+    "min_level": 20.0,
+    "scoring": "ESPN default H2H points"
+  },
+  "rows": 3441,
+  "breakouts": 390,
+  "base_rate": 0.11333914559721012,
+  "train_seasons": [
+    2019,
+    2026
+  ],
+  "backtest_seasons": [
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+  ],
+  "excluded_espn_seasons": [
+    2020,
+    2023
+  ],
+  "summary": {
+    "model": {
+      "auc": 0.7522839396559217,
+      "average_precision": 0.28650841612159744,
+      "top_hits": 9.0
+    },
+    "youth": {
+      "auc": 0.6692186151523951,
+      "average_precision": 0.21128020815923954,
+      "top_hits": 6.0,
+      "model_same_players": {
+        "auc": 0.7520994808846995,
+        "average_precision": 0.286561247343994,
+        "top_hits": 9.0
+      },
+      "seasons": [
+        2022,
+        2023,
+        2024,
+        2025,
+        2026
+      ]
+    },
+    "minutes": {
+      "auc": 0.6384292700804651,
+      "average_precision": 0.24795238357127028,
+      "top_hits": 7.0,
+      "model_same_players": {
+        "auc": 0.7509652824117952,
+        "average_precision": 0.33682219756744586,
+        "top_hits": 9.75
+      },
+      "seasons": [
+        2022,
+        2024,
+        2025,
+        2026
+      ]
+    },
+    "sps": {
+      "auc": 0.5996081579626162,
+      "average_precision": 0.1545739616152396,
+      "top_hits": 4.2,
+      "model_same_players": {
+        "auc": 0.7522839396559217,
+        "average_precision": 0.28650841612159744,
+        "top_hits": 9.0
+      },
+      "seasons": [
+        2022,
+        2023,
+        2024,
+        2025,
+        2026
+      ]
+    },
+    "espn": {
+      "auc": 0.656329383070091,
+      "average_precision": 0.26764130921141926,
+      "top_hits": 9.0,
+      "model_same_players": {
+        "auc": 0.7509652824117952,
+        "average_precision": 0.33682219756744586,
+        "top_hits": 9.75
+      },
+      "seasons": [
+        2022,
+        2024,
+        2025,
+        2026
+      ]
+    }
+  },
+  "by_season": {
+    "2022": {
+      "players": 438,
+      "breakouts": 46,
+      "model": {
+        "auc": 0.7702972493345164,
+        "average_precision": 0.2945061459485039,
+        "top_hits": 9,
+        "top_n": 25
+      },
+      "youth": {
+        "auc": 0.6874303232998885,
+        "average_precision": 0.20113500953359686,
+        "top_hits": 4,
+        "top_n": 25,
+        "players": 436,
+        "model_same_players": {
+          "auc": 0.7692307692307693,
+          "average_precision": 0.294517218674166,
+          "top_hits": 9,
+          "top_n": 25
+        }
+      },
+      "minutes": {
+        "auc": 0.6900452488687783,
+        "average_precision": 0.2741000729378256,
+        "top_hits": 8,
+        "top_n": 25,
+        "players": 294,
+        "model_same_players": {
+          "auc": 0.7415786827551534,
+          "average_precision": 0.31558149597538204,
+          "top_hits": 10,
+          "top_n": 25
+        }
+      },
+      "sps": {
+        "auc": 0.5692657497781721,
+        "average_precision": 0.13050650225924917,
+        "top_hits": 3,
+        "top_n": 25,
+        "players": 438,
+        "model_same_players": {
+          "auc": 0.7702972493345164,
+          "average_precision": 0.2945061459485039,
+          "top_hits": 9,
+          "top_n": 25
+        }
+      },
+      "espn": {
+        "auc": 0.6961287078934137,
+        "average_precision": 0.2597558789232066,
+        "top_hits": 10,
+        "top_n": 25,
+        "players": 294,
+        "model_same_players": {
+          "auc": 0.7415786827551534,
+          "average_precision": 0.31558149597538204,
+          "top_hits": 10,
+          "top_n": 25
+        }
+      }
+    },
+    "2023": {
+      "players": 442,
+      "breakouts": 42,
+      "model": {
+        "auc": 0.7279166666666667,
+        "average_precision": 0.19799307800694166,
+        "top_hits": 7,
+        "top_n": 25
+      },
+      "youth": {
+        "auc": 0.663125,
+        "average_precision": 0.1772129289632036,
+        "top_hits": 5,
+        "top_n": 25,
+        "players": 442,
+        "model_same_players": {
+          "auc": 0.7279166666666667,
+          "average_precision": 0.19799307800694166,
+          "top_hits": 7,
+          "top_n": 25
+        }
+      },
+      "sps": {
+        "auc": 0.6260119047619047,
+        "average_precision": 0.13963006481529147,
+        "top_hits": 4,
+        "top_n": 25,
+        "players": 442,
+        "model_same_players": {
+          "auc": 0.7279166666666667,
+          "average_precision": 0.19799307800694166,
+          "top_hits": 7,
+          "top_n": 25
+        }
+      }
+    },
+    "2024": {
+      "players": 431,
+      "breakouts": 46,
+      "model": {
+        "auc": 0.7827780914737437,
+        "average_precision": 0.349783571320445,
+        "top_hits": 11,
+        "top_n": 25
+      },
+      "youth": {
+        "auc": 0.6703274985883682,
+        "average_precision": 0.23140749959949278,
+        "top_hits": 7,
+        "top_n": 25,
+        "players": 431,
+        "model_same_players": {
+          "auc": 0.7827780914737437,
+          "average_precision": 0.349783571320445,
+          "top_hits": 11,
+          "top_n": 25
+        }
+      },
+      "minutes": {
+        "auc": 0.6092239467849224,
+        "average_precision": 0.24968896922871198,
+        "top_hits": 7,
+        "top_n": 25,
+        "players": 316,
+        "model_same_players": {
+          "auc": 0.7846563192904656,
+          "average_precision": 0.3772426652508344,
+          "top_hits": 11,
+          "top_n": 25
+        }
+      },
+      "sps": {
+        "auc": 0.5695087521174478,
+        "average_precision": 0.12656228528878896,
+        "top_hits": 2,
+        "top_n": 25,
+        "players": 431,
+        "model_same_players": {
+          "auc": 0.7827780914737437,
+          "average_precision": 0.349783571320445,
+          "top_hits": 11,
+          "top_n": 25
+        }
+      },
+      "espn": {
+        "auc": 0.618359201773836,
+        "average_precision": 0.27867753004415197,
+        "top_hits": 10,
+        "top_n": 25,
+        "players": 316,
+        "model_same_players": {
+          "auc": 0.7846563192904656,
+          "average_precision": 0.3772426652508344,
+          "top_hits": 11,
+          "top_n": 25
+        }
+      }
+    },
+    "2025": {
+      "players": 440,
+      "breakouts": 46,
+      "model": {
+        "auc": 0.7740564996689473,
+        "average_precision": 0.2466881875069652,
+        "top_hits": 5,
+        "top_n": 25
+      },
+      "youth": {
+        "auc": 0.6710089611682708,
+        "average_precision": 0.19950057417681186,
+        "top_hits": 7,
+        "top_n": 25,
+        "players": 439,
+        "model_same_players": {
+          "auc": 0.7742006859165836,
+          "average_precision": 0.24694127089328588,
+          "top_hits": 5,
+          "top_n": 25
+        }
+      },
+      "minutes": {
+        "auc": 0.5854896822797249,
+        "average_precision": 0.17991373963509236,
+        "top_hits": 4,
+        "top_n": 25,
+        "players": 327,
+        "model_same_players": {
+          "auc": 0.7291188994431707,
+          "average_precision": 0.2548161526585759,
+          "top_hits": 5,
+          "top_n": 25
+        }
+      },
+      "sps": {
+        "auc": 0.57845950121386,
+        "average_precision": 0.14062423631833443,
+        "top_hits": 4,
+        "top_n": 25,
+        "players": 440,
+        "model_same_players": {
+          "auc": 0.7740564996689473,
+          "average_precision": 0.2466881875069652,
+          "top_hits": 5,
+          "top_n": 25
+        }
+      },
+      "espn": {
+        "auc": 0.6148051097281363,
+        "average_precision": 0.21756229072311709,
+        "top_hits": 6,
+        "top_n": 25,
+        "players": 327,
+        "model_same_players": {
+          "auc": 0.7291188994431707,
+          "average_precision": 0.2548161526585759,
+          "top_hits": 5,
+          "top_n": 25
+        }
+      }
+    },
+    "2026": {
+      "players": 456,
+      "breakouts": 57,
+      "model": {
+        "auc": 0.7063711911357341,
+        "average_precision": 0.3435710978251314,
+        "top_hits": 13,
+        "top_n": 25
+      },
+      "youth": {
+        "auc": 0.6542012927054478,
+        "average_precision": 0.24714502852309253,
+        "top_hits": 7,
+        "top_n": 25,
+        "players": 456,
+        "model_same_players": {
+          "auc": 0.7063711911357341,
+          "average_precision": 0.3435710978251314,
+          "top_hits": 13,
+          "top_n": 25
+        }
+      },
+      "minutes": {
+        "auc": 0.668958202388435,
+        "average_precision": 0.2881067524834511,
+        "top_hits": 9,
+        "top_n": 25,
+        "players": 339,
+        "model_same_players": {
+          "auc": 0.748507228158391,
+          "average_precision": 0.39964847638499107,
+          "top_hits": 13,
+          "top_n": 25
+        }
+      },
+      "sps": {
+        "auc": 0.6547948819416963,
+        "average_precision": 0.23554671939453392,
+        "top_hits": 8,
+        "top_n": 25,
+        "players": 456,
+        "model_same_players": {
+          "auc": 0.7063711911357341,
+          "average_precision": 0.3435710978251314,
+          "top_hits": 13,
+          "top_n": 25
+        }
+      },
+      "espn": {
+        "auc": 0.696024512884978,
+        "average_precision": 0.3145695371552013,
+        "top_hits": 10,
+        "top_n": 25,
+        "players": 339,
+        "model_same_players": {
+          "auc": 0.748507228158391,
+          "average_precision": 0.39964847638499107,
+          "top_hits": 13,
+          "top_n": 25
+        }
+      }
+    }
+  },
+  "brier": 0.08749590779598218,
+  "brier_base_rate": 0.09585392608146959,
+  "calibration": [
+    {
+      "range": "0%-5%",
+      "players": 741,
+      "predicted": 0.0329322838656624,
+      "broke_out": 0.0310391363022942
+    },
+    {
+      "range": "5%-10%",
+      "players": 636,
+      "predicted": 0.07179762724435826,
+      "broke_out": 0.08018867924528301
+    },
+    {
+      "range": "10%-20%",
+      "players": 512,
+      "predicted": 0.14204314785624522,
+      "broke_out": 0.13671875
+    },
+    {
+      "range": "20%-35%",
+      "players": 246,
+      "predicted": 0.2579550192992823,
+      "broke_out": 0.26422764227642276
+    },
+    {
+      "range": "35%-100%",
+      "players": 72,
+      "predicted": 0.4241531501089837,
+      "broke_out": 0.3888888888888889
+    }
+  ],
+  "platt": [
+    0.9303421094178717,
+    -0.20380437710674698
+  ],
+  "feature_importance": [
+    [
+      "espn_gain",
+      0.14606702783980174
+    ],
+    [
+      "l1_fp_pg",
+      0.11659973893427837
+    ],
+    [
+      "age",
+      0.11025717575412262
+    ],
+    [
+      "espn_mpg_gain",
+      0.07195958488689058
+    ],
+    [
+      "l1_gp_frac",
+      0.056786839440832536
+    ],
+    [
+      "sps_gain",
+      0.050820052321801465
+    ],
+    [
+      "years",
+      0.04028489377204449
+    ],
+    [
+      "l2_usage",
+      0.03328815253847308
+    ],
+    [
+      "l1_fp36",
+      0.028709838445157735
+    ],
+    [
+      "espn_gp_frac",
+      0.028642694724700397
+    ]
+  ],
+  "lgb_params": {
+    "objective": "binary",
+    "learning_rate": 0.03,
+    "num_leaves": 6,
+    "min_child_samples": 40,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.7,
+    "reg_lambda": 5.0,
+    "verbose": -1,
+    "seed": 7,
+    "num_boost_round": 220
+  }
+}

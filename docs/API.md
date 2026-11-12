@@ -51,6 +51,7 @@ Base URL: your server, e.g. `http://localhost:8000`. Interactive docs (Swagger U
 | GET | `/api/leagues/{id}/players?status=all\|fa\|rostered&pos=&q=&team_id=&sort=&limit=` | Player table |
 | GET | `/api/leagues/{id}/players/{player_id}` | Full projection breakdown: sources and weights, adjustments, SHAP factors, game log, seasons, news, daily trend, override |
 | PUT / DELETE | `/api/leagues/{id}/players/{player_id}/override` | `{minutes_pct ∈ [−0.15, 0.15], out_games?, note}` (league-wide, logged) |
+| GET | `/api/leagues/{id}/breakouts?status=all\|fa\|rostered&limit=` | Breakout candidates, most likely first → `{season, players, total, on_pace, model}`. Each player has `probability` (set before the season), `last_fp_pg`, `breakout_line`, this season's `season_fp_pg` and `games_played`, `on_pace`, Courtside's `proj_fp_pg` and `reasons` (`[{factor, effect, direction}]`). `model` has the breakout definition and the backtest |
 | GET | `/api/leagues/{id}/news` | ESPN headlines with linked players |
 | GET | `/api/leagues/{id}/activity` | League feed |
 

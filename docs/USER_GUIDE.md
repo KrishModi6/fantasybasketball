@@ -44,6 +44,8 @@ Courtside reopens where you left off. The back arrow (or your mouse's back butto
 4. what moved the ML model;
 5. the projection per game next to his actual averages this season.
 
+**Breakouts.** The players most likely to have a breakout season: fantasy points per game up by 5 or more over last season, to at least 20. Each has a chance set before the season, the kinds of evidence behind it (minutes, usage, efficiency, age and experience, ESPN's projection), the FP/G that would make it a breakout for him (his line), and how this season is going. A player past his line over 8 or more games is marked **on pace**. Filter to free agents to find candidates you can still add.
+
 **Matchups.** Pick a week and see every scheduled matchup with a quick win estimate, or pair any two teams. The selected matchup is simulated 10,000 times, game by game, and shows:
 - each team's chance to win, with its projected score and the range it lands in 80% of the time;
 - the distribution of scores and of the winning margin;

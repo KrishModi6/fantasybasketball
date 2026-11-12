@@ -31,6 +31,7 @@ export function leagueTabs(base: string, isAdmin: boolean): { to: string; label:
     { to: `${base}/team`, label: "Team" },
     { to: `${base}/matchups`, label: "Matchups" },
     { to: `${base}/players`, label: "Players" },
+    { to: `${base}/breakouts`, label: "Breakouts" },
     { to: `${base}/trades`, label: "Trades" },
     { to: `${base}/assistant`, label: "Assistant" },
     { to: `${base}/league`, label: "League" },
