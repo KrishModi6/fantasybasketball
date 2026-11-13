@@ -1,6 +1,11 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.11
+## What's new in 0.5.12
+
+- **The player panel's buttons are no longer under the window buttons.** On Windows, the panel that opens when you click a player started at the very top of the window, so **What to ask for**, **What to offer**, **Ask AI** and the panel's close button sat under the window's minimize, maximize and close buttons, where they were covered and couldn't be clicked. The panel now starts just below the top bar.
+- **Dialogs stay below the top bar too.** A tall dialog, such as What's new on a small or zoomed-in window, now stops short of the top bar.
+
+## In 0.5.11
 
 - **Breakouts.** A new **Breakouts** tab lists the players most likely to have a breakout season: fantasy points per game up by 5 or more over last season, to at least 20. Each player has a chance set before the season, the evidence behind it (minutes, usage, efficiency, age and experience, ESPN's projection), the FP/G that would make it a breakout for him, and how his season is going. A player already past that line over 8 or more games is marked **on pace**. Filter to free agents to find the ones you can still add. It was checked on five past seasons it hadn't seen: it ranked breakouts better than ESPN's own projected gains in all four seasons that have an ESPN projection to compare with, and players it gave a 20–35% chance broke out 26% of the time.
 - **Playoff and title odds keep the points already scored.** The season simulation gives every team a good or a bad run for the rest of the season, and it was applying that run to points already on the board. Late in a week, or on a Monday before ESPN posts the results, a team that had finished a week 100 points ahead still lost it in 30% of the simulated seasons. Now only the points still to be played can change. Projected records, playoff and title odds, and a trade's odds before and after all come from that simulation.

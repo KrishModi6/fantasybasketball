@@ -239,6 +239,20 @@ th.n {
 :root[data-platform="darwin"] .topbar {
   padding-left: 80px;
 }
+/* Nothing else goes in the title-bar strip. The window buttons are drawn over its right end, and the whole strip
+   drags the window whatever is shown on top of it, so a button there is hidden or can't be clicked. The player
+   drawer used to start at the top of the window, which put "What to ask for" and its close button under the
+   window buttons. It now starts below the bar, and a tall dialog stops short of it. */
+:root[data-platform] .drawer {
+  top: var(--topbar);
+}
+:root[data-platform] .dialog {
+  max-height: calc(100vh - 2 * var(--topbar));
+}
+/* Panels over the page take clicks wherever they reach, even over the strip. */
+:root[data-platform] :is(.drawer, .dialog, .update-popup, .toasts) {
+  -webkit-app-region: no-drag;
+}
 .topbar .label {
   color: var(--muted);
 }
