@@ -30,8 +30,8 @@ beforeEach(() => api.mockReset());
 afterEach(cleanup);
 
 describe("the league vote", () => {
-  it("shows every trade with the count, and anyone can vote", async () => {
-    serve({ reach: "league", trades: [trade(), trade({ key: "k2", status: "poll", on_espn: false, votes: { open: true, fair: 0, unfair: 0, mine: null } })] });
+  it("shows every trade that went through with the count, and anyone can vote", async () => {
+    serve({ reach: "league", trades: [trade(), trade({ key: "k2", on_espn: false, votes: { open: true, fair: 0, unfair: 0, mine: null } })] });
     show(<LeagueVotes />);
     expect(await screen.findByText("3 fair · 1 not fair")).toBeInTheDocument();
     expect(screen.getByText("No votes yet")).toBeInTheDocument();

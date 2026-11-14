@@ -160,9 +160,8 @@ PRESETS: dict[str, str] = {
                 "does it cost me per week, and who on waivers best covers it?",
     "recap": "Write fun, punchy power-rankings blurbs for every team in the league (one or two sentences each), based on the "
              "rankings, records and playoff odds. Keep it friendly trash talk.",
-    "trade_review": "Analyze the league's trades: the ones that went through and the ones up for a league vote. For each, "
-                    "say who wins by Courtside's numbers and by how much, how the league has voted so far, and whether "
-                    "I should vote fair or not fair and why. Finish with the one trade that most changes the title race.",
+    "trade_review": "Analyze the trades that went through in my league. For each, say who wins by Courtside's numbers "
+                    "and by how much, how the league has voted so far, and whether I should vote fair or not fair and why. Finish with the one trade that most changes the title race.",
     "outlook": "Give me my team's outlook for the rest of the season: where I rank, my playoff and title odds, my biggest "
                "strengths and weaknesses by stat, and the single most valuable move I could make.",
 }

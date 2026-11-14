@@ -1,9 +1,9 @@
 """AWS Lambda entry point for the daily check (scripts/daily_sims.py; docs/AWS.md, section 4).
 
 EventBridge Scheduler starts the function courtside-daily-prep at 7:30 AM and 6:30 PM US Eastern (the
-evening run repeats the morning's report, or finishes it if the morning run failed). It does what
-``python -m scripts.daily_sims`` does at home: rebuilds this season's projections from ESPN, sends the
-leagues to courtside-sims, waits for them and has it write the report. ESPN answers requests from AWS;
+evening run scores the leagues the morning added, and adds more). It does what
+``python -m scripts.daily_sims`` does at home: rebuilds this season's projections from ESPN, has
+courtside-sims score the pool of leagues played so far, and adds a batch of new leagues to it. ESPN answers requests from AWS;
 stats.nba.com doesn't, which is why the xFP tracking feed (section 1b) stays on the home PC.
 
 The package is read-only, so fbb's cache (FBB_CACHE_DIR) and the inputs go to /tmp. The past seasons'
@@ -11,7 +11,7 @@ game logs that prepare() reads (the absence table, last season's closing games) 
 live in s3://<bucket>/sims/cache/ rather than being fetched from ESPN on every run. This season's logs
 are saved there after each run, so next season finds them.
 
-Event: {} for this season, or {"season": 2027, "leagues": 256}
+Event: {} for this season, or {"season": 2027, "leagues": 200} to add that many leagues instead of what the budget allows
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def handler(event, context):
             except s3.exceptions.ClientError:  # not saved yet: prepare() fetches it from ESPN
                 uncached.append(name)
     deadline = time.time() + context.get_remaining_time_in_millis() / 1000 - MARGIN
-    out = D.check(boto3.Session(), BUCKET, season, int(event.get("leagues", D.LEAGUES)), deadline)
+    out = D.check(boto3.Session(), BUCKET, season, event.get("leagues") and int(event["leagues"]), deadline)
     for name in (*uncached, current):
         if (CACHE_DIR / name).exists():
             s3.upload_file(str(CACHE_DIR / name), BUCKET, CACHE + name)

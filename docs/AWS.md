@@ -74,7 +74,8 @@ versions appear only when the data really changed.
 | C. CloudTrail data events | ≈ $0.00 | Needs a trail plus its own bucket. Best "who did what" detail. |
 | None | $0 | CloudTrail event history still records bucket setting changes for 90 days at no cost. |
 
-**Cost budget** (created 2026-10-30): `courtside-monthly`, $5 a month of real usage (credits and
+**Cost budget** (created 2026-10-30): `courtside-monthly`, $5 a month of real usage (the daily check
+spends about $20 a month since 2026-11-14, so raise it to $25 or its alerts fire every month; credits and
 refunds excluded, so it doesn't sit at $0), emailing the project owner when actual spend passes 50%
 and 100% and when the month is forecast to pass 100%. Budgets that only alert are free. Created
 through the API, so it may not have counted toward the "set up a budget" $20 credit activity.
@@ -294,24 +295,33 @@ and AWS Batch or Fargate would add a container image for no gain.
 checks the app as shipped against this season's finished matchup weeks:
 1. It rebuilds this season's projections week by week from ESPN's games so far, the same way as for
    past seasons, and uploads them to `sims/inputs/inputs_<season>.json.gz`.
-2. It sends 128 invocations of 2 leagues each to `courtside-sims` (256 synthetic leagues since
-   2026-11-14, 32 before; settings
-   `"app"`) and waits for their results under `sims/results/daily-<season>-<day>/`.
-3. `{"action": "report"}` scores them and writes `sims/daily/<season>/<day>.json` and `latest.json`:
-   Brier score, log loss and calibration of the weekly win odds, how often the 80% ranges held, and
-   the bias of projected scores, overall and week by week.
+2. `{"action": "report"}` to `courtside-sims` scores every synthetic league played so far through
+   those weeks (the pool, `sims/results/daily-<season>-w<weeks>/`, settings `"app"`) and writes
+   `sims/daily/<season>/<day>.json` and `latest.json`: Brier score, log loss and calibration of the
+   weekly win odds, how often the 80% ranges held, and the bias of projected scores, overall and week
+   by week.
+3. It adds a batch of new leagues to the pool: asynchronous invocations of 2 leagues each, numbered on
+   from the last league there. They run in the background, Lambda queueing what it can't run at once,
+   and the next run's report includes them.
 4. The function's log (`/aws/lambda/courtside-daily-prep`) ends with one line of headline numbers.
 
-Before the first week ends there is nothing to score, so it stops after step 1. The numbers change
-only when a week ends; on the other days it repeats the same weeks. Playoff odds aren't checked
-until the season is over. `python -m scripts.daily_sims` still runs the same check from a PC, signed
-in with `aws login`.
+The batch is sized to a budget (since 2026-11-14): `BUDGET_GBS` = 25,000 GB-seconds a run, divided by
+what a league costs, `GBS_PER_LEAGUE_WEEK` per finished week (measured; see Cost), so about 2,600
+leagues a run after week 1 and about 140 by week 19, never fewer than 32. Each league simulates every
+matchup with 10,000 draws, as the app does (the study uses 2,000). A pool stops growing at 20,000
+leagues, which keeps its report well inside 15 minutes.
 
-The 6:30 PM run uses the same day's run name, so on a normal day it finds the morning's leagues already
-done, skips them and writes the same report again (about 40 s, most of it step 1). It's the same-day
-second chance: if the morning run failed, the evening one finishes the leagues it left. Running the
-leagues again wouldn't give new numbers: the seeds are fixed, and a finished week's projections and
-box scores don't change.
+When a week ends the weeks change, so a new pool starts: that run plays the first 64 leagues, waits for
+them, reports, then sends the rest of its batch. Before the first week ends there is nothing to score,
+so it stops after step 1. Playoff odds aren't checked until the season is over. `python -m
+scripts.daily_sims` still runs the same check from a PC, signed in with `aws login`.
+
+Why a pool: a finished week's projections and box scores don't change and each league's seed is fixed,
+so running the same leagues again gives the same numbers. Each run adds leagues no run has played, with
+different drafts and rosters, so the report gets steadier through the week. It measures the app more
+precisely; it doesn't change the app's odds. The leagues share the same real box scores, so more of
+them smooth out the luck of drafts, not of the real weeks. A league that fails is left out; the next run
+numbers on from the last league that finished.
 
 **Why it can run on AWS.** Until 2026-11-01 the PC task in 1b ran it after the tracking feed, because
 step 1 was assumed to need the home network. It doesn't: it reads only ESPN, and ESPN answers requests
@@ -331,8 +341,9 @@ arm64.
   in `sims/cache/`. This season's logs are saved there after every run, so next season finds last
   season's.
 - **Timing**: about 40 s on 2026-11-01 (week 1; prep about 25 s of it), at most 431 MB used. A full
-  season's prep took 14 s on the PC. Waiting for the leagues grows with the weeks; everything has to
-  fit in the function's 15 minutes, and the leagues get what's left of them minus 90 s for the report.
+  season's prep took 14 s on the PC. Only a new pool's first 64 leagues are waited for; they get what's
+  left of the function's 15 minutes minus 90 s for the report. The rest of a batch, about 16 minutes of
+  work on 9 of the project's 10 slots, runs after the function has finished.
 - **Retries**: if Lambda is busy (the project runs at most 10 functions at once, and this one holds
   one of them) the calls back off and retry. If a run fails, Lambda runs it once more a minute or two
   later; leagues already done are skipped. If the schedule can't start the function, Scheduler
@@ -367,12 +378,13 @@ about 218 s at 3,008 MB) costs about $0.0085. Everything through 2026-10-31 took
 129,000 GB-seconds: $1.72 at list price. That covers the canary, the pilots, the 192-league study run
 `r1`, its merge and the first daily run. Lambda's always-free allowance is 400,000 GB-seconds a month,
 so the bill may show less, if this plan gets that allowance. The daily check runs one setting with no
-playoff odds: the first one (week 1, 32 leagues) took about 40 s end to end. With 32 leagues an invocation
-took about 3.5 s in week 3, and the whole first two weeks of November cost 8 cents, so on 2026-11-14 the
-check went to 256 leagues: about 30 GB-seconds a day per finished week, at most 10,000 a day (about
-$0.13) by the end of the season, and about 6 of the function's 15 minutes. The leagues share the same real
-box scores, so more of them smooth out the luck of drafts and rosters, not of the real weeks. Expect under $4 a month by
-the end of the season. `courtside-daily-prep` adds 40 s to a few minutes at 1 GB a morning plus
+playoff odds. At 32 leagues and 2,000 draws it cost 8 cents for the first two weeks of November, so
+on 2026-11-14 it moved to the budget above: 2 runs a day of about 25,000 GB-seconds, about 50,000 a day,
+about $0.67 a day and $20 a month at list price (about 1.5 million GB-seconds a month, so the free
+allowance, if this plan gets it, covers about a quarter). The first runs after the change are the
+measurement of `GBS_PER_LEAGUE_WEEK`: if a run's REPORT lines in `/aws/lambda/courtside-sims` add up to
+much more or less than 25,000 GB-seconds, change it and redeploy `courtside-daily-prep`. To spend less,
+lower `BUDGET_GBS`; to stop the growth, set it to 0 (each run then adds 32 leagues). `courtside-daily-prep` adds 40 s to a few minutes at 1 GB a morning plus
 about 40 s an evening, about 2,000-6,000 GB-seconds a month (under $0.10). Scheduler's first 14 million invocations a month are
 free. S3 storage and requests add about a cent.
 

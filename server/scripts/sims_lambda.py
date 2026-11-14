@@ -7,7 +7,7 @@ skipped, so an invocation can safely be sent again.
 
 Event: {"run": "r1", "tasks": [[2026, 0, 0], [2026, 0, 1]]}  (season, league, config group)
        {"run": "r1", "action": "merge"}  -> one file with every league of the run
-       {"run": "daily-2027-2026-11-01", "action": "report", "season": 2027, "day": "2026-11-01"}
+       {"run": "daily-2027-w3", "action": "report", "season": 2027, "day": "2026-11-01"}
            -> the daily check's summary, sims/daily/<season>/<day>.json and latest.json (scripts/daily_sims.py)
 
 The simulator never touches the app's xFP model or ESPN client, so LightGBM, joblib and httpx aren't in
@@ -63,10 +63,15 @@ def _exists(s3, key: str) -> bool:
 
 
 def _results(s3, run: str) -> list[dict]:
+    """Every league of a run. The daily check's pool reaches thousands of files, so they're read 32 at a time."""
+    from concurrent.futures import ThreadPoolExecutor
+
     keys = []
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix=f"{PREFIX}results/{run}/"):
         keys.extend(o["Key"] for o in page.get("Contents", []))
-    return [json.loads(gzip.decompress(s3.get_object(Bucket=BUCKET, Key=k)["Body"].read())) for k in sorted(keys)]
+    read = lambda k: json.loads(gzip.decompress(s3.get_object(Bucket=BUCKET, Key=k)["Body"].read()))  # noqa: E731
+    with ThreadPoolExecutor(32) as pool:
+        return list(pool.map(read, sorted(keys)))
 
 
 def _merge(s3, run: str) -> dict:

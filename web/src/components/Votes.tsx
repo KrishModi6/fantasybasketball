@@ -14,10 +14,7 @@ const REACH: Record<TradeVotes["reach"], string> = {
 };
 
 function Status({ t }: { t: VoteTrade }) {
-  if (t.status === "done") return <Tag tone="up">{t.on_espn ? "Happened on ESPN" : "Happened"}</Tag>;
-  if (t.status === "stale") return <Tag tone="warn">{t.on_espn ? "Happened on ESPN" : "No longer possible"}</Tag>;
-  if (t.status === "open") return <Tag>On the board</Tag>;
-  return <Tag>Proposed</Tag>;
+  return <Tag tone="up">{t.on_espn ? "Happened on ESPN" : "Happened"}</Tag>;
 }
 
 /** The league's count, in words: "3 fair · 1 not fair". */
@@ -25,7 +22,7 @@ export function tally(v: VoteTrade["votes"]): string {
   return v.fair + v.unfair === 0 ? "No votes yet" : `${v.fair} fair · ${v.unfair} not fair`;
 }
 
-/** Every trade the league can vote on. Anyone can vote; a vote is an opinion and changes none of Courtside's numbers. */
+/** The trades that went through, for everyone to vote on. A vote is an opinion and changes none of Courtside's numbers. */
 export function LeagueVotes() {
   const { league } = useLeagueCtx();
   const qc = useQueryClient();
@@ -42,7 +39,7 @@ export function LeagueVotes() {
   });
   if (!data?.trades?.length) return null;
   return (
-    <Panel title="League vote" note={`Is it fair? Vote on any trade here, or put one to a vote from the Analyze tab. ${REACH[data.reach]} Votes don't change Courtside's numbers, and they can't block or undo anything on ESPN.`}>
+    <Panel title="League vote" note={`Was it fair? Vote on every trade that went through. ${REACH[data.reach]} Votes don't change Courtside's numbers, and they can't block or undo anything on ESPN.`}>
       <ul className="list">
         {data.trades.map((t) => (
           <li key={t.key}>
@@ -66,9 +63,6 @@ export function LeagueVotes() {
               <details className="small">
                 <summary>Courtside's numbers ({count(t.numbers.sides.length, "team")})</summary>
                 {t.numbers.completed && <UndoNote />}
-                {t.numbers.adjusted && t.status === "poll" && (
-                  <p className="small muted">These numbers include projection changes made in the app that opened this vote, so they can differ from what yours shows.</p>
-                )}
                 <NumbersTable numbers={t.numbers} />
                 <p className="small muted">{t.numbers.fairness.label && <strong>{t.numbers.fairness.label}. </strong>}{t.numbers.summary}</p>
               </details>

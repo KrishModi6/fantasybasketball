@@ -1,8 +1,8 @@
-"""League votes on trades: anyone in the league can put a trade to a vote, and everyone votes fair or not fair.
+"""League votes on trades: everyone in the league votes fair or not fair on trades that went through.
 
 A vote is opinion, like the admin's ruling: it never changes a trade's evaluation, verdict or fairness label, and
-nothing is written to ESPN. What can be voted on is what the admin can rule on (board posts and real trades, see
-services.rulings), plus any trade someone analyzed and put to a vote.
+nothing is written to ESPN. Only completed trades can be voted on: real trades a refresh found, and board posts
+that have since happened (services.rulings). Proposals and ideas can't, so a vote is always about a real deal.
 
 On a shared server every member's vote is a row in trade_votes. Desktop apps each have their own database, so
 there the votes go through the Cloudflare Worker, as rulings do (services.rulings_share): each copy holds a random
@@ -21,12 +21,12 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..orm import Activity, League, TradePoll, TradeVote, UserSettings
+from ..orm import League, TradePoll, TradeVote, UserSettings
 from ..realtime import hub
 from ..security import decrypt_json, encrypt_json
 from . import rulings_share as share
 from .analysis import LeagueAnalysis
-from .rulings import TradeNotFound, _candidates, _score, describe, iso, league_rulings, numbers, review_queue, ruling_out
+from .rulings import TradeNotFound, _candidates, _score, describe, numbers, review_queue
 
 log = logging.getLogger(__name__)
 PULL_EVERY_S = 60.0
@@ -90,15 +90,26 @@ def _worker(db: Session, league: League, user_id: str, method: str, key: str = "
     return r.json()
 
 
+class NotCompleted(ValueError):
+    """The trade is on the board but hasn't gone through, so it can't be voted on."""
+
+
+def completed(row: dict) -> bool:
+    """A trade that went through: found on ESPN, or a board post that has since happened."""
+    return bool(row["on_espn"]) or row["status"] == "done"
+
+
 def resolve(db: Session, a: LeagueAnalysis, league_id: str, key: str) -> tuple[dict, dict | None]:
-    """What a trade is and Courtside's numbers for it, for a trade that can be voted on."""
-    poll = _polls(db, league_id).get(key)
-    if poll is not None:
-        return poll.trade, poll.numbers
+    """What a trade is and Courtside's numbers for it, for a completed trade."""
     item = _candidates(db, league_id).get(key)
     if item is None:
         raise TradeNotFound(key)
-    ev = _score(a, item)[0]
+    ev, status, _ = _score(a, item)
+    if not completed({"on_espn": item["on_espn"], "status": status}):
+        raise NotCompleted(key)
+    poll = _polls(db, league_id).get(key)
+    if poll is not None:
+        return poll.trade, poll.numbers
     return describe(a.snapshot, item["sends"], ev), numbers(ev)
 
 
@@ -127,7 +138,7 @@ def withdraw(db: Session, league: League, user_id: str, key: str) -> None:
 
 
 def pull(db: Session, league: League, user_id: str) -> bool:
-    """Reads the league's polls and tallies into this copy. Returns whether a poll arrived that it didn't have."""
+    """Reads the league's tallies into this copy. Returns whether a poll arrived that it didn't have."""
     if share.reach(league) != "league":
         return False
     data = _worker(db, league, user_id, "GET")
@@ -136,8 +147,6 @@ def pull(db: Session, league: League, user_id: str) -> bool:
     for item in data["polls"]:
         if _take(db, league, user_id, item, polls):
             arrived = True
-            db.add(Activity(league_id=league.id, kind="vote", payload={"key": item["key"]},
-                            message=f"A trade is up for a league vote: {item['trade'].get('text', '')}"[:500]))
     db.commit()
     if arrived:
         hub.publish(league.id, {"type": "trade_voted"})
@@ -175,19 +184,12 @@ def poll_out(key: str, tallies: dict[str, tuple[int, int]], mine: dict[str, str]
 
 
 def vote_list(db: Session, a: LeagueAnalysis, league: League, user_id: str) -> list[dict]:
-    """Every trade the league can vote on, newest first, with Courtside's numbers, the tally and this member's vote."""
+    """Every completed trade, newest first, with Courtside's numbers, the league's tally and this member's vote."""
     polls = _polls(db, league.id)
     tallies = _tallies(db, league, polls)
     mine = {v.trade_key: v.vote for v in db.scalars(select(TradeVote).where(
         TradeVote.league_id == league.id, TradeVote.user_id == user_id)).all()}
-    rows = review_queue(db, a, league.id)
-    seen = {r["key"] for r in rows}
-    rulings = {r.trade_key: r for r in league_rulings(db, league.id)}
-    for key, p in polls.items():
-        if key not in seen:  # put to a vote from someone's trade analyzer, or its post or feed entry has gone
-            rows.append({"key": key, "at": iso(p.created_at), "on_espn": False, "post": None, "status": "poll",
-                         "status_note": None, "trade": p.trade, "numbers": p.numbers,
-                         "ruling": ruling_out(rulings[key]) if key in rulings else None})
+    rows = [r for r in review_queue(db, a, league.id) if completed(r)]
     for r in rows:
         r["votes"] = poll_out(r["key"], tallies, mine)
         if r["numbers"] is None and r["key"] in polls:
