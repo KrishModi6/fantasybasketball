@@ -1,6 +1,13 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.5.12
+## What's new in 0.6.0
+
+- **NBA games on Overview.** A new **NBA games** panel shows today's games with the team Courtside's game model picks, its chance to win, the predicted score, the main reason behind the pick, and who is out. When tomorrow has games too, a button switches to them. Once a game starts the panel shows the score, and a finished game says whether the pick was right.
+- **How good the picks are.** The model is separate from the fantasy projections. It uses team strength, season and recent efficiency, rest, home court and who is available. On 7,393 past games it hadn't seen, it picked the winner 67% of the time, against 65% for team strength ratings alone and 55% for always taking the home team. It hasn't been compared with betting lines and isn't meant for betting.
+- **The odds are from before tip-off.** Predictions are updated four times a day, at about 10 a.m., 2 p.m., 5 p.m. and 8 p.m. Eastern (an hour later once the clocks change in March), with ESPN's injury report at that time: players listed as out are counted out, day-to-day players are counted as playing. A game that has started keeps its last prediction from before it began.
+- **It needs the internet.** The predictions come from a small file Courtside publishes, so the panel is hidden when that file can't be read or there are no games.
+
+## In 0.5.12
 
 - **The player panel's buttons are no longer under the window buttons.** On Windows, the panel that opens when you click a player started at the very top of the window, so **What to ask for**, **What to offer**, **Ask AI** and the panel's close button sat under the window's minimize, maximize and close buttons, where they were covered and couldn't be clicked. The panel now starts just below the top bar.
 - **Dialogs stay below the top bar too.** A tall dialog, such as What's new on a small or zoomed-in window, now stops short of the top bar.

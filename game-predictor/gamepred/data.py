@@ -157,7 +157,10 @@ def scoreboard(day: date) -> list[dict]:
         if not all(1 <= i <= 30 for i in ids.values()):
             continue  # an All-Star game
         state = ((e.get("status") or {}).get("type") or {}).get("state")
+        points = {k: int(c["score"]) if state in ("in", "post") and str(c.get("score") or "").isdigit() else None
+                  for k, c in sides.items()}
         games.append({"GAME_ID": str(e["id"]), "GAME_DATE": day.isoformat(), "TIP": e.get("date"),
+                      "HOME_PTS": points["home"], "AWAY_PTS": points["away"],
                       "HOME": sides["home"]["team"]["abbreviation"], "AWAY": sides["away"]["team"]["abbreviation"],
                       "HOME_ID": ids["home"], "AWAY_ID": ids["away"], "NEUTRAL": bool(comp.get("neutralSite")),
                       "STATUS": {"pre": "scheduled", "in": "live", "post": "final"}.get(state, "scheduled")})

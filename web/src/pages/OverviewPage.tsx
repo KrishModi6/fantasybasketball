@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { GamesPanel } from "../components/GamesPanel";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Notice, PageHead, Panel, PlayerName, Term } from "../components/ui";
 import { count, fmt0, pct, powerMix, projRecord, projRecordNote, record, relTime, shortDate } from "../lib/format";
@@ -74,6 +75,7 @@ export function OverviewPage() {
             {myTeamId != null && <QuickMoves teamId={myTeamId} />}
           </div>
           <div className="stack">
+            <GamesPanel />
             <ActivityPanel />
             <NewsPanel />
           </div>

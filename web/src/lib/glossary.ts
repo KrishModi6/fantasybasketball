@@ -7,6 +7,7 @@ export interface GlossaryEntry {
 export const GLOSSARY_SECTIONS: { title: string; keys: TermKey[] }[] = [
   { title: "Players", keys: ["fp_pg", "value_pg", "fp_sd", "season", "last10", "mpg", "ros", "ros_games", "over_repl", "next7", "availability", "rostered", "today"] },
   { title: "Advanced stats", keys: ["xfp", "luck", "team_luck", "xfp_expected"] },
+  { title: "NBA games", keys: ["game_model"] },
   { title: "Breakouts", keys: ["breakout", "breakout_chance", "breakout_last", "breakout_line", "breakout_backtest"] },
   { title: "How a projection is built", keys: ["source_weight", "games_pct", "preseason_blend"] },
   { title: "Your team", keys: ["pts_wk_team", "pts_wk_player", "vs_avg", "starts_wk", "confidence", "move_wk", "this_week", "move_ros", "ros_cost", "week_sd"] },
@@ -34,6 +35,8 @@ export const GLOSSARY = {
   luck: { term: "Luck", def: "Fantasy points per game this season minus xFP/G. Well above zero means he's scoring more than his chances were worth (a sell-high candidate); well below means less (a buy-low). The projection already expects part of the gap to close." },
   team_luck: { term: "Team luck", def: "Points a week a team's players have been scoring above (+) or below (−) what their chances were worth this season, counting each player's Luck as often as its best lineups will start him. Well above zero means the roster is running hot and likelier to cool off; well below, likelier to pick up. The projection already expects part of the gap to close." },
   xfp_expected: { term: "Expected", def: "A stat as his chances were worth: made shots from the shots he took, assists from his potential assists, rebounds from his rebound chances, steals from deflections and blocks from contested shots." },
+
+  game_model: { term: "Game model", def: "Courtside's forecast for real NBA games, apart from fantasy. It weighs each team's strength over the last few seasons, its scoring and defence this season, recent form, rest, home court, and who is out, and gives a chance to win and a predicted score. In testing on seasons it hadn't seen it picked about two winners in three, a little better than team ratings alone. It isn't meant for betting." },
 
   breakout: { term: "Breakout season", def: "A season where a player's fantasy points per game rise by at least 5 over his last season, to at least 20, over at least 30 games (ESPN default points). About one player in nine has one each year." },
   breakout_chance: { term: "Chance", def: "The chance he has a breakout season, from what was known before it started: his minutes, usage, efficiency, age and years in the league, and what ESPN and the stat baseline project. It doesn't change during the season, and it is the same in every league." },

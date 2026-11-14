@@ -7,6 +7,7 @@
   python -m gamepred predict --home BOS --away LAL
   python -m gamepred predict --home BOS --away LAL --out "Jayson Tatum" --back "Kristaps Porzingis"
   python -m gamepred lineup BOS                 a team's rotation and each player's value
+  python -m gamepred publish out.json           today's and tomorrow's predictions as one file (for Courtside)
 
 Add --json to predict for the full numbers.
 """
@@ -17,8 +18,9 @@ import argparse
 import json
 import sys
 from datetime import date
+from pathlib import Path
 
-from . import data, model
+from . import data, model, publish
 from .features import build
 from .predict import current_state, predict_day, predict_game
 
@@ -132,6 +134,20 @@ def cmd_predict(args) -> int:
     return 0
 
 
+def cmd_publish(args) -> int:
+    bundle = model.load()
+    state = current_state(refresh=True)
+    first = date.fromisoformat(args.date) if args.date else None
+    # A game that has started keeps the prediction published before it did (the file written last time).
+    previous = publish.read(Path(args.previous or args.out))
+    predictions = publish.build(bundle, state, first, args.days, sims=args.sims, previous=previous)
+    publish.write(Path(args.out), predictions)
+    games = sum(len(d["games"]) for d in predictions["days"])
+    _say(f"{games} games over {len(predictions['days'])} days, results through {predictions['data_through']}"
+         f"{'' if predictions['injuries'] else ', no injury report'} -> {args.out}")
+    return 0
+
+
 def cmd_lineup(args) -> int:
     state = current_state(refresh=args.refresh)
     try:
@@ -169,6 +185,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--refresh", action="store_true", help="fetch the latest results first")
     p.add_argument("--json", action="store_true")
     p.set_defaults(run=cmd_predict)
+    pb = sub.add_parser("publish", help="write today's and tomorrow's predictions to a file")
+    pb.add_argument("out")
+    pb.add_argument("--date", help="first day, YYYY-MM-DD (today by default)")
+    pb.add_argument("--days", type=int, default=2)
+    pb.add_argument("--sims", type=int, default=10_000)
+    pb.add_argument("--previous", help="the file published last time, when it isn't the one being written")
+    pb.set_defaults(run=cmd_publish)
     ln = sub.add_parser("lineup", help="a team's rotation and player values")
     ln.add_argument("team")
     ln.add_argument("--refresh", action="store_true")

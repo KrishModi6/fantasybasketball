@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     ai_model: str = "gpt-6-luna"
     ai_max_rounds: int = 6
     ai_user_hourly_limit: int = 100  # questions per user per hour on the shared key or proxy (own keys: no limit)
+    # NBA game predictions for the Overview page: the file .github/workflows/game-predictions.yml publishes.
+    # Empty turns the panel off.
+    games_url: str = "https://raw.githubusercontent.com/KrishModi6/fantasybasketball/game-predictions/predictions.json"
     # Desktop app: a single local user signs in automatically (the engine only listens on 127.0.0.1).
     local_mode: bool = False
 

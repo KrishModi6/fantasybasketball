@@ -602,3 +602,33 @@ export interface Breakouts {
   on_pace: number;
   model: BreakoutModelCard | null;
 }
+
+export interface NbaGame {
+  id: string;
+  tip: string | null; // tip-off, ISO
+  status: "scheduled" | "live" | "final";
+  neutral: boolean;
+  home: string;
+  away: string;
+  home_win: number; // the game model's chance the home team wins, from before tip-off
+  home_score: number | null; // predicted
+  away_score: number | null;
+  home_range: [number, number] | null; // where the score lands in 8 simulated games out of 10
+  away_range: [number, number] | null;
+  home_pts: number | null; // the real score so far, once the game has started
+  away_pts: number | null;
+  factors: { factor: string; points: number }[]; // percentage points of home win chance, by kind of evidence
+  home_out: string[];
+  away_out: string[];
+  home_questionable: string[];
+  away_questionable: string[];
+}
+
+export interface NbaGames {
+  available: boolean;
+  generated_at?: string | null;
+  data_through?: string | null;
+  injuries?: boolean; // whether ESPN's injury report was applied
+  backtest?: { games: number | null; accuracy: number | null; elo_accuracy: number | null; home_accuracy: number | null };
+  days?: { date: string; games: NbaGame[] }[];
+}

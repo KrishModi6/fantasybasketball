@@ -93,6 +93,7 @@ A league with no data yet returns `409` from analytics endpoints, with the last 
 |---|---|---|
 | GET | `/api/health` | `{ok: true}` |
 | GET | `/api/model` | Model card: backtest, blend weights, priors, data audit |
+| GET | `/api/games` | NBA game predictions for today and tomorrow (US Eastern) → `{available, generated_at, data_through, injuries, backtest: {games, accuracy, elo_accuracy, home_accuracy}, days: [{date, games}]}`. Each game has `home`, `away`, `tip`, `status` (`scheduled`, `live`, `final`), `home_win`, `home_score`, `away_score`, `home_range`, `away_range`, `home_pts`, `away_pts` (the real score once it starts), `factors` (`{factor, points}`, from the home team's side), `home_out`, `away_out`, `home_questionable`, `away_questionable`. Read from the file the **Game predictions** workflow publishes (`FBB_GAMES_URL`; empty turns it off), cached 15 minutes, with the last good copy kept on disk. `{available: false}` when there is nothing to show |
 | GET | `/api/connectors` | Available connectors and what each needs |
 | GET | `/api/import/example.csv` | Example import file |
 

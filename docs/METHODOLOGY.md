@@ -566,6 +566,16 @@ The **Breakouts** page ranks players by their chance of a breakout season (`fbb/
 
 Retrain with `python -m scripts.train_breakout` (writes `data/model/breakout_model.joblib` and `breakout_metrics.json`).
 
+### 7.2 NBA game predictions
+
+The **NBA games** panel on Overview shows the game predictor's picks. The predictor is a separate program (`game-predictor/`, with [its own README](../game-predictor/README.md)) and has nothing to do with the fantasy projections: it doesn't read them and they don't read it.
+
+- **The model.** For each game: both teams' Elo ratings, season and recent efficiency, rest, home court, and who is available, all as they stood before tip-off. A logistic regression and an XGBoost classifier are averaged for the chance to win; two XGBoost models give the margin and the total, which become the predicted score.
+- **How good it is.** Tested season by season on 7,393 games it hadn't seen, it picked the winner 67.0% of the time (log loss 0.6053), against 65.2% for Elo alone and 55.1% for always picking the home team. It has not been compared with betting lines and isn't meant for betting.
+- **How it reaches the app.** The desktop app can't run the predictor (it ships without pandas, scikit-learn and XGBoost). A scheduled job (`.github/workflows/game-predictions.yml`) runs `python -m gamepred publish` four times a day and publishes one small file; the engine reads it (`app/services/games.py`), keeps only the fields it knows, and serves it at `GET /api/games`.
+- **Before tip-off only.** A game is predicted again on each run, with the latest injury report, until it tips off. From then on it keeps the last prediction published before it started, so the "right" or "wrong" beside a finished game is never judged against a prediction that knew the result.
+- **Limits.** Players ESPN lists as out are counted out; day-to-day players are counted as playing. A star sitting moves the odds less than it should, because the team's ratings were earned with him. The newest run can be several hours old.
+
 ## 8. Limitations
 
 - Lineups assume an attentive manager who sets the optimal lineup daily.

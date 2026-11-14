@@ -1,0 +1,64 @@
+name: Game predictions
+
+# Runs the NBA game predictor (game-predictor/) a few times a day and publishes today's and tomorrow's
+# predictions as one small file, predictions.json, on the `game-predictions` branch. Every copy of
+# Courtside reads that file for the "NBA games" panel on its Overview page: the desktop app can't run
+# the predictor itself (it ships without pandas, scikit-learn and XGBoost).
+#
+# The branch holds only that file and is replaced on every run, so it has no history to grow.
+# Times are UTC: 10:05 AM, 2:05 PM, 5:05 PM and 8:05 PM Eastern in winter, an hour later in summer.
+# The later runs pick up the day's injury report as it firms up and the scores of games in progress.
+# A game is predicted again on each run until it tips off, then keeps its last prediction.
+on:
+  schedule:
+    - cron: "5 15,19,22 * * *"
+    - cron: "5 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write # to replace the game-predictions branch
+
+concurrency:
+  group: game-predictions
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: game-predictor/requirements.txt
+      # Finished seasons never change, so their box scores are kept between runs (about 9 MB).
+      - uses: actions/cache@v4
+        with:
+          path: game-predictor/data
+          key: gamepred-data-${{ github.run_id }}
+          restore-keys: gamepred-data-
+      - name: Install the predictor
+        run: pip install -r game-predictor/requirements.txt
+      # A game that has tipped off keeps the prediction published before it did, so the last file is read
+      # first. There is none on the very first run, and that is fine.
+      - name: Get the file published last time
+        run: |
+          git fetch -q --depth 1 origin game-predictions \
+            && git show FETCH_HEAD:predictions.json > "$RUNNER_TEMP/previous.json" \
+            || echo "No earlier predictions to carry over."
+      - name: Predict today's and tomorrow's games
+        working-directory: game-predictor
+        run: python -m gamepred publish ../published/predictions.json --previous "$RUNNER_TEMP/previous.json"
+      - name: Publish
+        working-directory: published
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          test -s predictions.json
+          git init -q -b game-predictions
+          git add predictions.json
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Predictions $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" game-predictions

@@ -41,7 +41,9 @@ function show(ui: ReactNode) {
   return render(<QueryClientProvider client={client}><MemoryRouter>{ui}</MemoryRouter></QueryClientProvider>);
 }
 
-beforeEach(() => api.mockReset());
+beforeEach(() => {
+  api.mockReset();
+});
 afterEach(cleanup);
 
 describe("the Breakouts page", () => {
