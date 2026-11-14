@@ -7,7 +7,12 @@ export const TOOL_LABELS: Record<string, string> = {
   waiver_recommendations: "Waiver simulation",
   player_details: "Player projection",
   evaluate_trade: "Trade evaluator",
+  evaluate_three_team_trade: "Trade evaluator",
   trade_ideas: "Trade finder",
+  trade_offers: "Trade finder",
+  what_to_ask_for: "Trade finder",
+  three_team_trade_ideas: "Trade finder",
+  league_trades: "League trades and votes",
   simulate_matchup: "Matchup simulation",
   league_news: "News",
 };

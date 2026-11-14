@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
 import { LeagueRulings, RulingTag } from "../components/Rulings";
-import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, Segmented, SubTabs, Tag, Term } from "../components/ui";
+import { LeagueVotes } from "../components/Votes";
+import { Delta, Empty, ErrorBox, Injury, LoadingBlock, Notice, PageHead, Panel, PlayerName, Segmented, SortTh, SubTabs, Tag, Term, useSort } from "../components/ui";
 import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -108,6 +109,7 @@ function RosterPicker({ title, label, teamId, picked, onToggle, onTeam, others, 
 }) {
   const { league, teams, myTeamId } = useLeagueCtx();
   const { data, isLoading } = useTeam(league.id, teamId);
+  const sorting = useSort<"fp_pg" | "ros_value">();
   return (
     <Panel title={title} flush actions={
       <select className="select" value={teamId ?? ""} onChange={(e) => onTeam(Number(e.target.value))} aria-label={label}>
@@ -121,11 +123,12 @@ function RosterPicker({ title, label, teamId, picked, onToggle, onTeam, others, 
             <thead>
               <tr>
                 <th style={{ width: 28 }}><span className="sr-only">Include</span></th><th>Player</th>
-                {!dest && <th className="hide-sm">Pos</th>}<th className="n">FP/G</th>{dest ? <th>To</th> : <th className="n">ROS</th>}
+                {!dest && <th className="hide-sm">Pos</th>}<SortTh dir={sorting.dir("fp_pg")} onSort={() => sorting.toggle("fp_pg")}>FP/G</SortTh>
+                {dest ? <th>To</th> : <SortTh dir={sorting.dir("ros_value")} onSort={() => sorting.toggle("ros_value")}>ROS</SortTh>}
               </tr>
             </thead>
             <tbody>
-              {data.roster.map((p) => {
+              {sorting.apply(data.roster, (p, k) => p[k]).map((p) => {
                 const on = picked.includes(p.id);
                 return (
                   <tr key={p.id} className={`clickable ${on ? "selected" : ""}`} onClick={() => onToggle(p.id)}>
@@ -189,6 +192,15 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
       toast("Trade posted to the league board.");
       setNote("");
       qc.invalidateQueries({ queryKey: ["league", league.id, "board"] });
+    },
+    onError: (e: Error) => toast(e.message, "err"),
+  });
+  const poll = useMutation({
+    mutationFn: () => api<{ new: boolean }>(`/api/leagues/${league.id}/trades/votes`, { body: tradeBody(submitted!) }),
+    onSuccess: (r) => {
+      toast(r.new ? "It's up for a league vote. Everyone can vote on the League board tab." : "That trade is already up for a vote. See the League board tab.");
+      qc.invalidateQueries({ queryKey: ["league", league.id, "votes"] });
+      qc.invalidateQueries({ queryKey: ["league", league.id, "activity"] });
     },
     onError: (e: Error) => toast(e.message, "err"),
   });
@@ -260,6 +272,14 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
             <div className="row wrap">
               <input className="input" style={{ flex: 1, minWidth: 220 }} placeholder="Note (optional)" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} aria-label="Note" />
               <button className="btn" onClick={() => share.mutate()} disabled={share.isPending}>Post</button>
+            </div>
+          </Panel>
+          <Panel title="Put it to a league vote">
+            <div className="row wrap">
+              <span className="small muted" style={{ flex: 1, minWidth: 220 }}>
+                Ask the whole league whether this trade is fair. Everyone can vote fair or not fair, and the count shows on the League board tab. It doesn't change Courtside's numbers.
+              </span>
+              <button className="btn" onClick={() => poll.mutate()} disabled={poll.isPending || stale}>{poll.isPending ? "Sending…" : "Start a league vote"}</button>
             </div>
           </Panel>
         </>
@@ -881,6 +901,7 @@ export function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
     return (
       <div className="stack">
         <RecentMoves />
+        <LeagueVotes />
         <LeagueRulings />
         <Panel><Empty title="No trades posted yet">Evaluate a trade and post it to share the numbers with the league. They update automatically after every refresh.</Empty></Panel>
       </div>
@@ -890,6 +911,7 @@ export function Board({ onLoad }: { onLoad: (d: Draft) => void }) {
   return (
     <div className="stack">
       <RecentMoves />
+      <LeagueVotes />
       <LeagueRulings />
       <Panel flush note="Numbers update automatically after every refresh, so they always reflect the latest stats and rosters.">
         <div className="table-wrap">

@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { RangeBar } from "../components/charts";
 import { useLeagueCtx } from "../components/Layout";
-import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Meter, PageHead, Panel, PlayerName, SubTabs, Tag, Term } from "../components/ui";
+import { Delta, Empty, ErrorBox, Kpi, Kpis, LoadingBlock, Meter, PageHead, Panel, PlayerName, SubTabs, Tag, Term, ariaSort, sortArrow, useSort } from "../components/ui";
 import { fmt0, fmt1, pct, projRecord, projRecordNote, record, shortDate } from "../lib/format";
+import { GLOSSARY, type TermKey } from "../lib/glossary";
 import { useClaimTeam, useLineup, useTeam, useTeamReport } from "../lib/queries";
 import { useToast } from "../lib/toast";
 import type { TeamDetail } from "../lib/types";
@@ -114,21 +115,32 @@ function Roster({ team, isPoints }: { team: TeamDetail; isPoints: boolean }) {
   const weeks = Math.max(1, team.weeks_remaining);
   // Points so far today: shown while games are on, and afterwards until tomorrow's first refresh.
   const today = isPoints && (live || team.roster.some((p) => p.today_fp != null));
+  type Col = "today" | "fp" | "sd" | "season" | "last10" | "xfp" | "luck" | "mpg" | "next7" | "starts" | "pts" | "vorp";
+  const sorting = useSort<Col>();
+  const value = (p: TeamDetail["roster"][number], k: Col) => ({
+    today: p.today_fp, fp: isPoints ? p.fp_pg : p.value_pg, sd: p.fp_sd, season: p.season_fp_pg, last10: p.recent_fp_pg,
+    xfp: p.xfp_pg, luck: p.luck_pg, mpg: p.mpg, next7: p.games_next7, starts: p.exp_starts, pts: p.pts_per_week, vorp: p.vorp,
+  })[k];
+  const th = (k: Col, t: TermKey, cls = "n", label?: string) => (
+    <th className={cls} aria-sort={ariaSort(sorting.dir(k))}>
+      <Term t={t} onClick={() => sorting.toggle(k)}>{label ?? GLOSSARY[t].term}{sortArrow(sorting.dir(k))}</Term>
+    </th>
+  );
   return (
-    <Panel flush foot="Starts and points per week come from simulating every remaining day with the optimal lineup, so they account for positions, schedule overlap and injuries.">
+    <Panel flush foot="Starts and points per week come from simulating every remaining day with the optimal lineup, so they account for positions, schedule overlap and injuries. Click a column to sort by it: highest first, then lowest first, then back.">
       <div className="table-wrap">
         <table className="data">
           <thead>
             <tr>
               <th>Slot</th><th>Player</th><th className="hide-sm">Team</th><th className="hide-sm">Pos</th>
-              {today && <th className="n"><Term t="today" /></th>}
-              <th className="n">{isPoints ? <Term t="fp_pg" /> : <Term t="value_pg" />}</th><th className="n hide-sm"><Term t="fp_sd" /></th><th className="n hide-sm"><Term t="season" /></th><th className="n hide-sm"><Term t="last10" /></th>
-              <th className="n hide-sm"><Term t="xfp">xFP/G</Term></th><th className="n hide-sm"><Term t="luck" /></th>
-              <th className="n"><Term t="mpg" /></th><th className="n"><Term t="next7" /></th><th className="n"><Term t="starts_wk" /></th><th className="n"><Term t="pts_wk_player" /></th><th className="n hide-sm"><Term t="over_repl" /></th>
+              {today && th("today", "today")}
+              {th("fp", isPoints ? "fp_pg" : "value_pg")}{th("sd", "fp_sd", "n hide-sm")}{th("season", "season", "n hide-sm")}{th("last10", "last10", "n hide-sm")}
+              {th("xfp", "xfp", "n hide-sm", "xFP/G")}{th("luck", "luck", "n hide-sm")}
+              {th("mpg", "mpg")}{th("next7", "next7")}{th("starts", "starts_wk")}{th("pts", "pts_wk_player")}{th("vorp", "over_repl", "n hide-sm")}
             </tr>
           </thead>
           <tbody>
-            {team.roster.map((p) => (
+            {sorting.apply(team.roster, value).map((p) => (
               <tr key={p.id}>
                 <td className="muted">{p.slot}</td>
                 <td><PlayerName name={p.name} injury={p.injury_status} onOpen={() => openPlayer(p.id)} sub={p.games_out > 0 ? `out ~${fmt0(p.games_out)}g` : undefined} /></td>

@@ -107,6 +107,10 @@ class RulingIn(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+class VoteIn(BaseModel):
+    vote: Literal["fair", "unfair"]
+
+
 class AdminCodeIn(BaseModel):
     code: str = Field(min_length=1, max_length=200)
 

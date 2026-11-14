@@ -11,7 +11,7 @@ game logs that prepare() reads (the absence table, last season's closing games) 
 live in s3://<bucket>/sims/cache/ rather than being fetched from ESPN on every run. This season's logs
 are saved there after each run, so next season finds them.
 
-Event: {} for this season, or {"season": 2027, "leagues": 32}
+Event: {} for this season, or {"season": 2027, "leagues": 256}
 """
 
 from __future__ import annotations

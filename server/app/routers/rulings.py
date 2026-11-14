@@ -1,8 +1,13 @@
-"""The league admin's trade rulings. Only the admin can see the dashboard or rule; every member can read the rulings."""
+"""The league admin's trade rulings, and the league's own votes.
+
+Only the admin can see the dashboard or rule; every member can read the rulings. Every member can put a trade
+to a league vote and vote on it.
+"""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -10,11 +15,14 @@ from ..db import get_db
 from ..deps import Membership, admin_membership, membership, owner_membership
 from ..orm import Activity, TradeRuling
 from ..realtime import hub
-from ..schemas import AdminCodeIn, RulingIn
+from ..schemas import AdminCodeIn, RulingIn, TradeIn, VoteIn
 from ..services import rulings_share as share
+from ..services import votes
 from ..services.analysis import LeagueAnalysis
-from ..services.rulings import TradeNotFound, league_rulings, review_queue, ruling_message, ruling_out, save_ruling
+from ..services.rulings import (TradeNotFound, describe, league_rulings, numbers, review_queue, ruling_message, ruling_out,
+                                save_ruling, trade_key)
 from .analysis import analysis
+from .trades import _sends
 
 router = APIRouter(prefix="/api/leagues/{league_id}/trades", tags=["rulings"])
 
@@ -94,3 +102,70 @@ def withdraw(key: str, m: Membership = Depends(admin_membership), db: Session = 
     db.delete(row)
     db.commit()
     hub.publish(m.league.id, {"type": "trade_ruled", "key": key})
+
+
+# ---- league votes ----------------------------------------------------------------------------------------
+
+UNREACHABLE = "Couldn't reach the rest of the league, so nothing was saved. Try again in a minute."
+
+
+def _voted(db: Session, a: LeagueAnalysis, m: Membership, key: str) -> dict:
+    db.commit()
+    hub.publish(m.league.id, {"type": "trade_voted", "key": key})
+    return next(r for r in votes.vote_list(db, a, m.league, m.user.id) if r["key"] == key)
+
+
+@router.get("/votes")
+def vote_list(m: Membership = Depends(membership), a: LeagueAnalysis = Depends(analysis), db: Session = Depends(get_db)):
+    share.pull_if_due(db, m.league)
+    votes.pull_if_due(db, m.league, m.user.id)
+    return {"reach": share.reach(m.league), "trades": votes.vote_list(db, a, m.league, m.user.id)}
+
+
+def _open(a: LeagueAnalysis, body: TradeIn) -> tuple[str, dict, dict | None]:
+    sends = _sends(a, body)
+    try:
+        ev = a.evaluator().evaluate_multi(sends)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return trade_key(sends), describe(a.snapshot, sends, ev), numbers(ev)
+
+
+@router.post("/votes", status_code=201)
+async def open_vote(body: TradeIn, m: Membership = Depends(membership), a: LeagueAnalysis = Depends(analysis),
+                    db: Session = Depends(get_db)):
+    """Puts a trade from the analyzer to a league vote. It doesn't have to be on the board."""
+    key, trade, nums = await run_in_threadpool(_open, a, body)
+    try:
+        new = votes.cast(db, m.league, m.user.id, key, None, trade, nums)
+    except share.Unreachable:
+        raise HTTPException(503, UNREACHABLE) from None
+    if new:
+        db.add(Activity(league_id=m.league.id, kind="vote", payload={"key": key},
+                        message=f"{m.user.display_name} put a trade to a league vote: {trade['text']}"[:500]))
+    return {**_voted(db, a, m, key), "new": new}
+
+
+@router.put("/votes/{key}")
+def vote(key: str, body: VoteIn, m: Membership = Depends(membership), a: LeagueAnalysis = Depends(analysis),
+         db: Session = Depends(get_db)):
+    try:
+        trade, nums = votes.resolve(db, a, m.league.id, key)
+        votes.cast(db, m.league, m.user.id, key, body.vote, trade, nums)
+    except TradeNotFound:
+        raise HTTPException(404, "That trade isn't up for a vote, on the board or in the league's recent moves") from None
+    except share.Unreachable:
+        raise HTTPException(503, UNREACHABLE) from None
+    return _voted(db, a, m, key)
+
+
+@router.delete("/votes/{key}")
+def unvote(key: str, m: Membership = Depends(membership), a: LeagueAnalysis = Depends(analysis),
+           db: Session = Depends(get_db)):
+    try:
+        votes.withdraw(db, m.league, m.user.id, key)
+    except share.Unreachable:
+        raise HTTPException(503, UNREACHABLE) from None
+    db.commit()
+    hub.publish(m.league.id, {"type": "trade_voted", "key": key})
+    return next((r for r in votes.vote_list(db, a, m.league, m.user.id) if r["key"] == key), {"key": key})

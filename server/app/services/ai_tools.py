@@ -44,8 +44,10 @@ def _slim_player(row: dict) -> dict:
 
 
 class ToolBox:
-    def __init__(self, analysis: LeagueAnalysis, my_team_id: int | None):
+    def __init__(self, analysis: LeagueAnalysis, my_team_id: int | None,
+                 league_trades: Callable[[], list[dict]] | None = None):
         self.a = analysis
+        self._league_trades = league_trades  # services.votes.vote_list for this member; needs the database
         self.ctx = analysis.ctx
         self.snap = analysis.snapshot
         self.my_team_id = my_team_id
@@ -63,6 +65,7 @@ class ToolBox:
             "three_team_trade_ideas": self.three_team_trade_ideas,
             "simulate_matchup": self.simulate_matchup,
             "league_news": self.league_news,
+            "league_trades": self.league_trades,
         }
 
     # -- schemas -----------------------------------------------------------------------
@@ -142,6 +145,10 @@ class ToolBox:
                    "week": {"type": "integer", "description": "Matchup period; defaults to the current week."},
                    "sit": {"type": "array", "items": {"type": "string"}, "description": "Players to bench in the simulation."},
                }),
+            fn("league_trades", "The league's trades to judge: real trades that went through, trades posted on the league "
+               "board and trades put to a league vote. For each: who sends whom, Courtside's numbers for every team "
+               "(points per week, playoff and title odds before and after, verdict, fairness), how the league has voted "
+               "(fair / not fair) with the user's own vote, and the league admin's ruling if there is one."),
             fn("league_news", "Recent NBA headlines that mention players in this league, with their fantasy teams. Context "
                "only; projections do not use headlines."),
         ]
@@ -441,3 +448,26 @@ class ToolBox:
             items.append({"headline": n.headline, "published": n.published.isoformat() if n.published else None,
                           "players": players})
         return {"headlines": items}
+
+    def league_trades(self) -> dict:
+        if self._league_trades is None:
+            raise ToolError("The league's trades aren't available here.")
+        trades = []
+        for r in self._league_trades()[:12]:
+            n = r["numbers"] or {}
+            trades.append({
+                "trade": r["trade"]["text"], "when": r["at"][:10],
+                "status": {"done": "happened", "open": "proposed", "stale": "no longer possible"}.get(r["status"], "proposed"),
+                "courtside_fairness": (n.get("fairness") or {}).get("label"), "courtside_summary": n.get("summary"),
+                "numbers_from_undoing_a_finished_trade": bool(n.get("completed")),
+                "teams": [{"team": s["team_name"], "verdict": s["verdict"], "pts_per_week_change": _r(s["delta_per_week"]),
+                           "rest_of_season_pct": _r((s["delta_pct"] or 0) * 100, 1),
+                           "playoff_odds": [_r(s["before_playoff_odds"], 2), _r(s["after_playoff_odds"], 2)],
+                           "title_odds": [_r(s["before_title_odds"], 2), _r(s["after_title_odds"], 2)]}
+                          for s in n.get("sides", [])],
+                "league_vote": {"fair": r["votes"]["fair"], "not_fair": r["votes"]["unfair"],
+                                "users_vote": {"fair": "fair", "unfair": "not fair"}.get(r["votes"]["mine"])},
+                "admin_ruling": ({"ruling": {"fair": "fair", "unfair": "not fair"}[r["ruling"]["ruling"]],
+                                  "note": r["ruling"]["note"]} if r["ruling"] else None),
+            })
+        return {"trades": trades, "note": "Votes and rulings are people's opinions; they don't change Courtside's numbers."}

@@ -222,3 +222,64 @@ test('writes stop at the daily limit and a league stops at its cap', async () =>
   assert.equal((await rulings('PUT', { trade: 'c'.repeat(32), payload: ruling, admin: ADMIN })).status, 429);
   assert.equal((await rulings('PUT', { trade: TRADE, payload: ruling, admin: ADMIN })).status, 200, 'changing one is still fine');
 });
+
+// ---- league votes ---------------------------------------------------------------------------------------
+
+const deal = { trade: { text: 'A sends X to B for Y' }, numbers: { completed: false } };
+
+function votes(method = 'GET', { trade, payload, voter, token = TOKEN, headers = {} } = {}) {
+  const path = `https://ai.example/v1/leagues/${LEAGUE}/votes${trade ? `/${trade}` : ''}`;
+  return worker.fetch(new Request(path, {
+    method,
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
+    headers: {
+      ...(payload ? { 'content-type': 'application/json' } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(voter ? { 'x-league-voter': voter } : {}),
+      ...headers,
+    },
+  }), env);
+}
+
+test('votes need the app token and a voter key to write', async () => {
+  assert.equal((await votes('GET', { token: null })).status, 401);
+  assert.equal((await votes('GET', { headers: { origin: 'https://evil.example' } })).status, 403);
+  assert.equal((await votes('PUT', { trade: TRADE, payload: { ...deal, vote: 'fair' } })).status, 400);
+  assert.equal((await votes('PUT', { trade: TRADE, payload: { ...deal, vote: 'maybe' }, voter: 'ann' })).status, 400);
+  assert.deepEqual(await (await votes()).json(), { polls: [] });
+});
+
+test('anyone can open a poll and everyone gets one vote on it', async () => {
+  const opened = await votes('PUT', { trade: TRADE, payload: deal, voter: 'ann' });
+  assert.equal(opened.status, 200);
+  assert.deepEqual({ ...(await opened.json()), at: null }, { ...deal, key: TRADE, at: null, fair: 0, unfair: 0, mine: null });
+
+  await votes('PUT', { trade: TRADE, payload: { ...deal, vote: 'fair' }, voter: 'ann' });
+  await votes('PUT', { trade: TRADE, payload: { trade: { text: 'someone else describing it' }, vote: 'unfair' }, voter: 'bob' });
+  const again = await (await votes('PUT', { trade: TRADE, payload: { ...deal, vote: 'unfair' }, voter: 'bob' })).json();
+  assert.deepEqual([again.fair, again.unfair, again.mine], [1, 1, 'unfair'], 'voting twice changes the vote, not the count');
+
+  const [seen] = (await (await votes('GET', { voter: 'ann' })).json()).polls;
+  assert.deepEqual([seen.fair, seen.unfair, seen.mine], [1, 1, 'fair']);
+  assert.equal(seen.trade.text, deal.trade.text, 'the first copy to open it says what the trade is');
+  assert.equal((await (await votes()).json()).polls[0].mine, null);
+  assert.equal(env.DB.raw.prepare('SELECT voter FROM league_votes').all().some(r => r.voter === 'ann'), false, 'only hashes are kept');
+});
+
+test('a vote can be withdrawn, and only your own', async () => {
+  await votes('PUT', { trade: TRADE, payload: { ...deal, vote: 'fair' }, voter: 'ann' });
+  await votes('PUT', { trade: TRADE, payload: { ...deal, vote: 'fair' }, voter: 'bob' });
+  const left = await (await votes('DELETE', { trade: TRADE, voter: 'bob' })).json();
+  assert.deepEqual([left.fair, left.unfair, left.mine], [1, 0, null]);
+  assert.equal((await votes('DELETE', { trade: 'c'.repeat(32), voter: 'bob' })).status, 404);
+});
+
+test('a poll takes a limited number of voters, and a league a limited number of polls', async () => {
+  await votes('PUT', { trade: TRADE, payload: { ...deal, vote: 'fair' }, voter: 'ann' });
+  const add = env.DB.raw.prepare("INSERT INTO league_votes(league, trade_key, voter, vote, updated_at) VALUES (?, ?, ?, 'fair', 0)");
+  for (let i = 0; i < 60; i++) add.run(LEAGUE, TRADE, `v${i}`);
+  assert.equal((await votes('PUT', { trade: TRADE, payload: { ...deal, vote: 'fair' }, voter: 'zed' })).status, 429);
+  const poll = env.DB.raw.prepare('INSERT INTO league_polls(league, trade_key, body, created_at) VALUES (?, ?, ?, 0)');
+  for (let i = 0; i < 300; i++) poll.run(LEAGUE, i.toString(16).padStart(32, '0'), '{}');
+  assert.equal((await votes('PUT', { trade: 'c'.repeat(32), payload: deal, voter: 'ann' })).status, 429);
+});

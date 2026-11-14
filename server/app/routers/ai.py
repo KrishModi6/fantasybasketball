@@ -6,12 +6,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..db import get_db
+from ..db import SessionLocal, get_db
 from ..deps import Membership, current_user, membership
-from ..orm import User, UserSettings
+from ..orm import League, User, UserSettings
 from ..security import decrypt_json, encrypt_json
 from ..services.ai import PRESETS, AIError, ai_mode, check_openai_key, run_assistant
 from ..services.analysis import LeagueAnalysis
+from ..services.votes import vote_list
 from .analysis import analysis
 
 router = APIRouter(tags=["ai"])
@@ -71,15 +72,23 @@ def remove_key(user: User = Depends(current_user), db: Session = Depends(get_db)
     return status(user, db)
 
 
+def _league_trades(a: LeagueAnalysis, league_id: str, user_id: str) -> list[dict]:
+    """For the assistant's league_trades tool. It runs on a worker thread, so it gets a session of its own."""
+    with SessionLocal() as db:
+        return vote_list(db, a, db.get(League, league_id), user_id)
+
+
 @router.post("/api/leagues/{league_id}/ai/ask")
 async def ask(body: AskIn, m: Membership = Depends(membership), a: LeagueAnalysis = Depends(analysis),
               db: Session = Depends(get_db)):
     prompt = PRESETS.get(body.preset or "") if body.preset else (body.prompt or "").strip()
     if not prompt:
         raise HTTPException(422, "Ask a question or pick a preset.")
+    league_id, user_id = m.league.id, m.user.id  # read here: the tool runs on another thread
     try:
         return await run_in_threadpool(run_assistant, a, user_id=m.user.id, my_team_id=m.member.team_id,
                                        prompt=prompt, previous_response_id=body.previous_response_id,
-                                       api_key=user_openai_key(db, m.user.id))
+                                       api_key=user_openai_key(db, m.user.id),
+                                       league_trades=lambda: _league_trades(a, league_id, user_id))
     except AIError as exc:
         raise HTTPException(exc.status, str(exc)) from exc

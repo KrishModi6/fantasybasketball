@@ -1,6 +1,15 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.6.0
+## What's new in 0.6.1
+
+- **Everyone can vote on trades.** A new **League vote** panel under **Trades > League board** lists every real trade, every board post and every trade someone has put to a vote. Anyone in the league can vote **Fair** or **Not fair**, and everyone sees the count. Click your vote again to take it back. Each app gets one vote per trade.
+- **Put any trade to a vote.** After you evaluate a trade on **Trades > Analyze**, choose **Start a league vote**. The trade and Courtside's numbers for it show up in everyone's League vote panel, without posting it to the board.
+- **Votes are opinions.** Like the admin's rulings, they don't change Courtside's numbers or verdict, and nothing happens on ESPN. Voting needs an internet connection, and everyone needs this version to see the votes.
+- **The assistant has a trade analyzer.** A new **Trade analyzer** quick question goes through the league's trades: who won each by the numbers, how the league voted, and how you should vote. You can also ask it about the votes in your own words.
+- **Sort from lowest to highest.** On **Players**, click a column you've already sorted by to flip it, so the lowest come first. The rosters on **Trades** (FP/G and ROS) and the **Team** roster now sort the same way: click a column for highest first, again for lowest first, and a third time to go back.
+- **The daily accuracy check is eight times bigger.** It now plays 256 practice leagues a day on AWS, up from 32.
+
+## In 0.6.0
 
 - **NBA games on Overview.** A new **NBA games** panel shows today's games with the team Courtside's game model picks, its chance to win, the predicted score, the main reason behind the pick, and who is out. When tomorrow has games too, a button switches to them. Once a game starts the panel shows the score, and a finished game says whether the pick was right.
 - **How good the picks are.** The model is separate from the fantasy projections. It uses team strength, season and recent efficiency, rest, home court and who is available. On 7,393 past games it hadn't seen, it picked the winner 67% of the time, against 65% for team strength ratings alone and 55% for always taking the home team. It hasn't been compared with betting lines and isn't meant for betting.

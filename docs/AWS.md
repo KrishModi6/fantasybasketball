@@ -294,7 +294,8 @@ and AWS Batch or Fargate would add a container image for no gain.
 checks the app as shipped against this season's finished matchup weeks:
 1. It rebuilds this season's projections week by week from ESPN's games so far, the same way as for
    past seasons, and uploads them to `sims/inputs/inputs_<season>.json.gz`.
-2. It sends 16 invocations of 2 leagues each to `courtside-sims` (32 synthetic leagues, settings
+2. It sends 128 invocations of 2 leagues each to `courtside-sims` (256 synthetic leagues since
+   2026-11-14, 32 before; settings
    `"app"`) and waits for their results under `sims/results/daily-<season>-<day>/`.
 3. `{"action": "report"}` scores them and writes `sims/daily/<season>/<day>.json` and `latest.json`:
    Brier score, log loss and calibration of the weekly win odds, how often the 80% ranges held, and
@@ -366,7 +367,11 @@ about 218 s at 3,008 MB) costs about $0.0085. Everything through 2026-10-31 took
 129,000 GB-seconds: $1.72 at list price. That covers the canary, the pilots, the 192-league study run
 `r1`, its merge and the first daily run. Lambda's always-free allowance is 400,000 GB-seconds a month,
 so the bill may show less, if this plan gets that allowance. The daily check runs one setting with no
-playoff odds: the first one (week 1, 32 leagues) took about 40 s end to end. Expect under $1 a month by
+playoff odds: the first one (week 1, 32 leagues) took about 40 s end to end. With 32 leagues an invocation
+took about 3.5 s in week 3, and the whole first two weeks of November cost 8 cents, so on 2026-11-14 the
+check went to 256 leagues: about 30 GB-seconds a day per finished week, at most 10,000 a day (about
+$0.13) by the end of the season, and about 6 of the function's 15 minutes. The leagues share the same real
+box scores, so more of them smooth out the luck of drafts and rosters, not of the real weeks. Expect under $4 a month by
 the end of the season. `courtside-daily-prep` adds 40 s to a few minutes at 1 GB a morning plus
 about 40 s an evening, about 2,000-6,000 GB-seconds a month (under $0.10). Scheduler's first 14 million invocations a month are
 free. S3 storage and requests add about a cent.
