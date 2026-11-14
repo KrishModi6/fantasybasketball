@@ -42,9 +42,9 @@ FUNCTION = "courtside-sims"
 # About $20 a month of Lambda at list price: 2 runs a day of 25,000 GB-seconds, $0.0000133334 per GB-second.
 BUDGET_GBS = 25_000
 # What one league costs per finished week at the app's 10,000 draws: 3,008 MB times its share of an
-# invocation's time (estimated from 2,000-draw runs on 2026-11-14; check it against the first runs'
-# REPORT lines in /aws/lambda/courtside-sims, docs/AWS.md, section 4).
-GBS_PER_LEAGUE_WEEK = 9.5
+# invocation's billed time. Measured on courtside-sims on 2026-11-14 with 2 leagues an invocation in week 3:
+# 6.7 cold, 6.1 warm (docs/AWS.md, section 4). Check it against real runs' REPORT lines now and then.
+GBS_PER_LEAGUE_WEEK = 6.5
 LEAGUES = 32  # the fewest a run adds
 MAX_LEAGUES = 20_000  # the largest a pool grows, so its report stays well inside courtside-sims' 15 minutes
 FIRST_SLICE = 64  # a new pool's leagues played and scored before the run's report

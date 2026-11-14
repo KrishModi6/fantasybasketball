@@ -306,8 +306,8 @@ checks the app as shipped against this season's finished matchup weeks:
 4. The function's log (`/aws/lambda/courtside-daily-prep`) ends with one line of headline numbers.
 
 The batch is sized to a budget (since 2026-11-14): `BUDGET_GBS` = 25,000 GB-seconds a run, divided by
-what a league costs, `GBS_PER_LEAGUE_WEEK` per finished week (measured; see Cost), so about 2,600
-leagues a run after week 1 and about 140 by week 19, never fewer than 32. Each league simulates every
+what a league costs, `GBS_PER_LEAGUE_WEEK` per finished week (6.5, measured; see Cost), so about 3,800
+leagues a run after week 1 and about 200 by week 19, never fewer than 32. Each league simulates every
 matchup with 10,000 draws, as the app does (the study uses 2,000). A pool stops growing at 20,000
 leagues, which keeps its report well inside 15 minutes.
 
@@ -381,9 +381,11 @@ so the bill may show less, if this plan gets that allowance. The daily check run
 playoff odds. At 32 leagues and 2,000 draws it cost 8 cents for the first two weeks of November, so
 on 2026-11-14 it moved to the budget above: 2 runs a day of about 25,000 GB-seconds, about 50,000 a day,
 about $0.67 a day and $20 a month at list price (about 1.5 million GB-seconds a month, so the free
-allowance, if this plan gets it, covers about a quarter). The first runs after the change are the
-measurement of `GBS_PER_LEAGUE_WEEK`: if a run's REPORT lines in `/aws/lambda/courtside-sims` add up to
-much more or less than 25,000 GB-seconds, change it and redeploy `courtside-daily-prep`. To spend less,
+allowance, if this plan gets it, covers about a quarter). `GBS_PER_LEAGUE_WEEK` comes from two 2-league canaries on 2026-11-14 in
+week 3, at 10,000 draws: 13.6 s billed cold and 12.4 s warm at 2.94 GB, so 6.7 and 6.1 GB-seconds a
+league-week (the first estimate, 9.5, would have spent about $14 a month). If a run's REPORT lines in
+`/aws/lambda/courtside-sims` add up to much more or less than 25,000 GB-seconds, change it and
+redeploy `courtside-daily-prep`. To spend less,
 lower `BUDGET_GBS`; to stop the growth, set it to 0 (each run then adds 32 leagues). `courtside-daily-prep` adds 40 s to a few minutes at 1 GB a morning plus
 about 40 s an evening, about 2,000-6,000 GB-seconds a month (under $0.10). Scheduler's first 14 million invocations a month are
 free. S3 storage and requests add about a cent.
