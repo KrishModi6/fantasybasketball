@@ -9,6 +9,7 @@ import type {
   LineupDay,
   Member,
   ModelCard,
+  NbaGames,
   NewsItem,
   PlayerDetail,
   PlayerRow,
@@ -85,6 +86,9 @@ export const useActivity = (id: string) =>
   useQuery({ queryKey: L(id, "activity"), queryFn: () => api<ActivityItem[]>(`/api/leagues/${id}/activity`) });
 export const useMembers = (id: string) =>
   useQuery({ queryKey: L(id, "members"), queryFn: () => api<Member[]>(`/api/leagues/${id}/members`) });
+/** Tonight's NBA games with the game model's odds; the same for every league, refreshed every 10 minutes. */
+export const useNbaGames = () =>
+  useQuery({ queryKey: ["nba-games"], queryFn: () => api<NbaGames>("/api/games"), staleTime: 300_000, refetchInterval: 600_000 });
 export const useModelCard = () => useQuery({ queryKey: ["model"], queryFn: () => api<ModelCard>("/api/model"), staleTime: 3600_000 });
 /** Saves which team the signed-in member manages; every page then defaults to it. */
 export function useClaimTeam(id: string) {

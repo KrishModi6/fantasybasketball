@@ -122,7 +122,8 @@ server/            FastAPI backend + analytics engine
   data/model/      trained model + metrics.json (the backtest above)
   tests/           engine unit tests + end-to-end API test
 web/               React + TypeScript + Vite client (also the desktop UI)
-game-predictor/    a separate program: NBA game win odds, scores and lineup what-ifs (its own README and environment)
+game-predictor/    a separate program: NBA game win odds, scores and lineup what-ifs (its own README and environment);
+                   .github/workflows/game-predictions.yml publishes its picks for the NBA games panel on Overview
 desktop/           Electron shell; starts the bundled engine; installers in desktop/release
 cloudflare/ai-proxy/  Worker + D1 that holds the OpenAI key and meters AI calls for the desktop app, and
                    carries league admins' trade rulings between desktop apps

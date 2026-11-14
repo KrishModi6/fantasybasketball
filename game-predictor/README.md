@@ -43,6 +43,7 @@ python -m gamepred predict --home CHI --away SAS --out "Victor Wembanyama"      
 python -m gamepred predict --home BOS --away LAL --back "Jayson Tatum"          # what if he's back?
 python -m gamepred lineup SAS                                # a team's rotation and each player's value
 python -m gamepred train                                     # backtest again and retrain on everything
+python -m gamepred publish predictions.json                  # today's and tomorrow's predictions as one file
 ```
 
 - `--out` and `--back` take full names, comma-separated. A surname alone works when only one player on the two
@@ -53,6 +54,17 @@ python -m gamepred train                                     # backtest again an
 - `--neutral` for a neutral court; `--sims` for more or fewer simulated games; `--refresh` to fetch the latest
   results first (otherwise this season's file is fetched again once it is three hours old).
 - Team abbreviations are ESPN's (`NY`, `SA`, `GS`, `NO`, `UTAH`, `WSH`); the NBA's (`NYK`, `SAS`, `GSW`, ...) work too.
+
+## In Courtside
+
+Courtside's Overview page has an **NBA games** panel with these predictions. The desktop app can't run this
+program (it ships without pandas, scikit-learn and XGBoost), so `.github/workflows/game-predictions.yml` runs
+`publish` four times a day and puts the file on the `game-predictions` branch, where every copy of the app reads it.
+
+`publish` predicts a game again on every run until it tips off. After that the game keeps the prediction from the
+file written last time (the output file itself, or `--previous other.json`) and only its score changes, so a
+finished game is never shown with a prediction made after it. What-ifs (`--out`, `--back`) are only here, on the
+command line.
 
 ## How it works
 

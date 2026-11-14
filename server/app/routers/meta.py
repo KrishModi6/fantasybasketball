@@ -12,6 +12,7 @@ from fbb.connectors.flaim import FlaimConnector
 from fbb.history import DATA_DIR
 
 from ..deps import current_user
+from ..services import games
 
 router = APIRouter(prefix="/api", tags=["meta"])
 
@@ -29,6 +30,12 @@ def model_card(_=Depends(current_user)):
     m = json.loads(path.read_text())
     m.pop("lgb_params", None)
     return {"trained": True, **m}
+
+
+@router.get("/games")
+def nba_games(_=Depends(current_user)):
+    """Today's and tomorrow's NBA games with win odds and predicted scores (services/games.py)."""
+    return games.predictions()
 
 
 @router.get("/connectors")

@@ -20,6 +20,7 @@ Courtside reopens where you left off. The back arrow (or your mouse's back butto
 - this week's projected score and win probability;
 - power rank, projected record, and playoff and title odds;
 - the best add/drop right now;
+- **NBA games:** today's games (and tomorrow's, behind a button) with the team Courtside's game model picks, its chance to win, the predicted score, the main reason, and who is out. Once a game starts it shows the score, and a finished game says whether the pick was right. The odds are the ones from before tip-off. They come from a file Courtside publishes a few times a day, so the panel needs the internet and is hidden when it can't be read or there are no games;
 - the live league feed (trades shared, injuries, joins) and NBA news.
 
 **Rankings.** Every team ranked by *power score*. This season's record counts for the share of the regular season already played; for the rest, it's the projected *all-play win rate*: how often the team would beat every other team, every remaining week. In week 1 it's all projection, halfway it's half each. Hover a power score to see the mix. **Luck** (points leagues) is how many points a week the team's players have been scoring above or below what their chances were worth, counted as often as its best lineups will start them; a team well above zero is likelier to cool off. Select a team's row to see **why**:
