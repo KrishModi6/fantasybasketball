@@ -70,7 +70,8 @@ async def lineup(team_id: int, days: int = Query(7, ge=1, le=14), a: LeagueAnaly
 def players(a: LeagueAnalysis = Depends(analysis),
             status: str = Query("all", pattern="^(all|fa|rostered)$"),
             pos: str | None = Query(None, max_length=3), q: str | None = Query(None, max_length=60),
-            team_id: int | None = None, sort: str = Query("ros_value"), limit: int = Query(200, ge=1, le=700)):
+            team_id: int | None = None, sort: str = Query("ros_value"), limit: int = Query(200, ge=1, le=700),
+            asc: bool = Query(False, description="Lowest first instead of highest first")):
     ids = []
     ql = q.lower().strip() if q else None
     for pid, p in a.snapshot.players.items():
@@ -91,7 +92,7 @@ def players(a: LeagueAnalysis = Depends(analysis),
                "ownership_pct", "value_pg", "xfp_pg", "luck_pg"}
     if key not in allowed:
         key = "ros_value"
-    reverse = key != "rank"
+    reverse = (key != "rank") != asc  # a rank's "highest" is 1; players with no value stay last either way
     rows.sort(key=lambda r: (r.get(key) is None, -(r.get(key) or 0) if reverse else (r.get(key) or 0)))
     return {"players": rows[:limit], "total": len(rows), "as_of": _as_of(a)}
 

@@ -13,6 +13,7 @@ import type { AiAnswer, AiStatus } from "../lib/types";
 const PRESETS = [
   { key: "waivers", title: "Waiver pickups", desc: "Best adds for the rest of the season and streams for this week, with who to drop." },
   { key: "matchup", title: "Matchup game plan", desc: "Your win probability, the players who swing it, and moves that raise your odds." },
+  { key: "trade_review", title: "Trade analyzer", desc: "Who won each trade in the league by the numbers, how the league voted, and how you should vote." },
   { key: "trades", title: "Trade ideas", desc: "Deals that help you and that the other manager could accept, with a pitch to send." },
   { key: "injuries", title: "Injury check", desc: "Who's hurt, what it costs you per week, and who on waivers covers it." },
   { key: "outlook", title: "Season outlook", desc: "Playoff and title odds, strengths and weaknesses, and the single best move." },
@@ -203,7 +204,7 @@ export default function AssistantPage() {
           {status.isLoading && <LoadingBlock rows={3} />}
           {turns.length === 0 && !status.isLoading && (
             <Empty title="Ask about your league">
-              Pick a quick question or type your own, like "Who should I stream on Thursday?" or "Is my center depth a problem?"
+Pick a quick question or type your own, like "Who should I stream on Thursday?" or "Analyze this trade: my Player A for their Player B."
             </Empty>
           )}
           <div className="transcript" aria-live="polite">
@@ -268,6 +269,7 @@ export default function AssistantPage() {
               <li>Free agents by rest-of-season value or games this week</li>
               <li>Waiver moves simulated against your real lineup</li>
               <li>Trade evaluation and the trade finder</li>
+              <li>The league's trades, the league vote and the admin's rulings</li>
               <li>Matchup simulations, including benching players</li>
               <li>Recent news and injuries (context only)</li>
             </ul>

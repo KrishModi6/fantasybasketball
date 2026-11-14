@@ -91,11 +91,14 @@ def _key_for(db: Session, league: League, user_id: str) -> str | None:
     return decrypt_json(league.connector_config).get("admin_key") or _stored_key(db, user_id)
 
 
-def _call(method: str, path: str, admin_key: str | None = None, body: dict | None = None) -> httpx.Response | None:
+def _call(method: str, path: str, admin_key: str | None = None, body: dict | None = None,
+          voter: str | None = None) -> httpx.Response | None:
     s = get_settings()
     headers = {"Authorization": f"Bearer {s.ai_proxy_token}"}
     if admin_key:
         headers["X-League-Admin"] = admin_key
+    if voter:  # services.votes
+        headers["X-League-Voter"] = voter
     try:
         return httpx.request(method, s.ai_proxy_url.rstrip("/") + path, headers=headers, json=body, timeout=TIMEOUT_S)
     except httpx.HTTPError as exc:

@@ -36,7 +36,9 @@ class FakeClient:
 
 
 def test_every_tool_returns_json(analysis):
-    tb = ToolBox(analysis, my_team_id=1)
+    polled = {"key": "k", "at": "2026-11-14T00:00:00+00:00", "status": "poll", "trade": {"text": "A sends X to B for Y"},
+              "numbers": None, "ruling": None, "votes": {"open": True, "fair": 2, "unfair": 1, "mine": "fair"}}
+    tb = ToolBox(analysis, my_team_id=1, league_trades=lambda: [polled])
     calls = {
         "league_overview": {},
         "team_roster": {},
@@ -53,6 +55,7 @@ def test_every_tool_returns_json(analysis):
         "three_team_trade_ideas": {},
         "simulate_matchup": {"week": 2},
         "league_news": {},
+        "league_trades": {},
     }
     assert set(calls) == {s["name"] for s in ToolBox.schemas()}
     for name, args in calls.items():

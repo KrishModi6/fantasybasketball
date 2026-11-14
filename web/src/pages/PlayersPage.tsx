@@ -29,6 +29,7 @@ export default function PlayersPage() {
   const status = (search.get("status") as Status) || "fa";
   const pos = search.get("pos") ?? "";
   const sort = search.get("sort") || "ros_value";
+  const asc = search.get("dir") === "asc"; // lowest first
   const setParam = (key: string, value: string, fallback: string) => {
     const next = new URLSearchParams(search);
     if (value === fallback) next.delete(key);
@@ -37,20 +38,28 @@ export default function PlayersPage() {
   };
   const setStatus = (v: Status) => setParam("status", v, "fa");
   const setPos = (v: string) => setParam("pos", v, "");
-  const setSort = (v: string) => setParam("sort", v, "ros_value");
+  // Clicking the column that's already sorted flips it: highest first, then lowest first.
+  const setSort = (v: string) => {
+    const next = new URLSearchParams(search);
+    if (v === "ros_value") next.delete("sort");
+    else next.set("sort", v);
+    if (v === sort && !asc) next.set("dir", "asc");
+    else next.delete("dir");
+    setSearch(next, { replace: true });
+  };
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
   useEffect(() => {
     const t = setTimeout(() => setDebounced(q), 220);
     return () => clearTimeout(t);
   }, [q]);
-  const { data, error, isLoading } = usePlayers(league.id, { status, pos, q: debounced, sort, limit: 200 });
+  const { data, error, isLoading } = usePlayers(league.id, { status, pos, q: debounced, sort, asc: asc ? "true" : undefined, limit: 200 });
   const isPoints = league.settings?.scoring.kind !== "categories";
   const cats = league.settings?.scoring.categories ?? [];
 
   return (
     <>
-      <PageHead title="Players" desc="Rest-of-season projections. Select a player to see how the projection is built." />
+      <PageHead title="Players" desc="Rest-of-season projections. Select a player to see how the projection is built. Click a column to sort by it, and again to put the lowest first." />
       <div className="toolbar">
         <Segmented label="Availability" value={status} onChange={setStatus}
           options={[{ value: "fa", label: "Free agents" }, { value: "rostered", label: "Rostered" }, { value: "all", label: "All" }]} />
@@ -76,8 +85,8 @@ export default function PlayersPage() {
                   <th className="hide-sm">Pos</th>
                   {status !== "fa" && <th className="hide-sm">Fantasy team</th>}
                   {COLUMNS.map((c) => (
-                    <th key={c.key} className={`n ${c.hideSm ? "hide-sm" : ""}`} aria-sort={sort === c.key ? "descending" : undefined}>
-                      <Term t={c.term} onClick={() => setSort(c.key)}>{c.label}{sort === c.key ? " ▾" : ""}</Term>
+                    <th key={c.key} className={`n ${c.hideSm ? "hide-sm" : ""}`} aria-sort={sort === c.key ? (asc ? "ascending" : "descending") : undefined}>
+                      <Term t={c.term} onClick={() => setSort(c.key)}>{c.label}{sort === c.key ? (asc ? " ▴" : " ▾") : ""}</Term>
                     </th>
                   ))}
                   {!isPoints && cats.map((c) => <th key={c} className="n hide-sm">{c}</th>)}

@@ -20,7 +20,7 @@ import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -143,6 +143,7 @@ Rules:
 - Courtside's projections are statistics-first. News headlines are context only; mention them, but don't let them override the numbers.
 - When recommending moves, say what to do, why (cite the specific numbers: points per week gained, games this week, win probability change), and the main risk.
 - Prefer the engine's simulated values (waiver_recommendations, evaluate_trade, evaluate_three_team_trade, simulate_matchup) over your own reasoning about player value.
+- When asked to judge trades in the league, or how the league voted, use league_trades. Votes and the admin's ruling are opinions: report them, but base your own call on the numbers.
 - When another manager wants one of the user's players but won't make an offer, use what_to_ask_for to say what a fair return from that team would be.
 - Be concise and practical. Use short markdown: a one-line bottom line first, then bullets or a small table. No preamble.
 - If the user hasn't claimed a team and a tool needs one, ask which team is theirs.
@@ -159,6 +160,9 @@ PRESETS: dict[str, str] = {
                 "does it cost me per week, and who on waivers best covers it?",
     "recap": "Write fun, punchy power-rankings blurbs for every team in the league (one or two sentences each), based on the "
              "rankings, records and playoff odds. Keep it friendly trash talk.",
+    "trade_review": "Analyze the league's trades: the ones that went through and the ones up for a league vote. For each, "
+                    "say who wins by Courtside's numbers and by how much, how the league has voted so far, and whether "
+                    "I should vote fair or not fair and why. Finish with the one trade that most changes the title race.",
     "outlook": "Give me my team's outlook for the rest of the season: where I rank, my playoff and title odds, my biggest "
                "strengths and weaknesses by stat, and the single most valuable move I could make.",
 }
@@ -207,12 +211,12 @@ def _context(a: LeagueAnalysis, my_team_id: int | None) -> str:
 
 def run_assistant(a: LeagueAnalysis, *, user_id: str, my_team_id: int | None, prompt: str,
                   previous_response_id: str | None = None, client: ResponsesClient | None = None,
-                  api_key: str | None = None) -> dict:
+                  api_key: str | None = None, league_trades: Callable[[], list[dict]] | None = None) -> dict:
     s = get_settings()
     # People using their own OpenAI key pay for it, so only shared keys are rationed here.
     if api_key is None and not throttle.allow(user_id, s.ai_user_hourly_limit):
         raise AIError(429, f"You've used the assistant {s.ai_user_hourly_limit} times this hour. Try again later.")
-    tools = ToolBox(a, my_team_id)
+    tools = ToolBox(a, my_team_id, league_trades)
     schemas = ToolBox.schemas()
     instructions = SYSTEM + "\n" + _context(a, my_team_id)
     own_client = client is None

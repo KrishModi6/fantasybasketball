@@ -143,7 +143,10 @@ export function useLeagueSocket(leagueId: string | undefined) {
             qc.invalidateQueries({ queryKey: [...key, "board"] });
             break;
           case "trade_ruled":
-            for (const part of ["board", "activity", "rulings", "review"]) qc.invalidateQueries({ queryKey: [...key, part] });
+            for (const part of ["board", "activity", "rulings", "review", "votes"]) qc.invalidateQueries({ queryKey: [...key, part] });
+            break;
+          case "trade_voted":
+            for (const part of ["votes", "activity"]) qc.invalidateQueries({ queryKey: [...key, part] });
             break;
           case "roster_moves": {
             qc.invalidateQueries({ queryKey: [...key, "activity"] });

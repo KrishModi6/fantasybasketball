@@ -1048,6 +1048,17 @@ table.data th button.term {
   text-underline-offset: 3px;
   cursor: pointer;
 }
+table.data th button.sort {
+  all: unset;
+  cursor: pointer;
+}
+table.data th button.sort:hover {
+  color: var(--text);
+}
+table.data th button.sort:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
 .term:focus-visible {
   outline: 1px solid var(--focus);
   outline-offset: 1px;

@@ -182,6 +182,36 @@ class TradeRuling(Base):
     pending: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class TradePoll(Base):
+    """A trade the league is voting on: fair or not fair. Anyone in the league can open one and vote.
+
+    Like a ruling, a vote is people's opinion and never touches Courtside's numbers; `trade` and `numbers` are
+    copies from when the poll opened. `fair` and `unfair` are used by desktop apps only: the league's tally as the
+    Worker last gave it (services.votes). A shared server counts its trade_votes rows instead.
+    """
+    __tablename__ = "trade_polls"
+    __table_args__ = (UniqueConstraint("league_id", "trade_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id", ondelete="CASCADE"), index=True)
+    trade_key: Mapped[str] = mapped_column(String(32))  # see services.rulings.trade_key
+    trade: Mapped[dict] = mapped_column(JSON)
+    numbers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    fair: Mapped[int] = mapped_column(Integer, default=0)
+    unfair: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TradeVote(Base):
+    """One member's vote on a polled trade. In a desktop app, only this copy's own vote is here."""
+    __tablename__ = "trade_votes"
+    __table_args__ = (UniqueConstraint("league_id", "trade_key", "user_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    league_id: Mapped[str] = mapped_column(ForeignKey("leagues.id", ondelete="CASCADE"), index=True)
+    trade_key: Mapped[str] = mapped_column(String(32))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    vote: Mapped[str] = mapped_column(String(10))  # fair | unfair
+
+
 class Activity(Base):
     __tablename__ = "activity"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

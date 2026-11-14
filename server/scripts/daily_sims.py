@@ -12,7 +12,7 @@ Run at 7:30 AM and 6:30 PM US Eastern on AWS by the Lambda function courtside-da
 Before the season's first matchup week ends there is nothing to score, and it stops after step 1. The
 numbers move when a week ends; on other days the run repeats the same weeks.
 
-Usage: python -m scripts.daily_sims [--season 2027] [--leagues 32] [--profile courtside]
+Usage: python -m scripts.daily_sims [--season 2027] [--leagues 256] [--profile courtside]
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from scripts import backtest_sims as B  # noqa: E402
 from scripts.push_tracking_s3 import BAD_CREDENTIALS, credentials_hint, default_bucket  # noqa: E402
 
 FUNCTION = "courtside-sims"
-LEAGUES = 32  # they share the same real box scores; more leagues only smooth out drafts and rosters
+LEAGUES = 256  # they share the same real box scores; more leagues only smooth out drafts and rosters (32 until 2026-11-14)
 PER_INVOCATION = 2  # one process per league: 3,008 MB of Lambda is about 1.7 vCPUs
 WAIT = 14 * 60  # seconds to wait for the leagues; an invocation stops at 15 minutes
 

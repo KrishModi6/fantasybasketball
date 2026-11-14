@@ -8,6 +8,9 @@
 // It also carries a league admin's trade rulings between desktop apps, since each app has its own database.
 // Any copy can read a league's rulings. Writing takes the key only the admin's copy holds: the first copy to
 // publish for a league claims it with that key's hash, and every later write has to match.
+//
+// League votes travel the same way: any copy can put a trade to a vote and vote on it, once per copy. Each copy
+// holds a random voter key; only its hash is kept, so a vote can be changed or withdrawn but not traced to a person.
 
 const OPENAI_URL = 'https://api.openai.com/v1/responses';
 const JOB_TTL_MS = 120_000;
@@ -17,8 +20,11 @@ const DEVICE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const RESPONSE_ID = /^resp_[A-Za-z0-9_-]{1,200}$/;
 const TOOL_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
 const RULINGS_ROUTE = /^\/v1\/leagues\/([0-9a-f]{32,64})\/rulings(?:\/([0-9a-f]{32}))?$/;
+const VOTES_ROUTE = /^\/v1\/leagues\/([0-9a-f]{32,64})\/votes(?:\/([0-9a-f]{32}))?$/;
 const MAX_RULING_BYTES = 16_000;
 const MAX_LEAGUE_RULINGS = 500;
+const MAX_LEAGUE_POLLS = 300;
+const MAX_POLL_VOTERS = 60;
 const securityHeaders = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
 
 export class HttpError extends Error {
@@ -196,6 +202,59 @@ async function handleRulings(request, env, league, tradeKey, now = Date.now()) {
   return { status: 200, body: { ok: true } };
 }
 
+export function validateVote(body) {
+  if (!isObject(body)) throw new HttpError(400, 'Invalid vote.');
+  const { vote = null, trade, numbers = null } = body;
+  if (vote !== null && vote !== 'fair' && vote !== 'unfair') throw new HttpError(400, 'A vote is fair or unfair.');
+  if (!isObject(trade) || (numbers !== null && !isObject(numbers))) throw new HttpError(400, 'Invalid vote.');
+  return { vote, trade, numbers };
+}
+
+// GET lists a league's polls with their tallies and this copy's own vote. PUT opens a poll (vote: null) or votes
+// on one, opening it if need be; the first copy to open a poll says what the trade is. DELETE withdraws a vote.
+async function handleVotes(request, env, league, tradeKey, now = Date.now()) {
+  const db = env.DB;
+  const voterKey = request.headers.get('x-league-voter') ?? '';
+  if (voterKey.length > 200) throw new HttpError(400, 'Invalid voter key.');
+  const voter = voterKey ? await sha256Hex(voterKey) : '';
+  const sql = (query, ...args) => db.prepare(query).bind(...args);
+  const tally = `COALESCE((SELECT SUM(vote = 'fair') FROM league_votes v WHERE v.league = p.league AND v.trade_key = p.trade_key), 0) AS fair,
+    COALESCE((SELECT SUM(vote = 'unfair') FROM league_votes v WHERE v.league = p.league AND v.trade_key = p.trade_key), 0) AS unfair,
+    (SELECT vote FROM league_votes v WHERE v.league = p.league AND v.trade_key = p.trade_key AND v.voter = ?) AS mine`;
+  const poll = r => ({ ...JSON.parse(r.body), key: r.trade_key, at: new Date(r.created_at).toISOString(), fair: r.fair, unfair: r.unfair, mine: r.mine ?? null });
+
+  if (!tradeKey) {
+    if (request.method !== 'GET') throw new HttpError(405, 'Use GET.');
+    const { results } = await sql(`SELECT p.trade_key, p.body, p.created_at, ${tally} FROM league_polls p WHERE p.league = ? ORDER BY p.created_at DESC`, voter, league).all();
+    return { status: 200, body: { polls: results.map(poll) } };
+  }
+
+  if (request.method !== 'PUT' && request.method !== 'DELETE') throw new HttpError(405, 'Use PUT or DELETE.');
+  if (!voter) throw new HttpError(400, 'Missing voter key.');
+  if (request.method === 'DELETE') {
+    await sql('DELETE FROM league_votes WHERE league = ? AND trade_key = ? AND voter = ?', league, tradeKey, voter).run();
+  } else {
+    const { vote, trade, numbers } = validateVote(await readJSON(request, MAX_RULING_BYTES));
+    const held = await sql(`SELECT (SELECT COUNT(*) FROM league_polls WHERE league = ?) AS polls,
+      (SELECT COUNT(*) FROM league_polls WHERE league = ? AND trade_key = ?) AS existing,
+      (SELECT COUNT(*) FROM league_votes WHERE league = ? AND trade_key = ? AND voter != ?) AS others`,
+      league, league, tradeKey, league, tradeKey, voter).first();
+    if (!held.existing && held.polls >= MAX_LEAGUE_POLLS) throw new HttpError(429, 'This league has reached the limit on votes.');
+    if (vote && held.others >= MAX_POLL_VOTERS) throw new HttpError(429, 'This trade has reached the limit on votes.');
+    await spendRulingWrite(db, env, now);
+    await db.batch([
+      sql('INSERT OR IGNORE INTO league_polls(league, trade_key, body, created_at) VALUES (?, ?, ?, ?)',
+        league, tradeKey, JSON.stringify({ trade, numbers }), now),
+      ...(vote ? [sql(`INSERT INTO league_votes(league, trade_key, voter, vote, updated_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(league, trade_key, voter) DO UPDATE SET vote = excluded.vote, updated_at = excluded.updated_at`,
+        league, tradeKey, voter, vote, now)] : []),
+    ]);
+  }
+  const row = await sql(`SELECT p.trade_key, p.body, p.created_at, ${tally} FROM league_polls p WHERE p.league = ? AND p.trade_key = ?`, voter, league, tradeKey).first();
+  if (!row) throw new HttpError(404, 'No vote on that trade.');
+  return { status: 200, body: poll(row) };
+}
+
 async function callOpenAI(env, request, maxOutputTokens, signal) {
   let upstream;
   try {
@@ -234,14 +293,15 @@ export default {
         await env.DB.prepare('SELECT bucket FROM model_budget LIMIT 1').first();
         return send(200, { service: 'courtside-ai', version: 1, model: env.MODEL || 'gpt-6-luna', ready: Boolean(env.OPENAI_API_KEY && env.CLIENT_TOKEN) });
       }
-      const rulings = route.match(RULINGS_ROUTE);
-      if (route !== '/v1/responses' && !rulings) return send(404, { error: 'Not found.' });
-      if (!rulings && request.method !== 'POST') return send(405, { error: 'Use POST.' }, { Allow: 'POST' });
+      const rulings = route.match(RULINGS_ROUTE), votes = route.match(VOTES_ROUTE);
+      if (route !== '/v1/responses' && !rulings && !votes) return send(404, { error: 'Not found.' });
+      if (!rulings && !votes && request.method !== 'POST') return send(405, { error: 'Use POST.' }, { Allow: 'POST' });
       if (typeof env.CLIENT_TOKEN !== 'string' || env.CLIENT_TOKEN.length < 24) return send(503, { error: 'The AI service is not configured yet.' });
       if (!await matchesToken(request.headers.get('authorization'), env.CLIENT_TOKEN))
         return send(401, { error: 'This copy of Courtside is out of date. Download the latest release.' });
-      if (rulings) {
-        const { status, body } = await handleRulings(request, env, rulings[1], rulings[2]);
+      if (rulings || votes) {
+        const { status, body } = rulings ? await handleRulings(request, env, rulings[1], rulings[2])
+          : await handleVotes(request, env, votes[1], votes[2]);
         return status === 204 ? new Response(null, { status, headers }) : send(status, body);
       }
       const deviceId = request.headers.get('x-device-id') ?? '';

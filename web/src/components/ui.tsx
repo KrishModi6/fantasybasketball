@@ -42,6 +42,38 @@ export function Term({ t, children, onClick }: { t: TermKey; children?: ReactNod
   );
 }
 
+export type SortDir = "desc" | "asc";
+
+/** Sorting a table that's already on the page: a column's first click puts the highest first, the second the
+ *  lowest first, and the third goes back to the order it came in. Rows with no value stay at the bottom. */
+export function useSort<K extends string>() {
+  const [sort, setSort] = useState<{ key: K; dir: SortDir } | null>(null);
+  const toggle = (key: K) => setSort((s) => (s?.key !== key ? { key, dir: "desc" } : s.dir === "desc" ? { key, dir: "asc" } : null));
+  const apply = <T,>(rows: T[], value: (row: T, key: K) => number | null | undefined): T[] => {
+    if (!sort) return rows;
+    const sign = sort.dir === "desc" ? -1 : 1;
+    return [...rows].sort((a, b) => {
+      const x = value(a, sort.key), y = value(b, sort.key);
+      if (x == null || y == null) return (x == null ? 1 : 0) - (y == null ? 1 : 0);
+      return sign * (x - y);
+    });
+  };
+  const dir = (key: K): SortDir | undefined => (sort?.key === key ? sort.dir : undefined);
+  return { sort, toggle, apply, dir };
+}
+
+export const sortArrow = (dir?: SortDir) => (dir === "desc" ? " ▾" : dir === "asc" ? " ▴" : "");
+export const ariaSort = (dir?: SortDir) => (dir === "desc" ? "descending" : dir === "asc" ? "ascending" : undefined);
+
+/** A plain column header that sorts its table when clicked (headers with a glossary tip use Term's onClick). */
+export function SortTh({ dir, onSort, children, className = "n" }: { dir?: SortDir; onSort: () => void; children: ReactNode; className?: string }) {
+  return (
+    <th className={className} aria-sort={ariaSort(dir)}>
+      <button type="button" className="sort" title="Sort: highest first, then lowest first" onClick={onSort}>{children}{sortArrow(dir)}</button>
+    </th>
+  );
+}
+
 export function PageHead({ title, desc, actions }: { title: ReactNode; desc?: ReactNode; actions?: ReactNode }) {
   return (
     <header className="page-head">

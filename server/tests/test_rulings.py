@@ -870,3 +870,153 @@ def test_league_key_matches_across_copies_and_hides_the_league():
     assert re.fullmatch(r"[0-9a-f]{40}", share.league_key(a))
     assert share.league_key(League(source="espn", season=2028, connector_config=a.connector_config)) != share.league_key(a)
     assert share.league_key(League(source="demo", season=2027, connector_config=a.connector_config)) is None
+
+
+# ---- league votes ----------------------------------------------------------------------------------------
+
+class VotingWorker(FakeWorker):
+    """Adds the votes routes of the Worker: one vote per voter key, and the tally anyone can read."""
+
+    def __init__(self):
+        super().__init__()
+        self.polls: dict[str, dict[str, dict]] = {}
+
+    def __call__(self, method, path, admin_key=None, body=None, voter=None):
+        found = re.fullmatch(r"/v1/leagues/([0-9a-f]{40})/votes(?:/([0-9a-f]{32}))?", path)
+        if not found:
+            return super().__call__(method, path, admin_key, body)
+        self.calls.append((method, path))
+        if self.down:
+            return None
+        league, trade = found.groups()
+        polls = self.polls.setdefault(league, {})
+
+        def out(key):
+            p = polls[key]
+            cast = list(p["votes"].values())
+            return {"trade": p["trade"], "numbers": p["numbers"], "key": key, "at": "2026-11-14T12:00:00.000Z",
+                    "fair": cast.count("fair"), "unfair": cast.count("unfair"), "mine": p["votes"].get(voter)}
+
+        if trade is None:
+            return httpx.Response(200, json={"polls": [out(k) for k in polls]})
+        if method == "DELETE":
+            if trade not in polls:
+                return httpx.Response(404, json={"error": "No vote on that trade."})
+            polls[trade]["votes"].pop(voter, None)
+        else:
+            body = json.loads(json.dumps(body))
+            p = polls.setdefault(trade, {"trade": body["trade"], "numbers": body["numbers"], "votes": {}})
+            if body["vote"]:
+                p["votes"][voter] = body["vote"]
+        return httpx.Response(200, json=out(trade))
+
+
+@pytest.fixture
+def voting(worker, monkeypatch):
+    from app.services import votes
+    fake = VotingWorker()
+    monkeypatch.setattr(share, "_call", fake)
+    monkeypatch.setattr(votes, "_last_pull", {})
+    return fake
+
+
+def _votes(client, lid: str, who: dict) -> dict[str, dict]:
+    from app.services import votes
+    votes._last_pull.clear()
+    return {t["key"]: t for t in client.get(f"/api/leagues/{lid}/trades/votes", headers=who).json()["trades"]}
+
+
+def _vote_feed(client, lid: str, who: dict) -> list[str]:
+    return [i["message"] for i in client.get(f"/api/leagues/{lid}/activity", headers=who).json() if i["kind"] == "vote"]
+
+
+def test_every_member_of_a_shared_league_can_vote(client):
+    snap = make_snapshot()
+    owner_id, owner = _user("Owner")
+    friend_id, friend = _user("Friend")
+    lid = _league(owner_id, snap, source="demo")
+    _join(lid, friend_id)
+    key = _posted_trade(client, lid, owner, snap)
+    evaluation = client.get(f"/api/leagues/{lid}/trades/board", headers=owner).json()[0]["evaluation"]
+    url = f"/api/leagues/{lid}/trades/votes/{key}"
+
+    assert _votes(client, lid, friend)[key]["votes"] == {"open": False, "fair": 0, "unfair": 0, "mine": None}
+    assert client.put(url, json={"vote": "unfair"}, headers=friend).json()["votes"]["mine"] == "unfair"
+    client.put(url, json={"vote": "fair"}, headers=owner)
+    client.put(url, json={"vote": "unfair"}, headers=owner)  # changing it isn't a second vote
+    assert _votes(client, lid, owner)[key]["votes"] == {"open": True, "fair": 0, "unfair": 2, "mine": "unfair"}
+    assert _votes(client, lid, friend)[key]["numbers"]["sides"]
+
+    # Taking a vote back, and Courtside's own numbers are untouched throughout.
+    assert client.delete(url, headers=friend).json()["votes"] == {"open": True, "fair": 0, "unfair": 1, "mine": None}
+    assert client.get(f"/api/leagues/{lid}/trades/board", headers=owner).json()[0]["evaluation"] == evaluation
+    assert client.put(f"/api/leagues/{lid}/trades/votes/{'0' * 32}", json={"vote": "fair"}, headers=friend).status_code == 404
+    assert client.put(url, json={"vote": "meh"}, headers=friend).status_code == 422
+    _, stranger = _user("Stranger")
+    assert client.put(url, json={"vote": "fair"}, headers=stranger).status_code == 404
+
+
+def test_a_trade_from_the_analyzer_can_be_put_to_a_vote_without_posting_it(client):
+    snap = make_snapshot()
+    owner_id, owner = _user("Owner")
+    friend_id, friend = _user("Friend")
+    lid = _league(owner_id, snap, source="demo")
+    _join(lid, friend_id)
+    x, y, a, b = _lopsided(snap)
+    opened = client.post(f"/api/leagues/{lid}/trades/votes", json=_trade_body(x, y, a, b), headers=friend)
+    assert opened.status_code == 201 and opened.json()["new"] is True and opened.json()["status"] == "poll"
+    key = opened.json()["key"]
+    assert key == trade_key({x: {a: y}, y: {b: x}})
+    assert client.post(f"/api/leagues/{lid}/trades/votes", json=_trade_body(x, y, a, b), headers=owner).json()["new"] is False
+    assert client.get(f"/api/leagues/{lid}/trades/board", headers=owner).json() == []
+    feed = _vote_feed(client, lid, owner)
+    assert len(feed) == 1 and feed[0].startswith("Friend put a trade to a league vote:")
+    client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=owner)
+    seen = _votes(client, lid, friend)[key]
+    assert seen["votes"] == {"open": True, "fair": 1, "unfair": 0, "mine": None} and seen["numbers"]["fairness"]["label"]
+
+
+def test_votes_reach_every_friends_app(client, voting):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    friend_id, friend = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    fid = _league(friend_id, snap, cfg={**ESPN, "shared_by": "the league owner"})
+    x, y, a, b = _lopsided(snap)
+    # The friend, who can't rule, opens the vote from their analyzer and votes; it isn't on anyone's board.
+    key = client.post(f"/api/leagues/{fid}/trades/votes", json=_trade_body(x, y, a, b), headers=friend).json()["key"]
+    assert client.put(f"/api/leagues/{fid}/trades/votes/{key}", json={"vote": "unfair"}, headers=friend).json()["votes"]["unfair"] == 1
+
+    seen = _votes(client, lid, admin)[key]
+    assert seen["status"] == "poll" and seen["trade"]["text"] and seen["numbers"]["sides"]
+    assert seen["votes"] == {"open": True, "fair": 0, "unfair": 1, "mine": None}
+    assert _vote_feed(client, lid, admin) == [f"A trade is up for a league vote: {seen['trade']['text']}"]
+    _votes(client, lid, admin)
+    assert len(_vote_feed(client, lid, admin)) == 1  # reading again doesn't repeat itself in the feed
+
+    assert client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=admin).json()["votes"] == {
+        "open": True, "fair": 1, "unfair": 1, "mine": "fair"}
+    assert _votes(client, fid, friend)[key]["votes"] == {"open": True, "fair": 1, "unfair": 1, "mine": "unfair"}
+    assert client.delete(f"/api/leagues/{fid}/trades/votes/{key}", headers=friend).json()["votes"]["unfair"] == 0
+    assert _votes(client, lid, admin)[key]["votes"] == {"open": True, "fair": 1, "unfair": 0, "mine": "fair"}
+
+
+def test_a_vote_that_cant_reach_the_league_isnt_saved(client, voting):
+    snap = make_snapshot()
+    admin_id, admin = _user("You")
+    lid = _league(admin_id, snap, cfg=ESPN)
+    key = _posted_trade(client, lid, admin, snap)
+    voting.down = True
+    assert client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=admin).status_code == 503
+    assert _votes(client, lid, admin)[key]["votes"] == {"open": False, "fair": 0, "unfair": 0, "mine": None}
+    voting.down = False
+    assert client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=admin).json()["votes"]["fair"] == 1
+
+
+def test_players_sort_lowest_first(client):
+    owner_id, owner = _user("Owner")
+    lid = _league(owner_id, source="demo")
+    url = f"/api/leagues/{lid}/players?status=all&sort=fp_pg"
+    high = [p["fp_pg"] for p in client.get(url, headers=owner).json()["players"]]
+    low = [p["fp_pg"] for p in client.get(url + "&asc=true", headers=owner).json()["players"]]
+    assert high == sorted(high, reverse=True) and low == sorted(low) and high[0] > high[-1]

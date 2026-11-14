@@ -11,3 +11,14 @@ CREATE TABLE IF NOT EXISTS league_rulings (
   league TEXT NOT NULL, trade_key TEXT NOT NULL, body TEXT NOT NULL, updated_at INTEGER NOT NULL,
   PRIMARY KEY (league, trade_key)
 );
+
+-- League votes on trades, carried the same way. Any copy can open a poll or vote; voter is the SHA-256 of a
+-- random key each copy holds, so one copy has one vote on a trade.
+CREATE TABLE IF NOT EXISTS league_polls (
+  league TEXT NOT NULL, trade_key TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL,
+  PRIMARY KEY (league, trade_key)
+);
+CREATE TABLE IF NOT EXISTS league_votes (
+  league TEXT NOT NULL, trade_key TEXT NOT NULL, voter TEXT NOT NULL, vote TEXT NOT NULL, updated_at INTEGER NOT NULL,
+  PRIMARY KEY (league, trade_key, voter)
+);
