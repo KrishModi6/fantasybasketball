@@ -195,15 +195,6 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
     },
     onError: (e: Error) => toast(e.message, "err"),
   });
-  const poll = useMutation({
-    mutationFn: () => api<{ new: boolean }>(`/api/leagues/${league.id}/trades/votes`, { body: tradeBody(submitted!) }),
-    onSuccess: (r) => {
-      toast(r.new ? "It's up for a league vote. Everyone can vote on the League board tab." : "That trade is already up for a vote. See the League board tab.");
-      qc.invalidateQueries({ queryKey: ["league", league.id, "votes"] });
-      qc.invalidateQueries({ queryKey: ["league", league.id, "activity"] });
-    },
-    onError: (e: Error) => toast(e.message, "err"),
-  });
   const three = draft.c != null;
   const sides = sidesOf(draft);
   const toggle = (s: Side, id: string) => {
@@ -272,14 +263,6 @@ function Analyzer({ draft, setDraft, autoRun }: { draft: Draft; setDraft: (d: Dr
             <div className="row wrap">
               <input className="input" style={{ flex: 1, minWidth: 220 }} placeholder="Note (optional)" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} aria-label="Note" />
               <button className="btn" onClick={() => share.mutate()} disabled={share.isPending}>Post</button>
-            </div>
-          </Panel>
-          <Panel title="Put it to a league vote">
-            <div className="row wrap">
-              <span className="small muted" style={{ flex: 1, minWidth: 220 }}>
-                Ask the whole league whether this trade is fair. Everyone can vote fair or not fair, and the count shows on the League board tab. It doesn't change Courtside's numbers.
-              </span>
-              <button className="btn" onClick={() => poll.mutate()} disabled={poll.isPending || stale}>{poll.isPending ? "Sending…" : "Start a league vote"}</button>
             </div>
           </Panel>
         </>

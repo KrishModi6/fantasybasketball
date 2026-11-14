@@ -12,6 +12,7 @@ from ..orm import League, User, UserSettings
 from ..security import decrypt_json, encrypt_json
 from ..services.ai import PRESETS, AIError, ai_mode, check_openai_key, run_assistant
 from ..services.analysis import LeagueAnalysis
+from ..services.rulings import review_queue
 from ..services.votes import vote_list
 from .analysis import analysis
 
@@ -75,7 +76,8 @@ def remove_key(user: User = Depends(current_user), db: Session = Depends(get_db)
 def _league_trades(a: LeagueAnalysis, league_id: str, user_id: str) -> list[dict]:
     """For the assistant's league_trades tool. It runs on a worker thread, so it gets a session of its own."""
     with SessionLocal() as db:
-        return vote_list(db, a, db.get(League, league_id), user_id)
+        voted = {r["key"]: r for r in vote_list(db, a, db.get(League, league_id), user_id)}
+        return [voted.get(r["key"], r) for r in review_queue(db, a, league_id)]
 
 
 @router.post("/api/leagues/{league_id}/ai/ask")

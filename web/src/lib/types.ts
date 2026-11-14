@@ -324,9 +324,8 @@ export interface ReviewTrade {
   ruling: Ruling | null;
 }
 
-/** A trade the league can vote on, with the league's count and this member's own vote. */
-export interface VoteTrade extends Omit<ReviewTrade, "status"> {
-  status: ReviewTrade["status"] | "poll"; // poll: put to a vote from someone's analyzer, not on this board
+/** A trade that went through, with the league's count and this member's own vote. */
+export interface VoteTrade extends ReviewTrade {
   votes: { open: boolean; fair: number; unfair: number; mine: RulingCall | null };
 }
 

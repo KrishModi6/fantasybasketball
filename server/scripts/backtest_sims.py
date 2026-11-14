@@ -67,7 +67,8 @@ LOG_SEASONS = (2023, 2024, 2025, 2026)  # game logs the absence table draws on
 OPENING = {2023: date(2022, 10, 18), 2024: date(2023, 10, 24), 2025: date(2024, 10, 22), 2026: date(2025, 10, 21)}
 TEAMS, ROUNDS, REG_WEEKS, PLAYOFF_TEAMS = 10, 13, 19, 4
 CHECKPOINTS = (1, 4, 7, 10, 13, 16, 19)  # weeks at whose start playoff odds are forecast
-N_SIMS = 2000  # Monte Carlo draws per matchup (the app uses 10,000 for smoother charts; 2,000 moves p by <0.012)
+N_SIMS = 2000  # Monte Carlo draws per matchup in the study (2,000 moves p by <0.012 from the app's 10,000)
+APP_N_SIMS = 10_000  # the daily check scores the app as shipped, so it draws as many as the app does
 N_SEASON_SIMS = 4000
 SEASON_CVS = (0.0, 0.05, 0.10, 0.15, 0.20, 0.25)  # fbb.strength.SEASON_TEAM_CV values tried at every checkpoint
 INPUTS = ROOT / "data" / "cache" / "sims"
@@ -520,7 +521,7 @@ def run_league(season: Season, league: int, configs: list[str] | None = None) ->
                 side = []
                 for tid in (a, b):
                     players, plans = sim._plan(ctx.team_roster(tid), days, set())
-                    totals, _, starts, _, _ = sim._simulate_team(players, plans, N_SIMS)
+                    totals, _, starts, _, _ = sim._simulate_team(players, plans, APP_N_SIMS if cfg == "app" else N_SIMS)
                     score = totals @ w_fp
                     actual, real_starts = real_score(season, players, plans)
                     win = ctx.project_window(ctx.team_roster(tid), days)

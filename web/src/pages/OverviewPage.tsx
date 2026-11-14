@@ -72,10 +72,10 @@ export function OverviewPage() {
               </div>
               <p className="panel-foot">Power: this season's record for the share of the season played, plus the expected share of wins against every team in every remaining week for the rest. Odds from 5,000 simulated seasons of the actual schedule.</p>
             </Panel>
+            <GamesPanel />
             {myTeamId != null && <QuickMoves teamId={myTeamId} />}
           </div>
           <div className="stack">
-            <GamesPanel />
             <ActivityPanel />
             <NewsPanel />
           </div>

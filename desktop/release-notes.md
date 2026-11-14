@@ -1,6 +1,13 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.6.1
+## What's new in 0.6.2
+
+- **Votes are only on trades that went through.** The **League vote** panel now lists just the trades that happened: real trades from ESPN, and board posts that have since gone through. Proposals and trade ideas can't be voted on until they happen.
+- **No more votes from the trade analyzer.** **Start a league vote** is gone from **Trades > Analyze**. Votes that 0.6.1 started there are hidden. Votes already cast on real trades stay.
+- **NBA games moved.** On **Overview**, the **NBA games** panel now sits on the left, under **Power rankings** and above **Best add/drop moves**.
+- **A much bigger daily accuracy check.** Courtside's check on AWS now uses the app's full 10,000 simulations per matchup, and every run adds new practice leagues for the weeks played so far instead of replaying the same ones. Through the week that grows to thousands of leagues, so the accuracy numbers get steadier. This measures how accurate the win odds are more precisely. It doesn't change the odds themselves.
+
+## In 0.6.1
 
 - **Everyone can vote on trades.** A new **League vote** panel under **Trades > League board** lists every real trade, every board post and every trade someone has put to a vote. Anyone in the league can vote **Fair** or **Not fair**, and everyone sees the count. Click your vote again to take it back. Each app gets one vote per trade.
 - **Put any trade to a vote.** After you evaluate a trade on **Trades > Analyze**, choose **Start a league vote**. The trade and Courtside's numbers for it show up in everyone's League vote panel, without posting it to the board.

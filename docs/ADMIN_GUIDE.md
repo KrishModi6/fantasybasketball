@@ -95,10 +95,10 @@ A league's admin can rule each trade fair or not fair from the **Admin** tab. A 
 
 ### League votes
 
-Every member can put a trade to a league vote and vote fair or not fair (`trade_polls`, `trade_votes`; `services/votes.py`). Like a ruling, a vote never changes a trade's evaluation and can't touch ESPN.
+Every member can vote fair or not fair on the trades that went through: real trades a refresh found, and board posts that have since happened (`trade_polls`, `trade_votes`; `services/votes.py`). Ideas can't be voted on. Like a ruling, a vote never changes a trade's evaluation and can't touch ESPN.
 
 - **On a shared server** each member's vote is a row, and the count is those rows.
-- **In the desktop app**, ESPN leagues send votes through the Worker (`/v1/leagues/{league_key}/votes`, tables `league_polls` and `league_votes`). Any copy can write. Each makes a random voter key (in `user_settings`), sent as `X-League-Voter`; the Worker keeps its SHA-256, one vote per key and trade, and answers with the trade and the count. A vote is saved only once the Worker has it, so a copy that can't reach the Worker (or reaches one deployed before votes existed) gets `503` and saves nothing. The first copy to open a poll supplies the trade's description and Courtside's numbers, which is how a trade analyzed on one computer shows up on the others.
+- **In the desktop app**, ESPN leagues send votes through the Worker (`/v1/leagues/{league_key}/votes`, tables `league_polls` and `league_votes`). Any copy can write. Each makes a random voter key (in `user_settings`), sent as `X-League-Voter`; the Worker keeps its SHA-256, one vote per key and trade, and answers with the trade and the count. A vote is saved only once the Worker has it, so a copy that can't reach the Worker (or reaches one deployed before votes existed) gets `503` and saves nothing. Every copy finds the same real trades in its own refreshes, so the Worker only has to carry the count. 0.6.1 could also open polls on analyzed trades; newer copies ignore any poll that isn't a trade they saw go through.
 - **Deploying.** The same two commands as above, schema first, before the app release that has votes.
 - **Limits.** 300 polls a league, 60 voters a poll, and the same `RULINGS_DAILY_LIMIT` on writes. The client token is in every release build, so someone who extracts it could add votes; the limits cap that, and a poll's rows can be removed in D1 (`DELETE FROM league_votes WHERE league = ? AND trade_key = ?`).
 

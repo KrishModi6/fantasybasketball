@@ -145,10 +145,10 @@ class ToolBox:
                    "week": {"type": "integer", "description": "Matchup period; defaults to the current week."},
                    "sit": {"type": "array", "items": {"type": "string"}, "description": "Players to bench in the simulation."},
                }),
-            fn("league_trades", "The league's trades to judge: real trades that went through, trades posted on the league "
-               "board and trades put to a league vote. For each: who sends whom, Courtside's numbers for every team "
-               "(points per week, playoff and title odds before and after, verdict, fairness), how the league has voted "
-               "(fair / not fair) with the user's own vote, and the league admin's ruling if there is one."),
+            fn("league_trades", "The league's trades to judge: real trades that went through and trades posted on the "
+               "league board. For each: who sends whom, Courtside's numbers for every team "
+               "(points per week, playoff and title odds before and after, verdict, fairness), how the league has voted on "
+               "it if it went through (fair / not fair) with the user's own vote, and the league admin's ruling if there is one."),
             fn("league_news", "Recent NBA headlines that mention players in this league, with their fantasy teams. Context "
                "only; projections do not use headlines."),
         ]
@@ -465,8 +465,9 @@ class ToolBox:
                            "playoff_odds": [_r(s["before_playoff_odds"], 2), _r(s["after_playoff_odds"], 2)],
                            "title_odds": [_r(s["before_title_odds"], 2), _r(s["after_title_odds"], 2)]}
                           for s in n.get("sides", [])],
-                "league_vote": {"fair": r["votes"]["fair"], "not_fair": r["votes"]["unfair"],
-                                "users_vote": {"fair": "fair", "unfair": "not fair"}.get(r["votes"]["mine"])},
+                "league_vote": ({"fair": r["votes"]["fair"], "not_fair": r["votes"]["unfair"],
+                                 "users_vote": {"fair": "fair", "unfair": "not fair"}.get(r["votes"]["mine"])}
+                                if "votes" in r else None),
                 "admin_ruling": ({"ruling": {"fair": "fair", "unfair": "not fair"}[r["ruling"]["ruling"]],
                                   "note": r["ruling"]["note"]} if r["ruling"] else None),
             })

@@ -930,82 +930,86 @@ def _vote_feed(client, lid: str, who: dict) -> list[str]:
     return [i["message"] for i in client.get(f"/api/leagues/{lid}/activity", headers=who).json() if i["kind"] == "vote"]
 
 
-def test_every_member_of_a_shared_league_can_vote(client):
+def _real_trade(owner_id: str, cfg: dict | None = None) -> tuple[str, str, object]:
+    """A league whose last refresh found a real trade. Returns the league, the trade's key and the new rosters."""
     snap = make_snapshot()
+    x, y, a, b = _lopsided(snap)
+    lid = _league(owner_id, snap, cfg=cfg)
+    new = _traded(snap, x, y, a, b)
+    _refresh(lid, snap, new)
+    return lid, trade_key({x: {a: y}, y: {b: x}}), new
+
+
+def test_every_member_can_vote_on_a_trade_that_went_through(client):
     owner_id, owner = _user("Owner")
     friend_id, friend = _user("Friend")
-    lid = _league(owner_id, snap, source="demo")
+    lid, key, _ = _real_trade(owner_id)
     _join(lid, friend_id)
-    key = _posted_trade(client, lid, owner, snap)
-    evaluation = client.get(f"/api/leagues/{lid}/trades/board", headers=owner).json()[0]["evaluation"]
+    numbers_before = client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"][0]["numbers"]
     url = f"/api/leagues/{lid}/trades/votes/{key}"
 
-    assert _votes(client, lid, friend)[key]["votes"] == {"open": False, "fair": 0, "unfair": 0, "mine": None}
+    [row] = _votes(client, lid, friend).values()
+    assert row["status"] == "done" and row["on_espn"] is True
+    assert row["votes"] == {"open": False, "fair": 0, "unfair": 0, "mine": None}
     assert client.put(url, json={"vote": "unfair"}, headers=friend).json()["votes"]["mine"] == "unfair"
     client.put(url, json={"vote": "fair"}, headers=owner)
     client.put(url, json={"vote": "unfair"}, headers=owner)  # changing it isn't a second vote
     assert _votes(client, lid, owner)[key]["votes"] == {"open": True, "fair": 0, "unfair": 2, "mine": "unfair"}
-    assert _votes(client, lid, friend)[key]["numbers"]["sides"]
 
     # Taking a vote back, and Courtside's own numbers are untouched throughout.
     assert client.delete(url, headers=friend).json()["votes"] == {"open": True, "fair": 0, "unfair": 1, "mine": None}
-    assert client.get(f"/api/leagues/{lid}/trades/board", headers=owner).json()[0]["evaluation"] == evaluation
-    assert client.put(f"/api/leagues/{lid}/trades/votes/{'0' * 32}", json={"vote": "fair"}, headers=friend).status_code == 404
+    assert client.get(f"/api/leagues/{lid}/trades/review", headers=owner).json()["trades"][0]["numbers"] == numbers_before
     assert client.put(url, json={"vote": "meh"}, headers=friend).status_code == 422
     _, stranger = _user("Stranger")
     assert client.put(url, json={"vote": "fair"}, headers=stranger).status_code == 404
 
 
-def test_a_trade_from_the_analyzer_can_be_put_to_a_vote_without_posting_it(client):
+def test_only_trades_that_went_through_can_be_voted_on(client):
     snap = make_snapshot()
     owner_id, owner = _user("Owner")
-    friend_id, friend = _user("Friend")
-    lid = _league(owner_id, snap, source="demo")
-    _join(lid, friend_id)
+    lid = _league(owner_id, snap)
+    key = _posted_trade(client, lid, owner, snap)  # an idea on the board, not a trade that happened
+
+    assert _votes(client, lid, owner) == {}
+    assert client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=owner).status_code == 409
+    assert client.put(f"/api/leagues/{lid}/trades/votes/{'0' * 32}", json={"vote": "fair"}, headers=owner).status_code == 404
+    assert client.post(f"/api/leagues/{lid}/trades/votes", json={}, headers=owner).status_code == 405  # no analyzer polls
+
+    # Once the posted deal goes through on ESPN, it's open for votes.
     x, y, a, b = _lopsided(snap)
-    opened = client.post(f"/api/leagues/{lid}/trades/votes", json=_trade_body(x, y, a, b), headers=friend)
-    assert opened.status_code == 201 and opened.json()["new"] is True and opened.json()["status"] == "poll"
-    key = opened.json()["key"]
-    assert key == trade_key({x: {a: y}, y: {b: x}})
-    assert client.post(f"/api/leagues/{lid}/trades/votes", json=_trade_body(x, y, a, b), headers=owner).json()["new"] is False
-    assert client.get(f"/api/leagues/{lid}/trades/board", headers=owner).json() == []
-    feed = _vote_feed(client, lid, owner)
-    assert len(feed) == 1 and feed[0].startswith("Friend put a trade to a league vote:")
-    client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=owner)
-    seen = _votes(client, lid, friend)[key]
-    assert seen["votes"] == {"open": True, "fair": 1, "unfair": 0, "mine": None} and seen["numbers"]["fairness"]["label"]
+    _refresh(lid, snap, _traded(snap, x, y, a, b))
+    assert _votes(client, lid, owner)[key]["on_espn"] is True
+    assert client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=owner).json()["votes"]["fair"] == 1
 
 
 def test_votes_reach_every_friends_app(client, voting):
-    snap = make_snapshot()
     admin_id, admin = _user("You")
     friend_id, friend = _user("You")
-    lid = _league(admin_id, snap, cfg=ESPN)
-    fid = _league(friend_id, snap, cfg={**ESPN, "shared_by": "the league owner"})
-    x, y, a, b = _lopsided(snap)
-    # The friend, who can't rule, opens the vote from their analyzer and votes; it isn't on anyone's board.
-    key = client.post(f"/api/leagues/{fid}/trades/votes", json=_trade_body(x, y, a, b), headers=friend).json()["key"]
+    lid, key, _ = _real_trade(admin_id, cfg=ESPN)
+    fid, _, _ = _real_trade(friend_id, cfg={**ESPN, "shared_by": "the league owner"})  # its own refresh sees the trade
+
     assert client.put(f"/api/leagues/{fid}/trades/votes/{key}", json={"vote": "unfair"}, headers=friend).json()["votes"]["unfair"] == 1
-
-    seen = _votes(client, lid, admin)[key]
-    assert seen["status"] == "poll" and seen["trade"]["text"] and seen["numbers"]["sides"]
-    assert seen["votes"] == {"open": True, "fair": 0, "unfair": 1, "mine": None}
-    assert _vote_feed(client, lid, admin) == [f"A trade is up for a league vote: {seen['trade']['text']}"]
-    _votes(client, lid, admin)
-    assert len(_vote_feed(client, lid, admin)) == 1  # reading again doesn't repeat itself in the feed
-
+    assert _votes(client, lid, admin)[key]["votes"] == {"open": True, "fair": 0, "unfair": 1, "mine": None}
     assert client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=admin).json()["votes"] == {
         "open": True, "fair": 1, "unfair": 1, "mine": "fair"}
     assert _votes(client, fid, friend)[key]["votes"] == {"open": True, "fair": 1, "unfair": 1, "mine": "unfair"}
     assert client.delete(f"/api/leagues/{fid}/trades/votes/{key}", headers=friend).json()["votes"]["unfair"] == 0
     assert _votes(client, lid, admin)[key]["votes"] == {"open": True, "fair": 1, "unfair": 0, "mine": "fair"}
+    assert _vote_feed(client, lid, admin) == []  # votes on a real trade don't fill the league feed
+
+
+def test_a_poll_another_app_opened_on_an_idea_stays_hidden(client, voting):
+    """0.6.1 could put any analyzed trade to a vote. Those reach newer apps, which show only real trades."""
+    admin_id, admin = _user("You")
+    lid, real, new = _real_trade(admin_id, cfg=ESPN)
+    league = share.league_key(SessionLocal().get(League, lid))
+    voting.polls[league] = {"f" * 32: {"trade": {"text": "an idea"}, "numbers": None, "votes": {"x": "fair"}}}
+    assert list(_votes(client, lid, admin)) == [real]
 
 
 def test_a_vote_that_cant_reach_the_league_isnt_saved(client, voting):
-    snap = make_snapshot()
     admin_id, admin = _user("You")
-    lid = _league(admin_id, snap, cfg=ESPN)
-    key = _posted_trade(client, lid, admin, snap)
+    lid, key, _ = _real_trade(admin_id, cfg=ESPN)
     voting.down = True
     assert client.put(f"/api/leagues/{lid}/trades/votes/{key}", json={"vote": "fair"}, headers=admin).status_code == 503
     assert _votes(client, lid, admin)[key]["votes"] == {"open": False, "fair": 0, "unfair": 0, "mine": None}
