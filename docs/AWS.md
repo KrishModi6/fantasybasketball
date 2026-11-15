@@ -74,9 +74,10 @@ versions appear only when the data really changed.
 | C. CloudTrail data events | ≈ $0.00 | Needs a trail plus its own bucket. Best "who did what" detail. |
 | None | $0 | CloudTrail event history still records bucket setting changes for 90 days at no cost. |
 
-**Cost budget** (created 2026-10-30): `courtside-monthly`, $5 a month of real usage (the daily check
-spends about $20 a month since 2026-11-14, so raise it to $25 or its alerts fire every month; credits and
-refunds excluded, so it doesn't sit at $0), emailing the project owner when actual spend passes 50%
+**Cost budget** (created 2026-10-30): `courtside-monthly`, $25 a month of real usage since 2026-11-14
+(it was $5). The daily check spends about $25 a month after Lambda's free allowance since that night, so
+raise it to $35 or its forecast alert fires every month. Credits and refunds are excluded, so it doesn't
+sit at $0, emailing the project owner when actual spend passes 50%
 and 100% and when the month is forecast to pass 100%. Budgets that only alert are free. Created
 through the API, so it may not have counted toward the "set up a budget" $20 credit activity.
 
@@ -305,9 +306,10 @@ checks the app as shipped against this season's finished matchup weeks:
    and the next run's report includes them.
 4. The function's log (`/aws/lambda/courtside-daily-prep`) ends with one line of headline numbers.
 
-The batch is sized to a budget (since 2026-11-14): `BUDGET_GBS` = 25,000 GB-seconds a run, divided by
-what a league costs, `GBS_PER_LEAGUE_WEEK` per finished week (6.5, measured; see Cost), so about 3,800
-leagues a run after week 1 and about 200 by week 19, never fewer than 32. Each league simulates every
+The batch is sized to a budget (since 2026-11-14): `BUDGET_GBS` = 37,500 GB-seconds a run (25,000
+for the first run, 6:30 PM on 2026-11-14), divided by what a league costs, `GBS_PER_LEAGUE_WEEK` per finished week (6.5,
+measured; see Cost), so about 5,800 leagues a run after week 1 and about 300 by week 19, never fewer
+than 32. Each league simulates every
 matchup with 10,000 draws, as the app does (the study uses 2,000). A pool stops growing at 20,000
 leagues, which keeps its report well inside 15 minutes.
 
@@ -342,7 +344,7 @@ arm64.
   season's.
 - **Timing**: about 40 s on 2026-11-01 (week 1; prep about 25 s of it), at most 431 MB used. A full
   season's prep took 14 s on the PC. Only a new pool's first 64 leagues are waited for; they get what's
-  left of the function's 15 minutes minus 90 s for the report. The rest of a batch, about 16 minutes of
+  left of the function's 15 minutes minus 90 s for the report. The rest of a batch, about 24 minutes of
   work on 9 of the project's 10 slots, runs after the function has finished.
 - **Retries**: if Lambda is busy (the project runs at most 10 functions at once, and this one holds
   one of them) the calls back off and retry. If a run fails, Lambda runs it once more a minute or two
@@ -379,12 +381,18 @@ about 218 s at 3,008 MB) costs about $0.0085. Everything through 2026-10-31 took
 `r1`, its merge and the first daily run. Lambda's always-free allowance is 400,000 GB-seconds a month,
 so the bill may show less, if this plan gets that allowance. The daily check runs one setting with no
 playoff odds. At 32 leagues and 2,000 draws it cost 8 cents for the first two weeks of November, so
-on 2026-11-14 it moved to the budget above: 2 runs a day of about 25,000 GB-seconds, about 50,000 a day,
-about $0.67 a day and $20 a month at list price (about 1.5 million GB-seconds a month, so the free
-allowance, if this plan gets it, covers about a quarter). `GBS_PER_LEAGUE_WEEK` comes from two 2-league canaries on 2026-11-14 in
+on 2026-11-14 it moved to the budget above: 2 runs a day of about 25,000 GB-seconds, $20 a month.
+The first such run (6:30 PM that day, week 3) billed 25,244 GB-seconds in `courtside-sims` for 1,282
+leagues. Later that night the user raised it to 37,500 a run: about 75,000 GB-seconds a day, $1.00 a
+day and $30 a month at list price. That is about 2.3 million GB-seconds a month, and the free
+allowance covers about a sixth (it does apply on this plan: October's 129,000 GB-seconds cost
+nothing), so the credits go down about $25 a month. At that pace $140 of credits leaves about $28
+on 2027-03-31 and lasts to about the end of April, when the free plan ends. In week 4 a pool reaches
+20,000 leagues before the week ends, so that week spends a little less. `GBS_PER_LEAGUE_WEEK` comes from two
+2-league canaries on 2026-11-14 in
 week 3, at 10,000 draws: 13.6 s billed cold and 12.4 s warm at 2.94 GB, so 6.7 and 6.1 GB-seconds a
 league-week (the first estimate, 9.5, would have spent about $14 a month). If a run's REPORT lines in
-`/aws/lambda/courtside-sims` add up to much more or less than 25,000 GB-seconds, change it and
+`/aws/lambda/courtside-sims` add up to much more or less than `BUDGET_GBS`, change it and
 redeploy `courtside-daily-prep`. To spend less,
 lower `BUDGET_GBS`; to stop the growth, set it to 0 (each run then adds 32 leagues). `courtside-daily-prep` adds 40 s to a few minutes at 1 GB a morning plus
 about 40 s an evening, about 2,000-6,000 GB-seconds a month (under $0.10). Scheduler's first 14 million invocations a month are
