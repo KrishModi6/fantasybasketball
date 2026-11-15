@@ -74,11 +74,11 @@ versions appear only when the data really changed.
 | C. CloudTrail data events | ≈ $0.00 | Needs a trail plus its own bucket. Best "who did what" detail. |
 | None | $0 | CloudTrail event history still records bucket setting changes for 90 days at no cost. |
 
-**Cost budget** (created 2026-10-30): `courtside-monthly`, $25 a month of real usage since 2026-11-14
-(it was $5). The daily check spends about $25 a month after Lambda's free allowance since that night, so
-raise it to $35 or its forecast alert fires every month. Credits and refunds are excluded, so it doesn't
-sit at $0, emailing the project owner when actual spend passes 50%
-and 100% and when the month is forecast to pass 100%. Budgets that only alert are free. Created
+**Cost budget** (created 2026-10-30): `courtside-monthly`, $35 a month of real usage since 2026-11-14
+(it was $5, then $25 earlier that day). The daily check spends about $25 a month after Lambda's free
+allowance since that night, so the 50% email arrives most months (around day 21) and the 100% ones
+mean something else is spending. Credits and refunds are excluded, so it doesn't sit at $0. It emails
+the project owner when actual spend passes 50% and 100% and when the month is forecast to pass 100%. Budgets that only alert are free. Created
 through the API, so it may not have counted toward the "set up a budget" $20 credit activity.
 
 **Running it**
