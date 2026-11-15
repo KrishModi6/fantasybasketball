@@ -39,8 +39,9 @@ from scripts import backtest_sims as B  # noqa: E402
 from scripts.push_tracking_s3 import BAD_CREDENTIALS, credentials_hint, default_bucket  # noqa: E402
 
 FUNCTION = "courtside-sims"
-# About $20 a month of Lambda at list price: 2 runs a day of 25,000 GB-seconds, $0.0000133334 per GB-second.
-BUDGET_GBS = 25_000
+# About $30 a month of Lambda at list price: 2 runs a day of 37,500 GB-seconds, $0.0000133334 per GB-second
+# (25,000, about $20 a month, for the first run, 6:30 PM on 2026-11-14).
+BUDGET_GBS = 37_500
 # What one league costs per finished week at the app's 10,000 draws: 3,008 MB times its share of an
 # invocation's billed time. Measured on courtside-sims on 2026-11-14 with 2 leagues an invocation in week 3:
 # 6.7 cold, 6.1 warm (docs/AWS.md, section 4). Check it against real runs' REPORT lines now and then.
