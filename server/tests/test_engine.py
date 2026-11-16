@@ -40,6 +40,12 @@ from fbb.valuation import player_values
 from factories import make_line, make_snapshot
 
 
+@pytest.fixture
+def no_teammates(monkeypatch):
+    """The teammate factor off, for tests of a player's own dips."""
+    monkeypatch.setattr(C, "TEAMMATE_BOOST", 0.0)
+
+
 # ---- scoring -----------------------------------------------------------------
 
 
@@ -229,6 +235,7 @@ def test_roster_week_swing_grows_in_over_the_season():
     assert narrow.var == pytest.approx(wide.var - (C.TEAM_WEEK_CV * wide.mean) ** 2)
 
 
+@pytest.mark.usefixtures("no_teammates")
 def test_first_games_of_the_season_are_projected_below_his_level():
     """The opening dip: a player's first games fall short of his settled level, fading game by game."""
     f = [P.opening_factor(n) for n in range(1, 60)]
@@ -248,6 +255,7 @@ def test_first_games_of_the_season_are_projected_below_his_level():
     assert opening.mean < settled.project_window(["1"], days).mean
 
 
+@pytest.mark.usefixtures("no_teammates")
 def test_a_rookie_has_a_deeper_longer_opening_dip():
     f, rookie = [P.opening_factor(n) for n in range(1, 60)], [P.opening_factor(n, True) for n in range(1, 60)]
     assert rookie[0] == pytest.approx(f[0] * (1 - P.ROOKIE_DIP_MINUTES) * (1 - P.ROOKIE_DIP_RATE))
@@ -262,6 +270,7 @@ def test_a_rookie_has_a_deeper_longer_opening_dip():
     assert form[0] == pytest.approx(rookie[0]) and form[9] == pytest.approx(rookie[9])
 
 
+@pytest.mark.usefixtures("no_teammates")
 def test_a_second_year_player_in_a_small_role_has_a_deeper_opening_dip():
     f = [P.opening_factors(n) for n in range(1, 60)]
     d = P.SECOND_YEAR_DIP_MINUTES
@@ -283,6 +292,7 @@ def test_a_second_year_player_in_a_small_role_has_a_deeper_opening_dip():
     assert form[3] == pytest.approx(P.opening_factor(4, second_year_dip=d))
 
 
+@pytest.mark.usefixtures("no_teammates")
 def test_rest_of_season_value_counts_his_first_games_at_their_dip():
     snap = make_snapshot()
     ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
@@ -295,6 +305,7 @@ def test_rest_of_season_value_counts_his_first_games_at_their_dip():
     assert settled.output_games("1") == pytest.approx(settled.expected_games("1"))
 
 
+@pytest.mark.usefixtures("no_teammates")
 def test_opening_dip_waits_for_an_injured_player_to_return():
     snap = make_snapshot(injured={"1": "OUT"})
     ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
@@ -334,6 +345,7 @@ def _season_games(snap, pid: str, played: list[int], minutes: dict[int, float] |
     return days
 
 
+@pytest.mark.usefixtures("no_teammates")
 def test_return_dip_follows_his_absences():
     """His first games back from an absence are projected below his level, by how many team games he missed."""
     snap = make_snapshot()
@@ -357,6 +369,56 @@ def test_return_dip_follows_his_absences():
     assert pr.games_missed == 3 and out >= 1
     upcoming = sorted(ctx.team_days[snap.players["1"].pro_team])
     assert ctx.form("1")[upcoming[out]] == pytest.approx(P.opening_factor(n - 2) * P.return_factor(1, 3 + out))
+
+
+def _pro_teammates(ctx: AnalysisContext) -> tuple[str, str, list[int]]:
+    """A pro team's best player, another player of it, and its upcoming days."""
+    by_team: dict[str, list[str]] = {}
+    for pid, pr in ctx.proj.items():
+        by_team.setdefault(ctx.s.players[pid].pro_team, []).append(pid)
+    team, pids = max(by_team.items(), key=lambda kv: len(kv[1]))
+    star = max(pids, key=lambda pid: ctx.proj[pid].fp_pg)
+    mate = next(pid for pid in pids if pid != star)
+    return star, mate, sorted(ctx.team_days[team])
+
+
+def test_teammates_score_more_while_a_star_sits(monkeypatch):
+    """A teammate expected to miss games lifts the others' projections on those days, and only those."""
+    snap = make_snapshot()
+    proj = ProjectionEngine(snap, model=None).project_all()
+    ctx = AnalysisContext(snap, proj)
+    star, mate, days = _pro_teammates(ctx)
+    ctx.proj[star].games_out = 5
+    f = ctx.teammates(mate)
+    assert all(f[d] > 1.02 for d in days[:5])
+    assert all(abs(f.get(d, 1.0) - 1) < 0.02 for d in days[6:])
+    with_it = ctx.form(mate)[days[0]]  # it reaches the per-day projection, on top of his own dips
+    monkeypatch.setattr(C, "TEAMMATE_BOOST", 0.0)
+    without = AnalysisContext(snap, proj).form(mate).get(days[0], 1.0)
+    assert with_it == pytest.approx(without * f[days[0]])
+
+
+def test_teammates_of_a_returning_star_are_projected_lower():
+    """A player who has been filling in for a star is projected lower once the star is back."""
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    star, mate, days = _pro_teammates(ctx)
+    team = snap.players[mate].pro_team
+    snap.players[mate].recent_games = [GameLog(season=2027, period=-k, team=team, minutes=30.0, stats={})
+                                       for k in range(1, 11)]
+    snap.players[star].recent_games = []  # sat every one of them
+    f = ctx.teammates(mate)
+    assert all(f[d] < 0.98 for d in days[:5])
+
+
+def test_teammates_are_neutral_with_nobody_out(monkeypatch):
+    """With nobody out and no games to go on, the everyday chance that someone sits leaves projections about
+    where they were; with the factor off, they're exactly there."""
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    assert all(abs(v - 1) < 0.02 for pid in ctx.proj for v in ctx.teammates(pid).values())
+    monkeypatch.setattr(C, "TEAMMATE_BOOST", 0.0)
+    assert all(ctx.teammates(pid) == {} for pid in ctx.proj)
 
 
 def test_update_counts_return_games_minutes_scaled_up(monkeypatch):
