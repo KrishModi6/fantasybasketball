@@ -84,6 +84,8 @@ TEAMMATE_HALF_LIFE_GAMES = 10.0
 TEAMMATE_PRIOR_GAMES = 3.0
 TEAMMATE_RECENT_SCALE = 0.6
 TEAMMATE_CAP = 0.35
+# The app shows a player's teammate effect (teammate_effect) once it moves his next 7 days by this many % or more.
+TEAMMATE_SHOW_PCT = 3.0
 TEAM_CORE = 10
 
 
@@ -135,6 +137,8 @@ class AnalysisContext:
         self._rostered = {e.player_id for t in snapshot.teams for e in t.roster}
         self._first_day: dict[str, int] = {}
         self._pro_rosters: dict[str, list[str]] | None = None
+        # teammates(), per player: (its factors, his k, each teammate's part day by day), for teammate_effect.
+        self._mate_terms: dict[str, tuple[dict[int, float], float, dict[str, dict[int, float]]]] = {}
 
     # -- availability ----------------------------------------------------------
 
@@ -234,26 +238,69 @@ class AnalysisContext:
         recent_part = 0.0  # sum_t s_t x his recent rate of sitting, shrunk toward his season rate
         sits: dict[int, float] = {d: 0.0 for d in days}  # sum_t s_t x q_t(d)
         everyday: dict[int, float] = {d: 0.0 for d in days}  # the same without known absences
+        parts: dict[str, tuple[float, dict[int, float], dict[int, float]]] = {}  # t -> his terms in the three
         for t, s in share.items():
             pt = self.p_play(t)
             known = int(math.floor(self.proj[t].games_out))
             after = 1 - pt.get(days[known], 0.0) if known < len(days) else 1 - self.proj[t].availability
+            t_sits, t_everyday, t_recent = {}, {}, 0.0
             for j, d in enumerate(days):
                 q = 1 - pt.get(d, 0.0)
-                sits[d] += s * q
-                everyday[d] += s * (after if j <= known else q)
+                t_sits[d] = s * q
+                t_everyday[d] = s * (after if j <= known else q)
+                sits[d] += t_sits[d]
+                everyday[d] += t_everyday[d]
             if seen:
                 season_rate = 1 - self.proj[t].availability
                 theirs = {g.period for g in self.s.players[t].recent_games if g.season == season}
                 sat = sum(wj for wj, q in zip(w, mine) if q not in theirs) / seen
-                recent_part += s * (season_rate + TEAMMATE_RECENT_SCALE * (sat - season_rate))
+                t_recent = s * (season_rate + TEAMMATE_RECENT_SCALE * (sat - season_rate))
+                recent_part += t_recent
+            parts[t] = (t_recent, t_sits, t_everyday)
         out: dict[int, float] = {}
         for d in days:
             base = lam * recent_part + (1 - lam) * everyday[d]
             f = min(1 + TEAMMATE_CAP, max(1 / (1 + TEAMMATE_CAP), (1 + k * sits[d]) / (1 + k * base)))
             if abs(f - 1) > 1e-3:
                 out[d] = f
+        # Each teammate's part of sits - base: above 0 when he sits more than this player's projection holds
+        # (he's out), below 0 when he sits less (he's back). They add up to what the factor above is made of.
+        self._mate_terms[pid] = (out, k, {t: {d: t_sits[d] - (lam * t_recent + (1 - lam) * t_everyday[d]) for d in days}
+                                          for t, (t_recent, t_sits, t_everyday) in parts.items()})
         return out
+
+    def teammate_effect(self, pid: str, days: list[int]) -> dict | None:
+        """How teammates sitting (or coming back) move his projection over `days` (the app's next 7 days).
+
+        {"pct": the change in his expected points over his games in `days`, in %; "out": the teammates whose
+        absence lifts him; "back": those whose return lowers him}, each a list of (pid, games he misses in
+        `days`), biggest part first, at most 3. None when the change is under TEAMMATE_SHOW_PCT: the factor is
+        applied either way (form()), this only decides what the app explains."""
+        if pid not in self._mate_terms:
+            self.form(pid)  # works out teammates(pid) and keeps its terms
+        factors, k, terms = self._mate_terms.get(pid, ({}, 0.0, {}))
+        pp = self.p_play(pid)
+        mine = [d for d in days if pp.get(d, 0) > 0]
+        weight = sum(pp[d] for d in mine)
+        if not weight:
+            return None
+        pct = 100 * (sum(pp[d] * factors.get(d, 1.0) for d in mine) / weight - 1)
+        if abs(pct) < TEAMMATE_SHOW_PCT:
+            return None
+        # A teammate is named when his part alone moves the factor by half of TEAMMATE_SHOW_PCT or more.
+        part = {t: k * sum(pp[d] * c.get(d, 0.0) for d in mine) / weight for t, c in terms.items()}
+        bar = TEAMMATE_SHOW_PCT / 200
+
+        def named(ts: list[str]) -> list[tuple[str, float]]:
+            out = []
+            for t in ts[:3]:
+                pt, own = self.p_play(t), self.team_days.get(self.s.players[t].pro_team, set())
+                out.append((t, round(sum(1 - pt.get(d, 0.0) for d in days if d in own), 1)))
+            return out
+
+        return {"pct": round(pct, 1),
+                "out": named(sorted((t for t in part if part[t] >= bar), key=lambda t: -part[t])),
+                "back": named(sorted((t for t in part if part[t] <= -bar), key=lambda t: part[t]))}
 
     def _roster_of(self, team: str) -> list[str]:
         """The players with projections on a pro team (none for free agents)."""

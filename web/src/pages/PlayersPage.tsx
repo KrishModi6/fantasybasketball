@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLeagueCtx } from "../components/Layout";
 import { Delta, ErrorBox, LoadingBlock, PageHead, Panel, PlayerName, Segmented, Term } from "../components/ui";
-import { fmt0, fmt1 } from "../lib/format";
+import { fmt0, fmt1, teammateLabel } from "../lib/format";
 import type { TermKey } from "../lib/glossary";
 import { usePlayers } from "../lib/queries";
 
@@ -97,7 +97,8 @@ export default function PlayersPage() {
                   <tr key={p.id} className="clickable" onClick={() => openPlayer(p.id)}>
                     <td className="n muted">{p.rank}</td>
                     <td><PlayerName name={p.name} injury={p.injury_status} onOpen={() => openPlayer(p.id)}
-                      sub={p.on_waivers ? "waivers" : p.flags.includes("new_team") ? "new team" : undefined} /></td>
+                      sub={[p.on_waivers ? "waivers" : p.flags.includes("new_team") ? "new team" : undefined, teammateLabel(p.teammates)]
+                        .filter(Boolean).join(" · ") || undefined} /></td>
                     <td className="hide-sm muted">{p.pro_team}</td>
                     <td className="hide-sm muted">{p.positions.join(", ")}</td>
                     {status !== "fa" && <td className="hide-sm">{p.fantasy_team_id ? teamName(p.fantasy_team_id) : <span className="muted">FA</span>}</td>}

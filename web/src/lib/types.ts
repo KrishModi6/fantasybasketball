@@ -64,6 +64,18 @@ export interface League {
   } | null;
 }
 
+export interface TeammateRef {
+  id: string;
+  name: string;
+  games_out: number; // games of his team's he's expected to miss in the next 7 days
+  injury_status: string;
+}
+export interface TeammateEffect {
+  pct: number; // change in his expected points over his games in the next 7 days, in %
+  out: TeammateRef[]; // teammates whose absence lifts him, biggest part first
+  back: TeammateRef[]; // teammates whose return lowers him
+}
+
 export interface PlayerRow {
   id: string;
   name: string;
@@ -99,6 +111,8 @@ export interface PlayerRow {
   fg_pct: number | null;
   ft_pct: number | null;
   flags: string[];
+  // Teammates out (or back) moving his next 7 days by 3% or more: the % change and who causes it.
+  teammates: TeammateEffect | null;
   gscores?: Record<string, number>;
   // team roster extras
   slot?: string;

@@ -40,3 +40,27 @@ def test_weekly_table_starts_with_the_final_scores_of_played_weeks():
 def test_weekly_table_leaves_out_played_weeks_without_results():
     wk = weekly_points(LeagueAnalysis("t", 1, _in_week_2(scored=False)))  # like a demo league
     assert wk["weeks"][0]["matchup_period"] == 2 and not any(w["final"] for w in wk["weeks"])
+
+
+def test_player_rows_say_which_teammate_is_out():
+    """The Players list and the player card get the teammate effect: the % and the star by name."""
+    from app.services.present import player_detail, player_rows
+    from fbb.context import AnalysisContext
+
+    a = LeagueAnalysis("t", 1, make_snapshot())
+    by_team: dict[str, list[str]] = {}
+    for pid in a.proj:
+        by_team.setdefault(a.snapshot.players[pid].pro_team, []).append(pid)
+    pids = max(by_team.values(), key=len)
+    star = max(pids, key=lambda pid: a.proj[pid].fp_pg)
+    a.proj[star].games_out = 5
+    a.ctx = AnalysisContext(a.snapshot, a.proj)  # the analysis already worked out availability without it
+    rows = {r["id"]: r for r in player_rows(a)}
+    lifted = [rows[pid] for pid in pids if pid != star and rows[pid]["teammates"]]
+    assert lifted, "someone on the star's team should be lifted"
+    t = lifted[0]["teammates"]
+    assert t["pct"] > 0 and t["out"][0]["id"] == star and t["out"][0]["name"] == a.snapshot.players[star].name
+    assert rows[star]["teammates"] is None or rows[star]["teammates"]["out"][0]["id"] != star
+    assert player_detail(a, lifted[0]["id"])["teammates"] == t
+    other = [r for r in rows.values() if a.snapshot.players[r["id"]].pro_team != a.snapshot.players[star].pro_team]
+    assert all(r["teammates"] is None for r in other)  # nobody else is out

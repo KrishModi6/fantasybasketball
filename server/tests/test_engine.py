@@ -421,6 +421,49 @@ def test_teammates_are_neutral_with_nobody_out(monkeypatch):
     assert all(ctx.teammates(pid) == {} for pid in ctx.proj)
 
 
+def test_teammate_effect_names_the_star_who_sits():
+    """The app's note: his next 7 days go up by about what the per-day factor says, and the star is named."""
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    star, mate, days = _pro_teammates(ctx)
+    ctx.proj[star].games_out = 5
+    week = ctx.days[:7]
+    eff = ctx.teammate_effect(mate, week)
+    assert eff is not None and eff["pct"] >= C.TEAMMATE_SHOW_PCT
+    assert eff["out"][0][0] == star and eff["back"] == []
+    pp, f = ctx.p_play(mate), ctx.teammates(mate)
+    mine = [d for d in week if pp.get(d, 0) > 0]
+    expected = 100 * (sum(pp[d] * f.get(d, 1.0) for d in mine) / sum(pp[d] for d in mine) - 1)
+    assert eff["pct"] == pytest.approx(expected, abs=0.05)
+    assert eff["out"][0][1] == pytest.approx(len([d for d in week if d in ctx.team_days[snap.players[star].pro_team]]), abs=0.05)
+
+
+def test_teammate_effect_names_the_star_who_is_back():
+    """A fill-in's note says the star is back, with a drop."""
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    star, mate, days = _pro_teammates(ctx)
+    team = snap.players[mate].pro_team
+    snap.players[mate].recent_games = [GameLog(season=2027, period=-k, team=team, minutes=30.0, stats={})
+                                       for k in range(1, 11)]
+    snap.players[star].recent_games = []
+    eff = ctx.teammate_effect(mate, ctx.days[:7])
+    assert eff is not None and eff["pct"] <= -C.TEAMMATE_SHOW_PCT
+    assert eff["back"][0][0] == star and eff["out"] == []
+
+
+def test_teammate_effect_is_quiet_with_nobody_out(monkeypatch):
+    """Nothing to explain when nobody is out, and nothing at all with the factor off."""
+    snap = make_snapshot()
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    assert all(ctx.teammate_effect(pid, ctx.days[:7]) is None for pid in ctx.proj)
+    monkeypatch.setattr(C, "TEAMMATE_BOOST", 0.0)
+    ctx = AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+    star, mate, _ = _pro_teammates(ctx)
+    ctx.proj[star].games_out = 5
+    assert ctx.teammate_effect(mate, ctx.days[:7]) is None
+
+
 def test_update_counts_return_games_minutes_scaled_up(monkeypatch):
     """A short first game back doesn't drag his minutes down for the games after it."""
     snap = make_snapshot()

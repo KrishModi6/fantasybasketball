@@ -60,11 +60,25 @@ def player_rows(a: LeagueAnalysis, ids: list[str] | None = None) -> list[dict]:
             "per_game": {k: _r(pg.get(k, 0.0)) for k in BOX},
             "fg_pct": _pct(pg.get("FGM", 0), pg.get("FGA", 0)), "ft_pct": _pct(pg.get("FTM", 0), pg.get("FTA", 0)),
             "flags": pr.flags,
+            "teammates": _teammates(a, pid, next7),
         }
         if ctx.cat_valuer:
             row["gscores"] = {k: _r(x) for k, x in ctx.cat_valuer.gscores(pid).items()}
         out.append(row)
     return out
+
+
+def _teammates(a: LeagueAnalysis, pid: str, days: list[int]) -> dict | None:
+    """Teammates out (or back) and how much they move his next 7 days (AnalysisContext.teammate_effect)."""
+    eff = a.ctx.teammate_effect(pid, days)
+    if eff is None:
+        return None
+    players = a.snapshot.players
+
+    def who(ts):
+        return [{"id": t, "name": players[t].name, "games_out": g, "injury_status": players[t].injury_status} for t, g in ts]
+
+    return {"pct": eff["pct"], "out": who(eff["out"]), "back": who(eff["back"])}
 
 
 def _values(a: LeagueAnalysis) -> dict:
