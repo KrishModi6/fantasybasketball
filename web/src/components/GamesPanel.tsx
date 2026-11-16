@@ -17,6 +17,13 @@ export function pick(g: NbaGame): { team: string; chance: number; right: boolean
            right: over ? (g.home_pts! > g.away_pts!) === home : null };
 }
 
+/** While a game is on: the team ahead on the live chance, and that chance (null before tip-off and once it's over). */
+export function livePick(g: NbaGame): { team: string; chance: number } | null {
+  if (g.status !== "live" || g.live_home_win == null) return null;
+  const home = g.live_home_win >= 0.5;
+  return { team: home ? g.home : g.away, chance: home ? g.live_home_win : 1 - g.live_home_win };
+}
+
 /** The evidence that does most for the picked team (the published factors are from the home team's side). */
 export function mainReason(g: NbaGame): string | null {
   const side = g.home_win >= 0.5 ? 1 : -1;
@@ -29,7 +36,8 @@ const tipTime = (iso: string | null) =>
 
 function when(g: NbaGame): string {
   if (g.status !== "scheduled" && g.home_pts != null && g.away_pts != null) {
-    return `${g.status === "final" ? "Final" : "Live"} ${g.away_pts}–${g.home_pts}`;
+    const score = `${g.status === "final" ? "Final" : "Live"} ${g.away_pts}–${g.home_pts}`;
+    return g.status === "live" && g.clock ? `${score} · ${g.clock}` : score;
   }
   return tipTime(g.tip);
 }
@@ -38,9 +46,12 @@ const lastName = (name: string) => name.split(" ").slice(1).join(" ") || name;
 
 function Game({ g }: { g: NbaGame }) {
   const p = pick(g);
+  const now = livePick(g);
   const reason = mainReason(g);
   const out = [[g.away, g.away_out], [g.home, g.home_out]] as const;
   const missing = out.filter(([, names]) => names.length).map(([team, names]) => `${team} out: ${names.map(lastName).join(", ")}`);
+  // The bar shows the live chance while the game is on, the pregame odds otherwise.
+  const homeWin = now ? g.live_home_win! : g.home_win;
   return (
     <li>
       <div className="row between small">
@@ -50,14 +61,17 @@ function Game({ g }: { g: NbaGame }) {
         </span>
         <span className="row" style={{ gap: 6 }}>
           {p.right != null && <Tag tone={p.right ? "up" : "down"}>{p.right ? "right" : "wrong"}</Tag>}
-          <span className="strong">{p.team} {pct(p.chance)}</span>
+          {now
+            ? <><Tag tone="accent">live</Tag><span className="strong">{now.team} {pct(now.chance)}</span></>
+            : <span className="strong">{p.team} {pct(p.chance)}</span>}
         </span>
       </div>
-      <div className="wpbar" role="img" aria-label={`${g.away} ${pct(1 - g.home_win)}, ${g.home} ${pct(g.home_win)}`}
-        style={{ margin: "4px 0" }}>
-        <span style={{ width: `${(1 - g.home_win) * 100}%` }} />
+      <div className="wpbar" role="img" style={{ margin: "4px 0" }}
+        aria-label={`${now ? "Live: " : ""}${g.away} ${pct(1 - homeWin)}, ${g.home} ${pct(homeWin)}`}>
+        <span style={{ width: `${(1 - homeWin) * 100}%` }} />
       </div>
       <div className="tiny muted">
+        {now && <>Before tip-off {p.team} {pct(p.chance)} · </>}
         {g.away_score != null && g.home_score != null && <>Predicted {g.away} {Math.round(g.away_score)}, {g.home} {Math.round(g.home_score)}</>}
         {reason && <> · {reason}</>}
         {missing.length > 0 && <> · {missing.join("; ")}</>}
@@ -103,6 +117,8 @@ export function GamesPanel({ now }: { now?: Date }) {
       foot={<>
         Odds are from before tip-off{data.injuries ? ", with players ESPN lists as out counted out" : "; the injury report couldn't be read, so nobody is counted out"}.
         {data.generated_at ? ` Updated ${relTime(data.generated_at)}.` : ""}
+        {day.games.some((g) => g.status === "live")
+          ? " While a game is on, its score and live chance update every 30 seconds." : ""}
       </>}>
       <ul className="list">
         {day.games.map((g) => <Game key={g.id || `${g.away}-${g.home}`} g={g} />)}

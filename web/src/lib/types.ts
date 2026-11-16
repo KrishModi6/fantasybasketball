@@ -627,6 +627,9 @@ export interface NbaGame {
   away_range: [number, number] | null;
   home_pts: number | null; // the real score so far, once the game has started
   away_pts: number | null;
+  period?: number | null; // while the game is on, from ESPN's scoreboard: 1-4, then 5 for overtime and up
+  clock?: string | null; // "Q3 4:12", "Halftime", "End of Q3", "OT 2:00"
+  live_home_win?: number | null; // the home team's chance from here, from the score, the time left and the pregame odds
   factors: { factor: string; points: number }[]; // percentage points of home win chance, by kind of evidence
   home_out: string[];
   away_out: string[];

@@ -59,7 +59,9 @@ python -m gamepred publish predictions.json                  # today's and tomor
 
 Courtside's Overview page has an **NBA games** panel with these predictions. The desktop app can't run this
 program (it ships without pandas, scikit-learn and XGBoost), so `.github/workflows/game-predictions.yml` runs
-`publish` four times a day and puts the file on the `game-predictions` branch, where every copy of the app reads it.
+`publish` at 10 a.m. and 2 p.m. Eastern and hourly from 5 to 10 p.m., and puts the file on the `game-predictions`
+branch, where every copy of the app reads it. Live scores don't come from this file: while a game is on, the app
+reads them from ESPN's scoreboard itself and works out a live chance from the score, the clock and these odds.
 
 `publish` predicts a game again on every run until it tips off. After that the game keeps the prediction from the
 file written last time (the output file itself, or `--previous other.json`) and only its score changes, so a
