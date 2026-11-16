@@ -1,7 +1,7 @@
 {
   "name": "courtside-desktop",
   "productName": "Courtside",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "Courtside fantasy basketball analytics for macOS and Windows",
   "main": "main.js",
   "author": "Courtside",
@@ -44,6 +44,7 @@
       "package.json",
       "ai-config.json"
     ],
+    "afterPack": "scripts/sign-mac.js",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -67,7 +68,7 @@
       ],
       "category": "public.app-category.sports",
       "icon": "build/icon.png",
-      "identity": "-",
+      "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}"

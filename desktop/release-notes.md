@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.6.4
+## What's new in 0.6.5
+
+- **No more "Courtside is damaged" on a Mac.** The Mac app never had a real code signature: the tool that builds it quietly skipped that step every time. Macs can live with that only until something looks closely, and then they say **"Courtside is damaged and can't be opened"**, which some of you saw again after updating. The Mac app is now properly signed (the free kind, without a paid Apple certificate), and every release checks the signature before it's published.
+- **Updates check the download first.** Before a Mac installs an update, Courtside now checks the new copy's signature too, so it never swaps in a copy macOS would refuse to open. Your current Courtside stays until the new one checks out.
+- **Saw "damaged" after updating?** Click **Cancel** (not Move to Trash), download **Courtside-0.6.5-mac-arm64.zip** below and follow **Install on a Mac**, Terminal command included. Your leagues stay. That should be the last time; from 0.6.5 on, updates install themselves again.
+
+## In 0.6.4
 
 - **NBA games are live.** While a game is on, the **NBA games** panel on **Overview** shows its score with the quarter and clock ("Q3 4:12", "Halftime"), updated every 30 seconds. Before, a score only changed when the predictions were published again, a few times a day, so it could be hours old.
 - **A live chance to win.** A game that's on shows a **live** tag and each team's chance from here, worked out from the score, the time left and the game model's pregame odds. It starts at the pregame odds and moves with the game. The pregame pick is still shown beside it, and **right** or **wrong** is still judged on that pick.
