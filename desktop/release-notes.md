@@ -1,6 +1,13 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.6.3
+## What's new in 0.6.4
+
+- **NBA games are live.** While a game is on, the **NBA games** panel on **Overview** shows its score with the quarter and clock ("Q3 4:12", "Halftime"), updated every 30 seconds. Before, a score only changed when the predictions were published again, a few times a day, so it could be hours old.
+- **A live chance to win.** A game that's on shows a **live** tag and each team's chance from here, worked out from the score, the time left and the game model's pregame odds. It starts at the pregame odds and moves with the game. The pregame pick is still shown beside it, and **right** or **wrong** is still judged on that pick.
+- **Fresher odds before tip-off.** Predictions are now updated every hour from 5 to 10 p.m. Eastern as well as at 10 a.m. and 2 p.m., so late injury news is counted before most games start.
+- **The panel wakes up at tip-off.** It checks again when a game is due to start, so the score shows up without waiting up to 10 minutes.
+
+## In 0.6.3
 
 - **When a star sits, his teammates' projections go up.** If a player is listed as out, Courtside now projects his teammates higher on the days he misses, the bench players most. In four past seasons, teammates scored about 9% more on nights the team's best player sat: about 12% for players in 12-20 minute roles and about 7% for starters.
 - **And back down when he returns.** A player who has been filling in for an injured star is projected a little lower once the star is back, but not all the way, because fill-ins keep part of the role.

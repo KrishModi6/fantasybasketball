@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultDay, GamesPanel, mainReason, nbaToday, pick } from "../components/GamesPanel";
+import { defaultDay, GamesPanel, livePick, mainReason, nbaToday, pick } from "../components/GamesPanel";
+import { GAMES_IDLE_MS, GAMES_LIVE_MS, gamesRefreshMs } from "../lib/queries";
 import type { NbaGame, NbaGames } from "../lib/types";
 
 const api = vi.hoisted(() => vi.fn());
@@ -87,6 +88,38 @@ describe("the NBA games panel", () => {
     expect(screen.getByText("Today")).toBeInTheDocument(); // one day with games: a label, no buttons
   });
 
+  it("shows the clock and the live chance while a game is on, with the pregame pick beside it", async () => {
+    api.mockResolvedValue(feed({ days: [{ date: "2026-11-13", games: [
+      game({ status: "live", home_pts: 70, away_pts: 58, period: 3, clock: "Q3 4:12", live_home_win: 0.86 }),
+    ] }] }));
+    show(<GamesPanel now={NOW} />);
+    const row = (await screen.findByText("IND")).closest("li")!;
+    expect(within(row).getByText(/Live 58–70 · Q3 4:12/)).toBeInTheDocument();
+    expect(within(row).getByText("live")).toBeInTheDocument();
+    expect(within(row).getByText("IND 86%")).toBeInTheDocument(); // the underdog is ahead now
+    expect(within(row).getByText(/Before tip-off NYK 67%/)).toBeInTheDocument();
+    expect(within(row).getByRole("img", { name: "Live: NYK 14%, IND 86%" })).toBeInTheDocument();
+    expect(screen.getByText(/update every 30 seconds/)).toBeInTheDocument();
+  });
+
+  it("asks again with the new score: the live chance moves on its own", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-11-14T01:00:00Z") });
+    try {
+      api.mockResolvedValueOnce(feed({ days: [{ date: "2026-11-13", games: [
+        game({ status: "live", home_pts: 20, away_pts: 22, clock: "Q1 2:00", live_home_win: 0.31 })] }] }));
+      api.mockResolvedValue(feed({ days: [{ date: "2026-11-13", games: [
+        game({ status: "live", home_pts: 30, away_pts: 24, clock: "Q2 9:40", live_home_win: 0.52 })] }] }));
+      show(<GamesPanel now={NOW} />);
+      expect(await screen.findByText(/Live 22–20 · Q1 2:00/)).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(GAMES_LIVE_MS + 100);
+      expect(await screen.findByText(/Live 24–30 · Q2 9:40/)).toBeInTheDocument();
+      expect(screen.getByText("IND 52%")).toBeInTheDocument();
+      expect(api).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens on the next day with games when today has none", async () => {
     api.mockResolvedValue(feed({ days: [{ date: "2026-11-13", games: [] }, { date: "2026-11-14", games: [game({ id: "3", home: "BOS", away: "LAL", home_win: 0.61 })] }] }));
     show(<GamesPanel now={NOW} />);
@@ -137,6 +170,26 @@ describe("reading a game", () => {
     expect(mainReason(game())).toBe("team strength"); // NYK is picked: the factors against the home team
     expect(mainReason(game({ home_win: 0.7, factors: [{ factor: "Injuries and availability", points: -8 }, { factor: "Home court", points: 6.9 }] }))).toBe("home court");
     expect(mainReason(game({ factors: [{ factor: "Home court", points: 6.9 }] }))).toBeNull(); // nothing favours NYK
+  });
+
+  it("reads the live chance only while the game is on", () => {
+    expect(livePick(game({ status: "live", live_home_win: 0.2 }))).toEqual({ team: "NYK", chance: 0.8 });
+    expect(livePick(game({ status: "live", live_home_win: null }))).toBeNull(); // no clock yet: the pregame pick stands
+    expect(livePick(game({ status: "final", live_home_win: 0.99 }))).toBeNull();
+    expect(livePick(game())).toBeNull();
+  });
+
+  it("asks every 30 seconds while a game is on, else every 10 minutes or at the next tip-off", () => {
+    const at = (iso: string) => Date.parse(iso);
+    const one = (g: Partial<NbaGame>) => feed({ days: [{ date: "2026-11-13", games: [game(g)] }] });
+    expect(gamesRefreshMs(undefined)).toBe(GAMES_IDLE_MS);
+    expect(gamesRefreshMs(one({ status: "live" }), at("2026-11-13T20:00:00Z"))).toBe(GAMES_LIVE_MS);
+    // Tipped off but the feed doesn't know yet: ask often so the score shows up.
+    expect(gamesRefreshMs(one({}), at("2026-11-14T00:05:00Z"))).toBe(GAMES_LIVE_MS);
+    expect(gamesRefreshMs(one({ status: "final" }), at("2026-11-14T01:00:00Z"))).toBe(GAMES_IDLE_MS);
+    expect(gamesRefreshMs(one({}), at("2026-11-14T08:00:00Z"))).toBe(GAMES_IDLE_MS); // long over (or postponed)
+    expect(gamesRefreshMs(one({}), at("2026-11-13T23:58:00Z"))).toBe(125_000); // just after tip-off
+    expect(gamesRefreshMs(one({}), at("2026-11-13T20:00:00Z"))).toBe(GAMES_IDLE_MS);
   });
 
   it("goes by the NBA's calendar day", () => {

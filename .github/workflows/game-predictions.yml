@@ -6,13 +6,15 @@ name: Game predictions
 # the predictor itself (it ships without pandas, scikit-learn and XGBoost).
 #
 # The branch holds only that file and is replaced on every run, so it has no history to grow.
-# Times are UTC: 10:05 AM, 2:05 PM, 5:05 PM and 8:05 PM Eastern in winter, an hour later in summer.
-# The later runs pick up the day's injury report as it firms up and the scores of games in progress.
-# A game is predicted again on each run until it tips off, then keeps its last prediction.
+# Times are UTC: 10:05 AM, 2:05 PM, then every hour from 5:05 PM to 10:05 PM Eastern in winter, an hour
+# later in summer. The evening runs pick up the injury report as it firms up before each tip-off (a run takes
+# about a minute). A game is predicted again on each run until it tips off, then keeps its last prediction.
+# Live scores don't wait for a run: each copy of Courtside reads them from ESPN while a game is on
+# (server/app/services/games.py).
 on:
   schedule:
-    - cron: "5 15,19,22 * * *"
-    - cron: "5 1 * * *"
+    - cron: "5 15,19,22,23 * * *"
+    - cron: "5 0,1,2,3 * * *"
   workflow_dispatch:
 
 permissions:

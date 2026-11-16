@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     # NBA game predictions for the Overview page: the file .github/workflows/game-predictions.yml publishes.
     # Empty turns the panel off.
     games_url: str = "https://raw.githubusercontent.com/KrishModi6/fantasybasketball/game-predictions/predictions.json"
+    # Live scores for those games while they're on: ESPN's public NBA scoreboard. Empty turns live scores off.
+    games_scores_url: str = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
     # Desktop app: a single local user signs in automatically (the engine only listens on 127.0.0.1).
     local_mode: bool = False
 
