@@ -5,7 +5,7 @@ export interface GlossaryEntry {
 }
 
 export const GLOSSARY_SECTIONS: { title: string; keys: TermKey[] }[] = [
-  { title: "Players", keys: ["fp_pg", "value_pg", "fp_sd", "season", "last10", "mpg", "ros", "ros_games", "over_repl", "next7", "availability", "rostered", "today"] },
+  { title: "Players", keys: ["fp_pg", "value_pg", "fp_sd", "season", "last10", "mpg", "ros", "ros_games", "over_repl", "next7", "availability", "teammates_out", "rostered", "today"] },
   { title: "Advanced stats", keys: ["xfp", "luck", "team_luck", "xfp_expected"] },
   { title: "NBA games", keys: ["game_model"] },
   { title: "Breakouts", keys: ["breakout", "breakout_chance", "breakout_last", "breakout_line", "breakout_backtest"] },
@@ -28,6 +28,7 @@ export const GLOSSARY = {
   over_repl: { term: "Over repl.", def: "Over replacement: how many more rest-of-season points he's worth than a player you could pick up from free agents. Zero or below means a free agent would do about as well." },
   next7: { term: "Next 7", def: "Games he's expected to play in the next 7 days, from his team's schedule and his injury status." },
   availability: { term: "Availability", def: "The share of his team's games he's expected to play, based on how often he has played in the past." },
+  teammates_out: { term: "Teammate out", def: "When a teammate who takes a big share of his team's points is expected to sit, Courtside projects him higher on those nights, bench and role players most (a 12-minute player gets about twice the lift of a 24-minute one). In four past seasons teammates scored about 9% more when their team's top scorer sat. It works the other way too: a player who filled in is projected a little lower once the star is back. The % is the change over his next 7 days." },
   rostered: { term: "Rostered", def: "The share of ESPN leagues where he's on a team. A rough measure of how popular he is." },
   today: { term: "Today", def: "Fantasy points he has scored so far today. During games it refreshes every few minutes." },
 

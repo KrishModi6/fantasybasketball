@@ -97,6 +97,18 @@ jobs:
           brew uninstall --ignore-dependencies libomp
           engine=$(ls -d desktop/release/mac*/Courtside.app)/Contents/Resources/engine/courtside-engine
           "$engine" --self-test
+      # desktop/scripts/sign-mac.js ad-hoc signs the app before it's zipped. Without a signature that holds,
+      # macOS says "Courtside is damaged" (every release up to 0.6.4 shipped unsigned), so check the zip
+      # that ships, unzipped the way a Mac does it, and stop here if the signature doesn't check out.
+      - name: Check the Mac app's code signature
+        if: runner.os == 'macOS'
+        run: |
+          out="$RUNNER_TEMP/signature-check"
+          rm -rf "$out" && mkdir -p "$out"
+          ditto -x -k desktop/release/Courtside-*-mac-arm64.zip "$out"
+          test -d "$out/Courtside.app/Contents/_CodeSignature" || { echo "::error::The Mac app has no code signature."; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$out/Courtside.app"
+          codesign -dv "$out/Courtside.app" 2>&1 | grep -E "^(Identifier|Format|Signature|Sealed Resources)"
       # Installed Macs update themselves with desktop/mac-update.js. This runs it on this build: download
       # the zip, check it, swap it in for an older copy, and leave the old copy alone if macOS refuses.
       - name: Self-test the Mac updater

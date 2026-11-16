@@ -77,3 +77,26 @@ export const sourceLabel: Record<string, string> = {
   file: "File import",
   flaim: "Flaim",
 };
+
+const NAME_SUFFIX = /^(jr|sr|ii|iii|iv|v)\.?$/i;
+
+/** A player's last name, skipping a suffix: "Jaren Jackson Jr." -> "Jackson". */
+export function lastName(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  while (parts.length > 1 && NAME_SUFFIX.test(parts[parts.length - 1])) parts.pop();
+  return parts[parts.length - 1] ?? name;
+}
+
+/** "Embiid", "Embiid and George", "Embiid, George and Maxey": teammates by last name, for a short label. */
+export function lastNames(names: string[]): string {
+  const last = names.map(lastName);
+  return last.length <= 1 ? (last[0] ?? "") : `${last.slice(0, -1).join(", ")} and ${last[last.length - 1]}`;
+}
+
+/** The Players list's note on a teammate effect: "+12% · Embiid out" or "−5% · Embiid back". */
+export function teammateLabel(t: { pct: number; out: { name: string }[]; back: { name: string }[] } | null | undefined): string | undefined {
+  if (!t) return undefined;
+  const who = t.pct > 0 ? t.out : t.back;
+  if (!who.length) return undefined;
+  return `${t.pct > 0 ? "+" : "−"}${Math.abs(Math.round(t.pct))}% · ${lastNames(who.map((w) => w.name))} ${t.pct > 0 ? "out" : "back"}`;
+}

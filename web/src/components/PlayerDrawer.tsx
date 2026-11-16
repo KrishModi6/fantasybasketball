@@ -4,10 +4,10 @@ import { X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
-import { fmt0, fmt1, pct, relTime, shortDate, signed } from "../lib/format";
+import { fmt0, fmt1, lastName, lastNames, pct, relTime, shortDate, signed } from "../lib/format";
 import { useAiStatus, usePlayer } from "../lib/queries";
 import { useToast } from "../lib/toast";
-import type { PlayerDetail } from "../lib/types";
+import type { PlayerDetail, TeammateEffect, TeammateRef } from "../lib/types";
 import { Diverging, GameColumns, Sparkline } from "./charts";
 import { useLeagueCtx } from "./Layout";
 import { Delta, ErrorBox, Injury, Kpi, Kpis, LoadingBlock, Notice, Panel, Term } from "./ui";
@@ -77,6 +77,7 @@ function PlayerBody({ p, onClose }: { p: PlayerDetail; onClose: () => void }) {
       </header>
       <div className="drawer-body">
         {p.injury_note && <Notice level="warn">{p.injury_note}</Notice>}
+        {p.teammates && <TeammateNote t={p.teammates} name={p.name} />}
         <Kpis label="Projection summary">
           <Kpi k={isPoints ? <Term t="fp_pg">Projected FP/G</Term> : <Term t="value_pg">Value per game</Term>} v={fmt1(isPoints ? p.fp_pg : p.value_pg)}
             s={<Term t="fp_sd">± {fmt0(p.fp_sd)} per game</Term>} />
@@ -350,5 +351,23 @@ function OverrideForm({ p }: { p: PlayerDetail }) {
         </div>
       </div>
     </Panel>
+  );
+}
+
+/** Why his next 7 days are projected higher (a teammate out) or lower (a teammate back). */
+export function TeammateNote({ t, name }: { t: TeammateEffect; name: string }) {
+  const up = t.pct > 0;
+  const who = up ? t.out : t.back;
+  if (!who.length) return null;
+  const first = lastName(name);
+  const missing = (w: TeammateRef) => (w.games_out >= 0.95 ? ` (about ${fmt0(w.games_out)} game${Math.round(w.games_out) === 1 ? "" : "s"} out)` : "");
+  return (
+    <Notice>
+      <strong>{up ? "Teammate out" : "Teammate back"}: {signed(t.pct, 0)}% for the next 7 days.</strong>{" "}
+      {up
+        ? <>With {who.map((w, i) => <span key={w.id}>{i ? (i === who.length - 1 ? " and " : ", ") : ""}{w.name}{missing(w)}</span>)} expected to sit, {first} should get more shots and minutes, so his projection goes up on those nights.</>
+        : <>{lastNames(who.map((w) => w.name))} {who.length > 1 ? "are" : "is"} expected back, and {first} has been filling in for {who.length > 1 ? "them" : "him"}, so his projection comes down a little.</>}
+      {" "}<Term t="teammates_out">How this works</Term>
+    </Notice>
   );
 }

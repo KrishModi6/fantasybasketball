@@ -7,7 +7,7 @@
 // So Courtside does it itself. electron-updater still finds the release; then this module downloads
 // the zip (only browsers and other quarantine-aware apps flag their downloads, so this copy isn't
 // flagged), checks it against the SHA-512 in latest-mac.yml, unzips it with ditto and checks the app's
-// version and that its programs are there. When Courtside quits, a small shell script waits for it to
+// version, that its programs are there and that its ad-hoc code signature holds. When Courtside quits, a small shell script waits for it to
 // exit, swaps the new Courtside.app into place and reopens it. If macOS won't let it move the app, the
 // old copy is put back, and on its next start Courtside shows the downloaded copy in Finder to drag
 // over by hand.
@@ -46,6 +46,8 @@ if /bin/mv "$target" "$backup" 2>>"$log"; then
     /bin/mv "$backup" "$target" 2>>"$log"
   fi
 fi
+# Clear any download flag the new copy picked up, so macOS opens it without asking.
+if [ "$status" = installed ]; then /usr/bin/xattr -dr com.apple.quarantine "$target" 2>/dev/null; fi
 echo "$status" > "$result"
 if [ "$relaunch" = 1 ]; then /usr/bin/open "$target"; fi
 `;
@@ -85,6 +87,14 @@ function readJson(file) {
   } catch {
     return null;
   }
+}
+
+// The first release with a real (ad-hoc) code signature. Older ones have none to check.
+const FIRST_SIGNED = [0, 6, 5];
+function signed(version) {
+  const v = String(version).split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((v[i] || 0) !== FIRST_SIGNED[i]) return (v[i] || 0) > FIRST_SIGNED[i];
+  return true;
 }
 
 /** The release zip for this Mac's processor, from the files listed in latest-mac.yml. */
@@ -167,8 +177,7 @@ async function stage({ info, dir, fetch = globalThis.fetch, base = DOWNLOAD_BASE
   const plist = (key) => run("/usr/libexec/PlistBuddy", ["-c", `Print :${key}`, path.join(app, "Contents", "Info.plist")]);
   const version = await plist("CFBundleShortVersionString");
   if (version !== info.version) throw new Error(`The download is version ${version}, not ${info.version}.`);
-  // The release has no valid code signature to check (electron-builder can't sign without an Apple
-  // Developer ID), so check that the app and the engine it starts unzipped whole.
+  // Check that the app and the engine it starts unzipped whole.
   for (const program of [path.join("MacOS", await plist("CFBundleExecutable")), path.join("Resources", "engine", "courtside-engine")]) {
     try {
       fs.accessSync(path.join(app, "Contents", program), fs.constants.X_OK);
@@ -178,6 +187,14 @@ async function stage({ info, dir, fetch = globalThis.fetch, base = DOWNLOAD_BASE
   }
   // Nothing should be flagged, since Courtside downloaded it, but clear any flag so it opens cleanly.
   await run("/usr/bin/xattr", ["-cr", app]).catch((err) => log.warn(err.message));
+  // First Version (0.3.2 to 0.6.4): no signature check, because releases had no signature to check.
+  // Current Version: releases are ad-hoc signed (desktop/scripts/sign-mac.js), and macOS says "damaged"
+  // about an app whose signature doesn't hold, so a copy that fails this check is never swapped in.
+  if (signed(info.version)) {
+    await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app]).catch((err) => {
+      throw new Error(`The download's code signature doesn't check out (${err.message}).`);
+    });
+  }
 
   fs.writeFileSync(path.join(dir, "staged.json"), JSON.stringify({ version, sha512, app }));
   log.info(`Courtside ${version} is ready at ${app}`);
@@ -229,4 +246,4 @@ function clear(dir) {
   return fsp.rm(dir, { recursive: true, force: true });
 }
 
-module.exports = { DOWNLOAD_BASE, SWAP_SCRIPT, bundlePath, installProblem, pickZip, stage, install, lastInstall, clear };
+module.exports = { DOWNLOAD_BASE, signed, SWAP_SCRIPT, bundlePath, installProblem, pickZip, stage, install, lastInstall, clear };
