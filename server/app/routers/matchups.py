@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 
-from fbb.matchup_sim import DEFAULT_SIMS, MatchupSimulator, week_options
+from fbb.matchup_sim import DEFAULT_SIMS, MatchupSimulator, finished_weeks, week_options, week_results
 from fbb.strength import MatchupModel
 
 from ..schemas import SimulateIn
@@ -17,13 +17,20 @@ router = APIRouter(prefix="/api/leagues/{league_id}/matchups", tags=["matchups"]
 
 @router.get("")
 def matchups(a: LeagueAnalysis = Depends(analysis), matchup_period: int | None = Query(None, ge=1)):
-    """A week's scheduled matchups with quick (Normal-approximation) projections."""
+    """A week's scheduled matchups with quick (Normal-approximation) projections, or for a week already played,
+    its final scores (``final`` and ``results``). Opens on the current week, or the last one once the season
+    is over."""
     ctx = a.ctx
-    weeks = week_options(ctx)
+    upcoming, past = week_options(ctx), finished_weeks(ctx)
+    weeks = past + upcoming
+    scoring = "points" if ctx.is_points else "categories"
     if not weeks:
-        return {"weeks": [], "matchup_period": None, "matchups": []}
+        return {"weeks": [], "matchup_period": None, "matchups": [], "final": False, "results": []}
     valid = {w["matchup_period"] for w in weeks}
-    mp = matchup_period if matchup_period in valid else weeks[0]["matchup_period"]
+    mp = matchup_period if matchup_period in valid else (upcoming[0] if upcoming else past[-1])["matchup_period"]
+    if any(w["matchup_period"] == mp for w in past):
+        return {"weeks": weeks, "matchup_period": mp, "matchups": [], "final": True,
+                "results": week_results(ctx, mp), "scoring": scoring}
     mm = MatchupModel(ctx, a.windows)
     rows = []
     for m in ctx.s.matchups:
@@ -38,8 +45,8 @@ def matchups(a: LeagueAnalysis = Depends(analysis), matchup_period: int | None =
             "home_score": m.home_score, "away_score": m.away_score,
             "home_win_prob": mm.p_win(m.home_team_id, m.away_team_id, mp),
         })
-    return {"weeks": weeks, "matchup_period": mp, "matchups": rows,
-            "scoring": "points" if ctx.is_points else "categories"}
+    return {"weeks": weeks, "matchup_period": mp, "matchups": rows, "final": False, "results": [],
+            "scoring": scoring}
 
 
 @router.post("/simulate")

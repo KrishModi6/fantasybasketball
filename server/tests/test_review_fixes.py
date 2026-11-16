@@ -296,14 +296,14 @@ def _user(name: str = "Someone") -> tuple[str, dict]:
         return user.id, {"Authorization": f"Bearer {create_token(user.id)}"}
 
 
-def _league(owner_id: str, source: str = "demo") -> str:
+def _league(owner_id: str, source: str = "demo", snap=None) -> str:
     with SessionLocal() as db:
         league = League(name="Test", season=2027, source=source, owner_id=owner_id, last_sync_status="ok",
                         connector_config=encrypt_json({"league_id": "1"}))
         db.add(league)
         db.flush()
         db.add(LeagueMember(league_id=league.id, user_id=owner_id, role="owner"))
-        db.add(Snapshot(league_id=league.id, source=source, data=pack_snapshot(make_snapshot())))
+        db.add(Snapshot(league_id=league.id, source=source, data=pack_snapshot(snap or make_snapshot())))
         db.commit()
         return league.id
 
@@ -442,6 +442,50 @@ def test_the_league_says_when_a_failed_refresh_is_tried_again(client, monkeypatc
     r = client.post(f"/api/leagues/{league_id}/sync", headers=headers).json()  # the Refresh button
     assert r == {"status": "ok", "error": None, "retry_at": None}
     assert client.get(f"/api/leagues/{league_id}", headers=headers).json()["sync"]["retry_at"] is None
+
+
+# ---- past weeks on the Matchups page ------------------------------------------------------------------
+
+
+def test_past_weeks_show_their_final_scores(client):
+    user_id, headers = _user()
+    snap = make_snapshot()
+    _start_week(snap, 3)
+    for m in snap.matchups:
+        if m.matchup_period == 1:
+            m.home_score, m.away_score, m.winner = 1412.5, 1358.0, "HOME"
+        elif m.matchup_period == 2:  # ESPN hasn't closed the week yet: the scores decide it
+            m.home_score, m.away_score = 990.0, 1004.5
+    league_id = _league(user_id, snap=snap)
+    url = f"/api/leagues/{league_id}/matchups"
+
+    wk = client.get(url, headers=headers).json()
+    assert [(w["matchup_period"], w["is_final"], w["is_current"]) for w in wk["weeks"][:3]] == [
+        (1, True, False), (2, True, False), (3, False, True)]
+    assert wk["matchup_period"] == 3 and not wk["final"] and wk["matchups"]  # still opens on this week
+    assert wk["weeks"][0]["start"] == snap.schedule.period_dates[snap.settings.matchup_periods[1][0]].isoformat()
+
+    w1 = client.get(f"{url}?matchup_period=1", headers=headers).json()
+    games = [m for m in snap.matchups if m.matchup_period == 1 and m.away_team_id is not None]
+    assert w1["final"] and w1["matchups"] == [] and len(w1["results"]) == len(games)
+    r = w1["results"][0]
+    assert (r["home_id"], r["away_id"]) == (games[0].home_team_id, games[0].away_team_id)
+    assert (r["home_score"], r["away_score"], r["winner"], r["consolation"]) == (1412.5, 1358.0, "HOME", False)
+    assert r["home_name"] == snap.team(games[0].home_team_id).name
+    w2 = client.get(f"{url}?matchup_period=2", headers=headers).json()
+    assert {r["winner"] for r in w2["results"]} == {"AWAY"}
+
+
+def test_once_the_season_is_over_the_page_opens_on_the_last_results(client):
+    user_id, headers = _user()
+    snap = make_snapshot()
+    last = max(snap.settings.matchup_periods)
+    _start_week(snap, last)
+    snap.current_period = max(snap.settings.matchup_periods[last]) + 1
+    league_id = _league(user_id, snap=snap)
+    wk = client.get(f"/api/leagues/{league_id}/matchups", headers=headers).json()
+    assert wk["final"] and wk["matchup_period"] == last  # it used to say "The fantasy season is over"
+    assert all(w["is_final"] for w in wk["weeks"]) and len(wk["weeks"]) == len(snap.settings.matchup_periods)
 
 
 def _espn_client(monkeypatch, handler) -> tuple[espn.EspnClient, list[float]]:

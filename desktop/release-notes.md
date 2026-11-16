@@ -2,6 +2,7 @@ Courtside runs on your computer: projections, power rankings, matchup simulation
 
 ## What's new in 0.6.6
 
+- **Look back at past weeks.** The **Week** picker on **Matchups** now lists the weeks already played too, marked **final**. Pick one to see every matchup's final score, with the winner in bold, the margin and a line on how your week went ("You beat Team Tacos, 1,412.5 to 1,358.0."). Once the season is over, the page opens on the last week's results instead of saying the season is over.
 - **Fewer "Refresh failed" messages.** When ESPN didn't answer for a few seconds, for example while Wi-Fi reconnected after your laptop woke up, the whole refresh failed. Courtside now keeps trying for about 30 seconds before it gives up.
 - **It tries again in 5 minutes.** A refresh that still doesn't work is tried again 5 minutes later, then after 10, 20 and 40 minutes, then every hour as usual. Before, a failed refresh could sit there for most of an hour. If you quit Courtside in the middle of a refresh, it now finishes the job as soon as you open the app again.
 - **Calmer about it.** The top bar now says **Couldn't refresh · trying again in 4 min** with an amber dot, and the league keeps showing the data from the last refresh. Hover over it to see what went wrong, in plain words like "Couldn't reach ESPN: it took too long to answer." A pop-up only appears when you press **Refresh** yourself, not every time a background refresh misses.

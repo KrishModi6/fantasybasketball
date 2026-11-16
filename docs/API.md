@@ -60,7 +60,7 @@ A league with no data yet returns `409` from analytics endpoints, with the last 
 ## Matchups
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/leagues/{id}/matchups?matchup_period=` | Remaining weeks plus that week's scheduled matchups with quick (Normal-approximation) projections and win probabilities. Defaults to the current week |
+| GET | `/api/leagues/{id}/matchups?matchup_period=` | Every week (played ones first, `is_final: true`) plus that week's scheduled matchups with quick (Normal-approximation) projections and win probabilities. For a week already played, `final: true` and `results` instead: each matchup's final `home_score`/`away_score` (points, or categories won), `winner` (`HOME`/`AWAY`/`TIE`, from the scores until ESPN closes the week) and `consolation`. Defaults to the current week, or the last one once the season is over |
 | POST | `/api/leagues/{id}/matchups/simulate` | `{team_a, team_b, matchup_period, exclude?: [player_id], sims?: 500–20000 (default 10000), seed?}` → win/tie probabilities, score and margin histograms, per-day and per-player results (`swing`, 80% range), category table for category leagues. Any two teams can be paired, not just scheduled opponents. `422` if the week is over or the teams are the same |
 
 ## Trades

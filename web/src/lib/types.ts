@@ -495,6 +495,19 @@ export interface WeekOption {
   end: string | null;
   is_current: boolean;
   is_playoff: boolean;
+  is_final?: boolean; // already played: the week shows its results
+}
+
+/** A finished week's matchup: ESPN's final scores (points, or categories won). */
+export interface WeekResult {
+  home_id: number;
+  away_id: number;
+  home_name: string;
+  away_name: string;
+  home_score: number;
+  away_score: number;
+  winner: "HOME" | "AWAY" | "TIE";
+  consolation: boolean;
 }
 
 export interface WeekMatchup {
