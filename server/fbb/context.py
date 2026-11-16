@@ -55,6 +55,37 @@ MISS_RAMP_GAMES = 9.0
 SEASON_START_MISS_CUT = 0.6
 SEASON_START_GAMES = 2.0
 
+# Teammates of a player who sits score more: in 2022-23 to 2025-26, on nights a team's top fantasy scorer missed
+# and its other regulars played (not in its last 12 games), his teammates scored 8.8% more than in their own games
+# beside him a few weeks either side, about half of it minutes; more for bench players (12% at 12-20 minutes) than
+# starters (7% at 26+). A teammate t's share of his team's output, s_t = his FP/G over the sum of the team's top
+# TEAM_CORE, stands for what leaves with him. On a day t is expected to sit with probability q_t(d) = 1 - p_play,
+# a player in a role of m minutes is projected at x (1 + TEAMMATE_BOOST x r x sum_t s_t q_t(d)), r = (TEAMMATE_REF_MPG
+# / m) ** TEAMMATE_ROLE_POWER, capped at TEAMMATE_ROLE_CAP. His projection already holds the games t sat among his
+# own recent ones, so it's also divided by (1 + TEAMMATE_BOOST x r x sum_t s_t w_t(d)). w_t(d) blends two things:
+# t's season miss rate plus TEAMMATE_RECENT_SCALE of how far his rate of sitting in this player's last games
+# (fading over TEAMMATE_HALF_LIFE_GAMES) ran above it, and t's everyday chance of sitting on day d (q_t(d) with any
+# known absence taken out), worth TEAMMATE_PRIOR_GAMES games. So with nothing to go on a team with nobody hurt comes
+# out even on every day, and a player who's been filling in for a star is projected lower once the star is back,
+# though not all the way: fill-ins keep part of the role. The factor stays within 1 / (1 + TEAMMATE_CAP) to
+# 1 + TEAMMATE_CAP. 0 turns it off. Tuned on the weekly projections of scripts/backtest_sims.py (weeks 1-19 of
+# 2023-24 to 2025-26, 49,581 player-games against what each scored): games with the factor above 1.03 had been
+# projected at 0.944 of what players scored, now 0.991; below 0.97 (a teammate back), 1.036, now 0.981; all games
+# 0.988, now 0.998. RMSE fell in every season, in week 1 and in weeks 2-4 and 5+ (13.352 -> 13.335 FP overall), and
+# so did the mean absolute error (10.562 -> 10.555). Strengths 0.35-0.55, role powers 0.4-1.0 and a cap of 0.25
+# scored within 0.01 of it. Letting the whole recent rate count (TEAMMATE_RECENT_SCALE 1) left returns at 0.962;
+# t's season miss rate in place of his everyday chance with no games to go on put week 1 at 0.914 of what players
+# scored (0.938 without the factor), and his next games' everyday chance for every day lifted later games.
+TEAMMATE_BOOST = 0.45
+TEAMMATE_REF_MPG = 24.0
+TEAMMATE_ROLE_POWER = 1.0
+TEAMMATE_ROLE_CAP = 2.5
+TEAMMATE_HALF_LIFE_GAMES = 10.0
+TEAMMATE_PRIOR_GAMES = 3.0
+TEAMMATE_RECENT_SCALE = 0.6
+TEAMMATE_CAP = 0.35
+TEAM_CORE = 10
+
 
 @dataclass
 class WindowResult:
@@ -103,6 +134,7 @@ class AnalysisContext:
         self._league_gp: float | None = None
         self._rostered = {e.player_id for t in snapshot.teams for e in t.roster}
         self._first_day: dict[str, int] = {}
+        self._pro_rosters: dict[str, list[str]] | None = None
 
     # -- availability ----------------------------------------------------------
 
@@ -169,8 +201,73 @@ class AnalysisContext:
             if f > 0.999 and not pr.climb:
                 break
             out[d] = f * climbs[k]
+        for d, f in self.teammates(pid).items():
+            out[d] = out.get(d, 1.0) * f
         self._form[pid] = out
         return out
+
+    def teammates(self, pid: str) -> dict[int, float]:
+        """period -> his output that day relative to his projection from teammates sitting (TEAMMATE_BOOST):
+        above 1 when someone who takes a share of his team's output is expected to miss, below 1 when one who
+        missed his recent games is expected back. Days not listed are 1."""
+        if not TEAMMATE_BOOST:
+            return {}
+        p = self.s.players[pid]
+        team, pr = p.pro_team, self.proj[pid]
+        mates = [t for t in self._roster_of(team) if t != pid]
+        total = self._team_output(team)
+        if not mates or total <= 0 or pr.mpg <= 0:
+            return {}
+        k = TEAMMATE_BOOST * min(TEAMMATE_ROLE_CAP, (TEAMMATE_REF_MPG / max(pr.mpg, 1.0)) ** TEAMMATE_ROLE_POWER)
+        share = {t: self.proj[t].fp_pg / total for t in mates if self.proj[t].fp_pg > 0}
+        # His recent games this season for this team, newest first, and who sat in each.
+        season = self.s.settings.season
+        mine = sorted((g.period for g in p.recent_games if g.season == season and g.team == team), reverse=True)
+        # What his projection already holds of each teammate sitting. From his recent games: how often t sat in
+        # them, shrunk toward t's season miss rate (TEAMMATE_RECENT_SCALE). With no games to go on, t's everyday
+        # chance of sitting that day, without his known absence, so a team with nobody hurt comes out even. The
+        # two blend as his games add up, the latter worth TEAMMATE_PRIOR_GAMES.
+        w = [0.5 ** (j / TEAMMATE_HALF_LIFE_GAMES) for j in range(len(mine))]
+        seen = sum(w)
+        lam = seen / (seen + TEAMMATE_PRIOR_GAMES)
+        days = sorted(self.team_days.get(team, ()))
+        recent_part = 0.0  # sum_t s_t x his recent rate of sitting, shrunk toward his season rate
+        sits: dict[int, float] = {d: 0.0 for d in days}  # sum_t s_t x q_t(d)
+        everyday: dict[int, float] = {d: 0.0 for d in days}  # the same without known absences
+        for t, s in share.items():
+            pt = self.p_play(t)
+            known = int(math.floor(self.proj[t].games_out))
+            after = 1 - pt.get(days[known], 0.0) if known < len(days) else 1 - self.proj[t].availability
+            for j, d in enumerate(days):
+                q = 1 - pt.get(d, 0.0)
+                sits[d] += s * q
+                everyday[d] += s * (after if j <= known else q)
+            if seen:
+                season_rate = 1 - self.proj[t].availability
+                theirs = {g.period for g in self.s.players[t].recent_games if g.season == season}
+                sat = sum(wj for wj, q in zip(w, mine) if q not in theirs) / seen
+                recent_part += s * (season_rate + TEAMMATE_RECENT_SCALE * (sat - season_rate))
+        out: dict[int, float] = {}
+        for d in days:
+            base = lam * recent_part + (1 - lam) * everyday[d]
+            f = min(1 + TEAMMATE_CAP, max(1 / (1 + TEAMMATE_CAP), (1 + k * sits[d]) / (1 + k * base)))
+            if abs(f - 1) > 1e-3:
+                out[d] = f
+        return out
+
+    def _roster_of(self, team: str) -> list[str]:
+        """The players with projections on a pro team (none for free agents)."""
+        if self._pro_rosters is None:
+            self._pro_rosters = {}
+            for t_pid in self.proj:
+                tm = self.s.players[t_pid].pro_team
+                if tm and tm != "FA":
+                    self._pro_rosters.setdefault(tm, []).append(t_pid)
+        return self._pro_rosters.get(team, [])
+
+    def _team_output(self, team: str) -> float:
+        """The FP/G of a pro team's top TEAM_CORE players: the output the shares in teammates() divide."""
+        return sum(sorted((self.proj[t].fp_pg for t in self._roster_of(team)), reverse=True)[:TEAM_CORE])
 
     def team_games_played(self, team: str) -> int:
         """A pro team's games this season before today."""

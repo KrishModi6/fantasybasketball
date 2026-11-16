@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.6.2
+## What's new in 0.6.3
+
+- **When a star sits, his teammates' projections go up.** If a player is listed as out, Courtside now projects his teammates higher on the days he misses, the bench players most. In four past seasons, teammates scored about 9% more on nights the team's best player sat: about 12% for players in 12-20 minute roles and about 7% for starters.
+- **And back down when he returns.** A player who has been filling in for an injured star is projected a little lower once the star is back, but not all the way, because fill-ins keep part of the role.
+- **More accurate overall.** Tested on three past seasons, the change made week-by-week projections more accurate in every season. Games with a teammate out had been projected about 6% too low. Now they're within 1%. Lineups, matchup odds, rest-of-season values and add/drop advice all use it.
+
+## In 0.6.2
 
 - **Votes are only on trades that went through.** The **League vote** panel now lists just the trades that happened: real trades from ESPN, and board posts that have since gone through. Proposals and trade ideas can't be voted on until they happen.
 - **No more votes from the trade analyzer.** **Start a league vote** is gone from **Trades > Analyze**. Votes that 0.6.1 started there are hidden. Votes already cast on real trades stay.

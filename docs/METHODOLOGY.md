@@ -373,6 +373,35 @@ Tried and dropped:
 - **A climb table by year** (year 3 at 0.15 instead of 0.10). It lifted year 3 by about a point, and year 3's error got worse in 2020‑21 (4.06 → 4.11). Not worth six separate numbers.
 - **Veterans' minutes × 0.97 from year 7.** About the same error as the split (−0.034), with 2023‑24 worse (+0.017), and no better than 0.98 for years 7–10 in the older seasons.
 
+### 1.5.3 Teammates who sit (the teammate factor)
+
+When a team's best player sits, the others score more. In the 2022‑23 to 2025‑26 box scores, on nights a team's top fantasy scorer (25+ games, 28+ minutes) missed and every other regular (24+ minutes) played, outside the team's last 12 games, his teammates scored **8.8% more** than in their own games beside him within 15 team games either side. About half was minutes (+4.7%), half output per minute (+3.9%). It held in every season (+9.0%, +8.1%, +6.9%, +10.5%) and leaned toward the bench: +12% at 12–20 minutes, +9% at 20–26, +7% at 26 or more. With rest nights and end‑of‑season tanking left in, the lift reads +14%, because several regulars sit together; the app's absences add up teammate by teammate, so that case is covered without the inflated number.
+
+`AnalysisContext.teammates` (fbb/context.py) turns that into a per‑day factor on each player's projection, multiplied into `form` with the opening and return dips, so lineups, the matchup simulator, rest‑of‑season values and add/drop advice all see it:
+
+- Each teammate *t* carries a share *s_t* of his team's output: his FP/G over the sum of the team's top 10.
+- On day *d*, *t* sits with probability *q_t(d)* = 1 − his chance of playing (his injury status and games out, or the everyday chance of missing).
+- A player in a role of *m* minutes is projected at × (1 + 0.45 · r · Σ *s_t q_t(d)*) / (1 + 0.45 · r · Σ *s_t w_t(d)*), r = 24 / *m* (at most 2.5), the factor kept within 1/1.35 and 1.35.
+- *w_t(d)* is what his projection already holds of *t* sitting. From his own recent games: how often *t* sat in them, over his last games fading with a 10‑game half‑life, shrunk 40% toward *t*'s season miss rate. With nothing to go on, *t*'s everyday chance of sitting that day with any known absence taken out, worth 3 games. So a team with nobody hurt comes out even, a player is lifted on the days a teammate is expected out, and a player who has been filling in for a star is projected lower once the star is back, though not all the way, since fill‑ins keep part of the role.
+
+Scored on `scripts/backtest_sims.py`'s weekly projections (weeks 1–19 of 2023‑24 to 2025‑26, 49,581 player‑games, each game projected as at the start of its week against what the player scored):
+
+| Games | Projected / scored, before → after |
+|---|---|
+| A teammate out (factor above 1.03, 11,372 games) | 0.944 → 0.991 |
+| A teammate back (factor below 0.97, 3,952 games) | 1.036 → 0.981 |
+| All games | 0.988 → 0.998 |
+
+RMSE went 13.352 → 13.335 FP per game and mean absolute error 10.562 → 10.555, lower in each season (13.330 → 13.315, 13.363 → 13.356, 13.363 → 13.334) and in week 1, weeks 2–4 and weeks 5 on. Strengths 0.35–0.55, role powers 0.4–1.0 and a cap of 0.25 scored within 0.01 of it.
+
+Tried and dropped:
+- **Letting a player's whole recent rate count.** Returns stayed at 0.962 of what fill‑ins scored: they keep more of the role than that assumes.
+- **Scaling the recent rate down.** It also cancels the everyday chance that someone sits, so every player rose, all games to 1.05–1.13.
+- **The season miss rate as the starting point with no games.** Healthy players rarely miss their next games, so the factor fell below 1 for everyone early on: week 1 went from 0.938 to 0.914 of what players scored.
+- **The next week's everyday chance for every day.** Week 1 was right, but later days rose with the season miss rate, and all games ran 1.012.
+
+Unlike the team‑minutes budget the app dropped (section 1.6), which ran about 7% high because teammates' recent games already showed who absorbs an absence and it counted that again, the factor moves a player only by how far his teammates' expected absences differ from what his recent games already hold.
+
 ### 1.6 Bounded adjustments (the "news" layer)
 
 Only structured signals change numbers, and each has a cap:
