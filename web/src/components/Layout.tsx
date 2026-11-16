@@ -5,7 +5,7 @@ import { ArrowLeft, Cloud, LogOut, Menu, Moon, RefreshCw, Sun } from "lucide-rea
 import { api, isLocalApp } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { openAppMenu, openWhatsNew } from "../lib/desktop";
-import { count, pct, record, relTime, shortDate, sourceLabel } from "../lib/format";
+import { count, pct, record, relTime, shortDate, sourceLabel, syncFailedText, syncLabel } from "../lib/format";
 import { canGoBack, leagueTabs, rememberPath } from "../lib/nav";
 import { useLeague, useLeagues, useModelCard, useRankings } from "../lib/queries";
 import { useAutoRefresh, useLeagueSocket, useLive, useRefreshOnSync } from "../lib/realtime";
@@ -103,19 +103,31 @@ function SyncStatus({ league }: { league: League }) {
   const qc = useQueryClient();
   const toast = useToast();
   const sync = useMutation({
-    mutationFn: () => api<{ status: string; error?: string | null }>(`/api/leagues/${league.id}/sync`, { method: "POST" }),
+    mutationFn: () =>
+      api<{ status: string; error?: string | null; retry_at?: string | null }>(`/api/leagues/${league.id}/sync`, { method: "POST" }),
     onSuccess: (r) => {
-      // Hosts with inline syncing return the finished result; others report "started".
-      if (r?.status === "error") toast(`Refresh failed: ${r.error ?? "unknown error"}`, "err");
+      // Hosts with inline syncing return the finished result; others report "started" (and a failure by push).
+      if (r?.status === "error") toast(syncFailedText(r.error, r.retry_at), "err");
       qc.invalidateQueries({ queryKey: ["league", league.id, "meta"] });
     },
     onError: (e: Error) => toast(e.message, "err"),
   });
   const s = sync.isPending ? "running" : league.sync.status;
-  const label = s === "running" ? "Refreshing" : s === "error" ? "Refresh failed" : `Synced ${relTime(league.sync.last_synced_at)}`;
+  const retryAt = s === "error" ? league.sync.retry_at : null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { // keeps "trying again in 4 min" counting down
+    if (!retryAt) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [retryAt]);
+  const label = syncLabel(s, league.sync.last_synced_at, retryAt, now);
+  const title = s === "error"
+    ? `${league.sync.error ?? "The last refresh didn't finish."} Showing the data from ${relTime(league.sync.last_synced_at)}.`
+    : `Auto-refresh every ${league.sync.interval_hours}h`;
   return (
-    <div className="sync" title={league.sync.error ?? `Auto-refresh every ${league.sync.interval_hours}h`}>
-      <span className={`dot ${s === "running" ? "run" : s === "error" ? "err" : ""}`} aria-hidden="true" />
+    <div className="sync" title={title}>
+      <span className={`dot ${s === "running" ? "run" : s === "error" ? (retryAt ? "warn" : "err") : ""}`} aria-hidden="true" />
       <span className="hide-sm">{sourceLabel[league.source]} · </span>
       <span className="hide-sm">{label}</span>
       <button className="btn" onClick={() => sync.mutate()} disabled={s === "running" || sync.isPending} aria-label="Refresh league data">

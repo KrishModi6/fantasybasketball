@@ -48,6 +48,30 @@ export function relTime(iso: string | null | undefined): string {
   return `${Math.round(s / 86400)}d ago`;
 }
 
+/** "in 4 min" / "in 1h" until an ISO time; "soon" once it's (nearly) due. */
+export function untilTime(iso: string, now = Date.now()): string {
+  const m = Math.round((Date.parse(iso) - now) / 60_000);
+  if (!(m >= 1)) return "soon";
+  return m < 60 ? `in ${m} min` : `in ${Math.round(m / 60)}h`;
+}
+
+/**
+ * The words for a league's refresh state, in the header and the leagues list. A failed refresh that will be
+ * tried again on its own says so, instead of a bare "Refresh failed".
+ */
+export function syncLabel(status: string, lastSyncedAt: string | null, retryAt?: string | null, now = Date.now()): string {
+  if (status === "running") return "Refreshing";
+  if (status !== "error") return `Synced ${relTime(lastSyncedAt)}`;
+  return retryAt ? `Couldn't refresh · trying again ${untilTime(retryAt, now)}` : "Couldn't refresh";
+}
+
+/** A pop-up for a refresh someone asked for that didn't work: what happened, and when it's tried again. */
+export function syncFailedText(error: string | null | undefined, retryAt?: string | null, now = Date.now()): string {
+  let text = (error ?? "").trim() || "The refresh didn't finish.";
+  if (!/[.!?]$/.test(text)) text += ".";
+  return retryAt ? `${text} Courtside will try again ${untilTime(retryAt, now)}.` : text;
+}
+
 export function shortDate(iso: string | null | undefined, withDay = false): string {
   if (!iso) return "";
   const d = new Date(iso.length === 10 ? `${iso}T12:00:00` : iso);

@@ -274,6 +274,9 @@ th.n {
 .dot.err {
   background: var(--down);
 }
+.dot.warn {
+  background: var(--warn);
+}
 .dot.run {
   background: var(--warn);
   animation: blink 1s infinite;

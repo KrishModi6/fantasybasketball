@@ -14,6 +14,7 @@ export interface LeagueSummary {
   member_count: number;
   team_count: number | null; // null before the first sync
   sync_status: string;
+  retry_at?: string | null; // after a failed refresh: when it's tried again on its own
   last_synced_at: string | null;
 }
 
@@ -41,7 +42,13 @@ export interface League {
   name: string;
   season: number;
   source: LeagueSummary["source"];
-  sync: { status: string; error: string | null; last_synced_at: string | null; interval_hours: number };
+  sync: {
+    status: string;
+    error: string | null;
+    last_synced_at: string | null;
+    interval_hours: number;
+    retry_at?: string | null; // after a failed refresh: when it's tried again on its own
+  };
   connector: { espn_league_id: string | null; has_cookies: boolean | null; shared_by: string | null };
   me: { role: "owner" | "member"; team_id: number | null; is_admin: boolean } | null;
   member_count: number;

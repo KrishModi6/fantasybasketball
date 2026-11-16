@@ -23,11 +23,11 @@ Base URL: your server, e.g. `http://localhost:8000`. Interactive docs (Swagger U
 | GET | `/api/leagues` | any | Your leagues, with `member_count` and `team_count` (teams in the latest snapshot; `null` before the first sync) |
 | POST | `/api/leagues` | any | `{source: "espn"\|"demo"\|"flaim", name?, season, espn?: {league_id, espn_s2?, swid?}, flaim?: {flaim_token, platform, league_id}, team_count?}`. Runs the first sync inline; `400` with ESPN's error if the league can't be read |
 | POST | `/api/leagues/import` | any | multipart `file` (.csv/.json, ≤2 MB), `name`, `season` |
-| GET | `/api/leagues/{id}` | member | League, teams (with who claimed them), settings, sync status, your role/team, and `me.is_admin` (whether you can rule on its trades) |
+| GET | `/api/leagues/{id}` | member | League, teams (with who claimed them), settings, sync status (`sync.retry_at`: after a failed refresh, when it's tried again on its own), your role/team, and `me.is_admin` (whether you can rule on its trades) |
 | PATCH | `/api/leagues/{id}` | owner | `{name?, sync_interval_hours?, espn?}`. Blank cookie fields keep stored values |
 | DELETE | `/api/leagues/{id}` | owner | |
 | PUT | `/api/leagues/{id}/settings` | owner | `{kind, points, categories, roster_slots?}`. Demo/file leagues only |
-| POST | `/api/leagues/{id}/sync` | member | Starts a background refresh (`202`) |
+| POST | `/api/leagues/{id}/sync` | member | Starts a background refresh (`202`). `?auto=true` when the page refreshes old data on its own: a failure then shows in the header without a pop-up (`sync_failed` event with `reason: "auto"`) |
 
 ## Members & invites
 | Method | Path | Who | Notes |

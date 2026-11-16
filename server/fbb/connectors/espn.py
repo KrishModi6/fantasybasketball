@@ -81,6 +81,27 @@ class RateLimiter:
 
 _limiter = RateLimiter()
 
+# Seconds to wait between tries when ESPN can't be reached or is overloaded: 5 tries over about 30 seconds,
+# long enough for Wi-Fi to come back after a laptop wakes. (It was 4 tries over about 9 seconds, so a short
+# blip failed the whole refresh.) RETRY_BUDGET_S caps the retrying, so slow timeouts can't stall a refresh.
+RETRY_DELAYS = (2.0, 4.0, 8.0, 16.0)
+RETRY_BUDGET_S = 90.0
+
+
+def _network_problem(exc: httpx.HTTPError) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "it took too long to answer"
+    if isinstance(exc, httpx.ConnectError):
+        return "no connection (is the internet on?)"
+    return "the connection dropped"
+
+
+def _retry_after(r: httpx.Response, default: float) -> float:
+    try:
+        return min(max(float(r.headers.get("Retry-After", default)), 0.0), 30.0)
+    except ValueError:  # an HTTP date instead of seconds
+        return default
+
 
 class EspnClient:
     def __init__(self, espn_s2: str | None = None, swid: str | None = None, timeout: float = 45.0):
@@ -101,32 +122,41 @@ class EspnClient:
         headers = {}
         if fantasy_filter is not None:
             headers["X-Fantasy-Filter"] = json.dumps(fantasy_filter)
-        last_exc: Exception | None = None
-        for attempt in range(4):
+        started = time.monotonic()
+        problem = "it didn't answer"
+        for attempt in range(len(RETRY_DELAYS) + 1):
             _limiter.wait()
+            wait = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
             try:
                 r = self._http.get(url, params=params, headers=headers)
-            except httpx.HTTPError as exc:  # network blip: retry with backoff
-                last_exc = exc
-                time.sleep(1.5 * (attempt + 1))
-                continue
-            if r.status_code in (429, 500, 502, 503, 504):
-                retry_after = float(r.headers.get("Retry-After", 2 * (attempt + 1)))
-                time.sleep(min(retry_after, 20))
-                continue
-            if r.status_code in (401, 403):
-                raise ConnectorError(
-                    "ESPN refused access. For a private league, add the espn_s2 and SWID cookies "
-                    "from a logged-in browser session."
-                )
-            if r.status_code == 404:
-                raise ConnectorError("ESPN returned 404: check the league id and season.")
-            r.raise_for_status()
-            # ESPN sends HTML (a login redirect) instead of JSON when cookies are stale.
-            if "json" not in r.headers.get("content-type", ""):
-                raise ConnectorError("ESPN returned a non-JSON response; your cookies may have expired.")
-            return r.json()
-        raise ConnectorError(f"ESPN request failed after retries: {last_exc or 'rate limited'}")
+            except httpx.HTTPError as exc:  # a network blip, or Wi-Fi still reconnecting after a laptop woke
+                log.info("ESPN request failed (try %d): %r", attempt + 1, exc)
+                problem = _network_problem(exc)
+            else:
+                if r.status_code not in (429, 500, 502, 503, 504):
+                    return self._answer(r)
+                problem = ("it asked Courtside to slow down" if r.status_code == 429
+                           else f"it had a problem on its end (error {r.status_code})")
+                wait = _retry_after(r, wait)
+            if attempt == len(RETRY_DELAYS) or time.monotonic() - started + wait > RETRY_BUDGET_S:
+                break
+            time.sleep(wait)
+        raise ConnectorError(f"Couldn't reach ESPN: {problem}.")
+
+    @staticmethod
+    def _answer(r: httpx.Response) -> Any:
+        if r.status_code in (401, 403):
+            raise ConnectorError(
+                "ESPN refused access. For a private league, add the espn_s2 and SWID cookies "
+                "from a logged-in browser session."
+            )
+        if r.status_code == 404:
+            raise ConnectorError("ESPN returned 404: check the league id and season.")
+        r.raise_for_status()
+        # ESPN sends HTML (a login redirect) instead of JSON when cookies are stale.
+        if "json" not in r.headers.get("content-type", ""):
+            raise ConnectorError("ESPN returned a non-JSON response; your cookies may have expired.")
+        return r.json()
 
     # ---- endpoints ---------------------------------------------------------
 

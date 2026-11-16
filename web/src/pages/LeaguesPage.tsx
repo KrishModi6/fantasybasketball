@@ -7,7 +7,7 @@ import { Empty, ErrorBox, LoadingBlock, Panel, SubTabs, Tag } from "../component
 import { VersionBadge } from "../components/VersionBadge";
 import { api, isLocalApp, serverUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { relTime, sourceLabel } from "../lib/format";
+import { sourceLabel, syncLabel } from "../lib/format";
 import { canGoBack } from "../lib/nav";
 import { useLeagues } from "../lib/queries";
 import type { League } from "../lib/types";
@@ -63,8 +63,8 @@ export function LeaguesPage() {
                       <td>{l.season - 1}–{String(l.season).slice(2)}</td>
                       <td>{l.role === "owner" ? "Owner" : "Member"}</td>
                       <td className="n">{isLocalApp() ? (l.team_count ?? "–") : l.member_count}</td>
-                      <td className={l.sync_status === "error" ? "down" : "muted"}>
-                        {l.sync_status === "error" ? "Refresh failed" : `Synced ${relTime(l.last_synced_at)}`}
+                      <td className={l.sync_status !== "error" ? "muted" : l.retry_at ? "warn" : "down"}>
+                        {syncLabel(l.sync_status, l.last_synced_at, l.retry_at)}
                       </td>
                     </tr>
                   ))}

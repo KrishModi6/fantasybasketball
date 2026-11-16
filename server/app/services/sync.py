@@ -34,6 +34,23 @@ KEEP_SNAPSHOTS = 20
 # 2: expected assists, rebounds, steals, blocks and free throws calibrated to this season (fbb.xfp.calibrate_lines).
 # 3: each team's tip-off (a finished game stops counting) and when each waiver claim clears.
 DATA_VERSION = 3
+# After a refresh fails, the next automatic try comes 5 minutes later, then 10, 20 and 40, then at the league's
+# usual interval. Most failures are a network blip or ESPN being busy, gone within minutes. Before, the next
+# try waited for the regular schedule: up to an hour after a failed refresh from the app (or one cut off when
+# Courtside closed), and every 10 minutes for good after a failed scheduled one, expired cookies included.
+RETRY_FIRST = timedelta(minutes=5)
+INTERRUPTED = "The last refresh was cut off before it finished."
+_failures: dict[str, tuple[int, datetime]] = {}  # league id -> (failed refreshes in a row, next automatic try)
+
+
+def retry_at(league_id: str) -> datetime | None:
+    """When a league whose last refresh failed is tried again automatically (None if not known here)."""
+    failed = _failures.get(league_id)
+    return failed[1] if failed else None
+
+
+def _interval(league: League) -> timedelta:
+    return timedelta(hours=league.sync_interval_hours or get_settings().sync_interval_hours)
 
 
 def build_connector(league: League) -> LeagueConnector:
@@ -81,11 +98,11 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
         try:
             snap = build_connector(league).fetch_snapshot()
         except ConnectorError as exc:
-            _fail(db, league, str(exc))
+            _fail(db, league, str(exc), reason)
             return
         except Exception as exc:  # noqa: BLE001
             log.exception("sync failed for %s", league_id)
-            _fail(db, league, f"Unexpected error while syncing: {exc}")
+            _fail(db, league, f"Unexpected error while syncing: {exc}", reason)
             return
 
         try:
@@ -97,7 +114,7 @@ def run_sync(league_id: str, reason: str = "manual") -> None:
             db.rollback()
             league = db.get(League, league_id)
             if league is not None:
-                _fail(db, league, f"Unexpected error while saving the refresh: {exc}")
+                _fail(db, league, f"Unexpected error while saving the refresh: {exc}", reason)
     finally:
         db.close()
 
@@ -147,6 +164,7 @@ def _store(db, league: League, snap: LeagueSnapshot, reason: str) -> None:
     league.last_sync_status = "ok"
     league.last_sync_error = None
     db.commit()
+    _failures.pop(league_id, None)
     if moves:
         hub.publish(league_id, {"type": "roster_moves", "count": len(moves),
                                 "first": describe_move(moves[0], prev, snap)})
@@ -183,12 +201,16 @@ def claim_own_team(db, league: League, snap: LeagueSnapshot) -> None:
     _log(db, league.id, "member", f"{team.name} was matched to the ESPN login that owns it", {"team_id": team.id})
 
 
-def _fail(db, league: League, message: str) -> None:
+def _fail(db, league: League, message: str, reason: str = "manual") -> None:
+    count = _failures.get(league.id, (0, None))[0] + 1
+    at = datetime.now(timezone.utc) + min(RETRY_FIRST * 2 ** min(count - 1, 8), _interval(league))
+    _failures[league.id] = (count, at)
     league.last_sync_status = "error"
     league.last_sync_error = message[:1000]
-    _log(db, league.id, "sync_error", message[:480])
+    if count == 1:  # one line in the league feed for a run of failures, not one every few minutes
+        _log(db, league.id, "sync_error", message[:480])
     db.commit()
-    hub.publish(league.id, {"type": "sync_failed", "error": message})
+    hub.publish(league.id, {"type": "sync_failed", "error": message, "reason": reason, "retry_at": at.isoformat()})
 
 
 def _prune(db, league_id: str) -> None:
@@ -219,8 +241,9 @@ def _record_projection_history(db, league_id: str, snap: LeagueSnapshot) -> None
 
 
 def due_leagues(now: datetime | None = None, outdated: bool = False) -> list[str]:
-    """Leagues to refresh: those whose sync interval has passed, and with ``outdated`` (the first check
-    after the app starts) those whose latest snapshot is older than DATA_VERSION."""
+    """Leagues to refresh: those whose sync interval has passed, those whose last refresh failed and whose
+    retry time has come, and with ``outdated`` (the first check after the app starts) those whose latest
+    snapshot is older than DATA_VERSION or whose last refresh failed or was cut off before the app closed."""
     now = now or datetime.now(timezone.utc)
     db = SessionLocal()
     try:
@@ -228,7 +251,15 @@ def due_leagues(now: datetime | None = None, outdated: bool = False) -> list[str
         for lg in db.scalars(select(League)).all():
             if lg.last_sync_status == "running":
                 continue
-            interval = timedelta(hours=lg.sync_interval_hours or get_settings().sync_interval_hours)
+            failed = _failures.get(lg.id) if lg.last_sync_status == "error" else None
+            if failed is not None:
+                if now >= failed[1]:
+                    out.append(lg.id)
+                continue
+            if outdated and lg.last_sync_status == "error":
+                out.append(lg.id)
+                continue
+            interval = _interval(lg)
             last = lg.last_synced_at
             if last is not None and last.tzinfo is None:
                 last = last.replace(tzinfo=timezone.utc)
