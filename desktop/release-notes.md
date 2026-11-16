@@ -1,11 +1,18 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.6.5
+## What's new in 0.6.6
+
+- **Look back at past weeks.** The **Week** picker on **Matchups** now lists the weeks already played too, marked **final**. Pick one to see every matchup's final score, with the winner in bold, the margin and a line on how your week went ("You beat Team Tacos, 1,412.5 to 1,358.0."). Once the season is over, the page opens on the last week's results instead of saying the season is over.
+- **Fewer "Refresh failed" messages.** When ESPN didn't answer for a few seconds, for example while Wi-Fi reconnected after your laptop woke up, the whole refresh failed. Courtside now keeps trying for about 30 seconds before it gives up.
+- **It tries again in 5 minutes.** A refresh that still doesn't work is tried again 5 minutes later, then after 10, 20 and 40 minutes, then every hour as usual. Before, a failed refresh could sit there for most of an hour. If you quit Courtside in the middle of a refresh, it now finishes the job as soon as you open the app again.
+- **Calmer about it.** The top bar now says **Couldn't refresh · trying again in 4 min** with an amber dot, and the league keeps showing the data from the last refresh. Hover over it to see what went wrong, in plain words like "Couldn't reach ESPN: it took too long to answer." A pop-up only appears when you press **Refresh** yourself, not every time a background refresh misses.
+
+## In 0.6.5
 
 - **See when a star sitting lifts a bench player.** Since 0.6.3 Courtside has projected role and bench players higher on nights a teammate who takes a big share of the team's points is out, but nothing said so. Now the player card shows a **Teammate out** note, for example **+12% for the next 7 days**, with who's sitting and for about how many games. On **Players** the same thing shows under the name ("+12% · Embiid out"), so free agents worth a short-term pickup stand out. It works the other way too: a player who filled in shows **Teammate back** with a small drop once the star returns. Only changes of 3% or more are shown; the projections themselves are the same as in 0.6.4.
 - **No more "Courtside is damaged" on a Mac.** The Mac app never had a real code signature: the tool that builds it quietly skipped that step every time. Macs can live with that only until something looks closely, and then they say **"Courtside is damaged and can't be opened"**, which some of you saw again after updating. The Mac app is now properly signed (the free kind, without a paid Apple certificate), and every release checks the signature before it's published.
 - **Updates check the download first.** Before a Mac installs an update, Courtside now checks the new copy's signature too, so it never swaps in a copy macOS would refuse to open. Your current Courtside stays until the new one checks out.
-- **Saw "damaged" after updating?** Click **Cancel** (not Move to Trash), download **Courtside-0.6.5-mac-arm64.zip** below and follow **Install on a Mac**, Terminal command included. Your leagues stay. That should be the last time; from 0.6.5 on, updates install themselves again.
+- **Saw "damaged" after updating?** Click **Cancel** (not Move to Trash), download **Courtside-<version>-mac-arm64.zip** below (0.6.5 or newer) and follow **Install on a Mac**, Terminal command included. Your leagues stay. That should be the last time; from 0.6.5 on, updates install themselves again.
 
 ## In 0.6.4
 

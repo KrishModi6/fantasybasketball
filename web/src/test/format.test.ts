@@ -1,5 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { count, fmt1, luckNote, pct, projRecord, projRecordNote, record, signed, signedPct } from "../lib/format";
+import {
+  count, fmt1, luckNote, pct, projRecord, projRecordNote, record, signed, signedPct, syncFailedText, syncLabel, untilTime,
+} from "../lib/format";
+
+describe("refresh status", () => {
+  const now = Date.parse("2026-11-16T22:00:00Z");
+  const inMin = (m: number) => new Date(now + m * 60_000).toISOString();
+  it("says a failed refresh will be tried again, instead of a bare Refresh failed", () => {
+    expect(syncLabel("error", inMin(-90), inMin(4), now)).toBe("Couldn't refresh · trying again in 4 min");
+    expect(syncLabel("error", inMin(-90), inMin(0.2), now)).toBe("Couldn't refresh · trying again soon");
+    expect(syncLabel("error", inMin(-90), null, now)).toBe("Couldn't refresh");
+    expect(syncLabel("running", inMin(-90), inMin(4), now)).toBe("Refreshing");
+    expect(syncLabel("ok", new Date(Date.now() - 20 * 60_000).toISOString())).toBe("Synced 20m ago");
+  });
+  it("counts down to the retry", () => {
+    expect(untilTime(inMin(5), now)).toBe("in 5 min");
+    expect(untilTime(inMin(60), now)).toBe("in 1h");
+    expect(untilTime(inMin(-3), now)).toBe("soon");
+    expect(untilTime("not a time", now)).toBe("soon");
+  });
+  it("tells someone who pressed Refresh what happened and when it's tried again", () => {
+    expect(syncFailedText("Couldn't reach ESPN: it took too long to answer.", inMin(5), now))
+      .toBe("Couldn't reach ESPN: it took too long to answer. Courtside will try again in 5 min.");
+    expect(syncFailedText("Unexpected error while syncing: KeyError('x')", inMin(5), now))
+      .toBe("Unexpected error while syncing: KeyError('x'). Courtside will try again in 5 min.");
+    expect(syncFailedText(null, null, now)).toBe("The refresh didn't finish.");
+  });
+});
 
 describe("format", () => {
   it("formats signed numbers with a true minus sign", () => {

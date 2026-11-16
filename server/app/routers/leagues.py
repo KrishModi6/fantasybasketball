@@ -35,7 +35,7 @@ from ..schemas import (
 )
 from ..security import decrypt_json, encrypt_json, invite_code
 from ..services.analysis import invalidate, latest_snapshot_row, pack_snapshot, unpack_snapshot
-from ..services.sync import run_sync
+from ..services.sync import retry_at, run_sync
 
 router = APIRouter(prefix="/api", tags=["leagues"])
 MAX_UPLOAD = 2 * 1024 * 1024
@@ -80,7 +80,7 @@ def league_out(db: Session, lg: League, me: LeagueMember | None = None) -> dict:
         "id": lg.id, "name": lg.name, "season": lg.season, "source": lg.source,
         "sync": {"status": lg.last_sync_status, "error": lg.last_sync_error,
                  "last_synced_at": _aware(lg.last_synced_at).isoformat() if lg.last_synced_at else None,
-                 "interval_hours": lg.sync_interval_hours},
+                 "interval_hours": lg.sync_interval_hours, "retry_at": _retry_iso(lg)},
         "connector": {"espn_league_id": cfg.get("league_id") if lg.source == "espn" else None,
                       "has_cookies": bool(cfg.get("espn_s2")) if lg.source == "espn" else None,
                       "shared_by": cfg.get("shared_by")},
@@ -105,9 +105,15 @@ def my_leagues(user: User = Depends(current_user), db: Session = Depends(get_db)
         lg = m.league
         out.append({"id": lg.id, "name": lg.name, "season": lg.season, "source": lg.source, "role": m.role,
                     "team_id": m.team_id, "member_count": len(lg.members), "team_count": _team_count(db, lg.id),
-                    "sync_status": lg.last_sync_status,
+                    "sync_status": lg.last_sync_status, "retry_at": _retry_iso(lg),
                     "last_synced_at": _aware(lg.last_synced_at).isoformat() if lg.last_synced_at else None})
     return out
+
+
+def _retry_iso(lg: League) -> str | None:
+    """When a league whose last refresh failed is tried again on its own, for "trying again in 4 min"."""
+    at = retry_at(lg.id) if lg.last_sync_status == "error" else None
+    return at.isoformat() if at else None
 
 
 def _create(db: Session, user: User, name: str, season: int, source: str, cfg: dict,
@@ -249,8 +255,12 @@ def update_scoring(body: ScoringUpdate, m: Membership = Depends(owner_membership
 
 
 @router.post("/leagues/{league_id}/sync", status_code=202)
-def sync_now(background: BackgroundTasks, m: Membership = Depends(membership), db: Session = Depends(get_db)):
+def sync_now(background: BackgroundTasks, auto: bool = False, m: Membership = Depends(membership),
+             db: Session = Depends(get_db)):
+    """Refresh now: the Refresh button, or with ``auto`` the page itself when it finds the data old. A failed
+    automatic refresh says so in the header without a pop-up, since nobody asked for it."""
     lg = m.league
+    reason = "auto" if auto else "manual"
     if lg.last_sync_status == "running":
         return {"status": "running"}
     last = _aware(lg.last_synced_at)
@@ -261,10 +271,10 @@ def sync_now(background: BackgroundTasks, m: Membership = Depends(membership), d
     db.commit()
     if get_settings().inline_sync:
         # Scale-to-zero hosts throttle CPU once the response is sent, so finish the sync first.
-        run_sync(lg.id, "manual")
+        run_sync(lg.id, reason)
         db.refresh(lg)
-        return {"status": lg.last_sync_status, "error": lg.last_sync_error}
-    background.add_task(run_sync, lg.id, "manual")
+        return {"status": lg.last_sync_status, "error": lg.last_sync_error, "retry_at": _retry_iso(lg)}
+    background.add_task(run_sync, lg.id, reason)
     return {"status": "started"}
 
 

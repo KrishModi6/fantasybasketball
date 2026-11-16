@@ -6,17 +6,19 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
+import httpx
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 import fbb.strength as S
 from app.config import get_settings
 from app.db import SessionLocal
 from app.main import app
-from app.orm import League, LeagueMember, Snapshot, User
+from app.orm import Activity, League, LeagueMember, Snapshot, User
 from app.security import create_token, encrypt_json
 from app.services import sync
 from app.services.analysis import pack_snapshot
@@ -294,14 +296,14 @@ def _user(name: str = "Someone") -> tuple[str, dict]:
         return user.id, {"Authorization": f"Bearer {create_token(user.id)}"}
 
 
-def _league(owner_id: str, source: str = "demo") -> str:
+def _league(owner_id: str, source: str = "demo", snap=None) -> str:
     with SessionLocal() as db:
         league = League(name="Test", season=2027, source=source, owner_id=owner_id, last_sync_status="ok",
                         connector_config=encrypt_json({"league_id": "1"}))
         db.add(league)
         db.flush()
         db.add(LeagueMember(league_id=league.id, user_id=owner_id, role="owner"))
-        db.add(Snapshot(league_id=league.id, source=source, data=pack_snapshot(make_snapshot())))
+        db.add(Snapshot(league_id=league.id, source=source, data=pack_snapshot(snap or make_snapshot())))
         db.commit()
         return league.id
 
@@ -335,9 +337,206 @@ def test_a_refresh_that_fails_after_the_fetch_isnt_left_running(client, monkeypa
     # It used to stay "running", which every later refresh skips: old data until the app restarted.
     status, error = _status(league_id)
     assert status == "error" and "Unexpected error" in error
-    assert league_id in sync.due_leagues()  # never synced, and no longer skipped as running
+    # No longer skipped as running: tried again 5 minutes later (sync.RETRY_FIRST), not straight away.
+    assert league_id not in sync.due_leagues()
+    assert league_id in sync.due_leagues(datetime.now(timezone.utc) + sync.RETRY_FIRST)
     sync.run_sync(league_id)
     assert _status(league_id) == ("ok", None)
+
+
+# ---- a failed refresh is retried soon, and says so calmly ---------------------------------------------
+
+
+class _Flaky:
+    """A league source that can't be reached for the first ``down`` refreshes."""
+
+    def __init__(self, down: int):
+        self.down = down
+        self.calls = 0
+
+    def fetch_snapshot(self):
+        self.calls += 1
+        if self.calls <= self.down:
+            raise ConnectorError("Couldn't reach ESPN: it took too long to answer.")
+        return _Connector().fetch_snapshot()
+
+
+def _quiet_sync(monkeypatch, connector) -> list[dict]:
+    """Run syncs against ``connector`` without the optional extras, and collect what they push to pages."""
+    events: list[dict] = []
+    monkeypatch.setattr(sync, "build_connector", lambda league: connector)
+    monkeypatch.setattr(sync, "fetch_missing_bios", lambda *a, **k: 0)
+    monkeypatch.setattr(sync, "attach_tracking", lambda *a, **k: 0)
+    monkeypatch.setattr(sync.hub, "publish", lambda league_id, ev: events.append(ev))
+    return events
+
+
+def test_a_failed_refresh_is_tried_again_in_5_minutes_then_backs_off(client, monkeypatch):
+    user_id, _ = _user()
+    league_id = _league(user_id)
+    source = _Flaky(down=3)
+    events = _quiet_sync(monkeypatch, source)
+    with SessionLocal() as db:  # synced moments ago, so the hourly schedule alone would wait about an hour
+        db.get(League, league_id).last_synced_at = datetime.now(timezone.utc)
+        db.commit()
+
+    waits = []
+    for _ in range(3):
+        before = datetime.now(timezone.utc)
+        sync.run_sync(league_id, "scheduled")
+        at = sync.retry_at(league_id)
+        waits.append(round((at - before).total_seconds() / 60))
+        assert league_id not in sync.due_leagues(at - timedelta(seconds=5))
+        assert league_id in sync.due_leagues(at)
+    assert waits == [5, 10, 20]
+    assert _status(league_id) == ("error", "Couldn't reach ESPN: it took too long to answer.")
+    failed = [ev for ev in events if ev["type"] == "sync_failed"]
+    assert [ev["reason"] for ev in failed] == ["scheduled"] * 3 and all(ev["retry_at"] for ev in failed)
+    with SessionLocal() as db:  # one line in the league feed for the run of failures, not one per try
+        kinds = [a.kind for a in db.scalars(select(Activity).where(Activity.league_id == league_id))]
+    assert kinds.count("sync_error") == 1
+
+    sync.run_sync(league_id, "scheduled")  # ESPN is back
+    assert _status(league_id) == ("ok", None) and sync.retry_at(league_id) is None
+    assert league_id not in sync.due_leagues(datetime.now(timezone.utc) + timedelta(minutes=30))  # hourly again
+
+
+def test_retries_never_wait_longer_than_the_usual_interval(client, monkeypatch):
+    user_id, _ = _user()
+    league_id = _league(user_id)
+    _quiet_sync(monkeypatch, _Flaky(down=99))
+    for _ in range(7):  # 5, 10, 20, 40, then the league's hour
+        before = datetime.now(timezone.utc)
+        sync.run_sync(league_id, "scheduled")
+    assert round((sync.retry_at(league_id) - before).total_seconds() / 60) == 60
+
+
+def test_a_refresh_cut_off_when_the_app_closed_is_tried_again_when_it_opens(client, monkeypatch):
+    user_id, _ = _user()
+    league_id = _league(user_id)
+    with SessionLocal() as db:  # as the engine's startup leaves a league that was mid-refresh
+        league = db.get(League, league_id)
+        league.last_synced_at = datetime.now(timezone.utc)
+        league.last_sync_status, league.last_sync_error = "error", sync.INTERRUPTED
+        db.commit()
+    assert sync.retry_at(league_id) is None
+    assert league_id in sync.due_leagues(outdated=True)  # the first check after the app starts
+    assert league_id not in sync.due_leagues()  # later checks wait for the schedule, as before
+
+
+def test_the_league_says_when_a_failed_refresh_is_tried_again(client, monkeypatch):
+    user_id, headers = _user()
+    league_id = _league(user_id)
+    events = _quiet_sync(monkeypatch, _Flaky(down=1))
+    monkeypatch.setattr(get_settings(), "inline_sync", True)  # finish the refresh inside the request
+
+    r = client.post(f"/api/leagues/{league_id}/sync?auto=true", headers=headers).json()
+    assert r["status"] == "error" and r["retry_at"]
+    meta = client.get(f"/api/leagues/{league_id}", headers=headers).json()["sync"]
+    assert meta["retry_at"] == r["retry_at"]
+    listed = {lg["id"]: lg for lg in client.get("/api/leagues", headers=headers).json()}
+    assert listed[league_id]["retry_at"] == r["retry_at"]
+    # The page refreshing old data on its own is "auto": its failure shows in the header, with no pop-up.
+    assert [ev["reason"] for ev in events if ev["type"] == "sync_failed"] == ["auto"]
+
+    r = client.post(f"/api/leagues/{league_id}/sync", headers=headers).json()  # the Refresh button
+    assert r == {"status": "ok", "error": None, "retry_at": None}
+    assert client.get(f"/api/leagues/{league_id}", headers=headers).json()["sync"]["retry_at"] is None
+
+
+# ---- past weeks on the Matchups page ------------------------------------------------------------------
+
+
+def test_past_weeks_show_their_final_scores(client):
+    user_id, headers = _user()
+    snap = make_snapshot()
+    _start_week(snap, 3)
+    for m in snap.matchups:
+        if m.matchup_period == 1:
+            m.home_score, m.away_score, m.winner = 1412.5, 1358.0, "HOME"
+        elif m.matchup_period == 2:  # ESPN hasn't closed the week yet: the scores decide it
+            m.home_score, m.away_score = 990.0, 1004.5
+    league_id = _league(user_id, snap=snap)
+    url = f"/api/leagues/{league_id}/matchups"
+
+    wk = client.get(url, headers=headers).json()
+    assert [(w["matchup_period"], w["is_final"], w["is_current"]) for w in wk["weeks"][:3]] == [
+        (1, True, False), (2, True, False), (3, False, True)]
+    assert wk["matchup_period"] == 3 and not wk["final"] and wk["matchups"]  # still opens on this week
+    assert wk["weeks"][0]["start"] == snap.schedule.period_dates[snap.settings.matchup_periods[1][0]].isoformat()
+
+    w1 = client.get(f"{url}?matchup_period=1", headers=headers).json()
+    games = [m for m in snap.matchups if m.matchup_period == 1 and m.away_team_id is not None]
+    assert w1["final"] and w1["matchups"] == [] and len(w1["results"]) == len(games)
+    r = w1["results"][0]
+    assert (r["home_id"], r["away_id"]) == (games[0].home_team_id, games[0].away_team_id)
+    assert (r["home_score"], r["away_score"], r["winner"], r["consolation"]) == (1412.5, 1358.0, "HOME", False)
+    assert r["home_name"] == snap.team(games[0].home_team_id).name
+    w2 = client.get(f"{url}?matchup_period=2", headers=headers).json()
+    assert {r["winner"] for r in w2["results"]} == {"AWAY"}
+
+
+def test_once_the_season_is_over_the_page_opens_on_the_last_results(client):
+    user_id, headers = _user()
+    snap = make_snapshot()
+    last = max(snap.settings.matchup_periods)
+    _start_week(snap, last)
+    snap.current_period = max(snap.settings.matchup_periods[last]) + 1
+    league_id = _league(user_id, snap=snap)
+    wk = client.get(f"/api/leagues/{league_id}/matchups", headers=headers).json()
+    assert wk["final"] and wk["matchup_period"] == last  # it used to say "The fantasy season is over"
+    assert all(w["is_final"] for w in wk["weeks"]) and len(wk["weeks"]) == len(snap.settings.matchup_periods)
+
+
+def _espn_client(monkeypatch, handler) -> tuple[espn.EspnClient, list[float]]:
+    slept: list[float] = []
+    monkeypatch.setattr(espn.time, "sleep", slept.append)
+    monkeypatch.setattr(espn._limiter, "wait", lambda: None)
+    c = espn.EspnClient()
+    c._http = httpx.Client(transport=httpx.MockTransport(handler))
+    return c, slept
+
+
+def test_espn_rides_out_a_connection_that_comes_back_within_half_a_minute(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) <= 4:  # Wi-Fi still coming back after the laptop woke
+            raise httpx.ConnectError("getaddrinfo failed", request=request)
+        return httpx.Response(200, json={"ok": True})
+
+    c, slept = _espn_client(monkeypatch, handler)
+    assert c.get("https://example.test/league") == {"ok": True}
+    assert slept == [2.0, 4.0, 8.0, 16.0]  # 5 tries over 30 seconds (it was 4 over about 9)
+
+
+def test_espn_says_plainly_why_it_couldnt_be_reached(monkeypatch):
+    def offline(request):
+        raise httpx.ConnectError("[Errno 11001] getaddrinfo failed", request=request)
+
+    c, slept = _espn_client(monkeypatch, offline)
+    with pytest.raises(ConnectorError, match=r"^Couldn't reach ESPN: no connection \(is the internet on\?\)\.$"):
+        c.get("https://example.test/league")
+    assert len(slept) == 4  # no wait after the last try
+
+    c, _ = _espn_client(monkeypatch, lambda request: httpx.Response(503, headers={"Retry-After": "Wed, 21 Oct"}))
+    with pytest.raises(ConnectorError, match=r"it had a problem on its end \(error 503\)"):
+        c.get("https://example.test/league")
+
+
+def test_espn_stops_retrying_slow_timeouts_after_90_seconds(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(espn.time, "monotonic", lambda: clock[0])
+
+    def slow(request):
+        clock[0] += 45  # each try waits out the whole timeout
+        raise httpx.ReadTimeout("The read operation timed out", request=request)
+
+    c, slept = _espn_client(monkeypatch, slow)
+    with pytest.raises(ConnectorError, match="it took too long to answer"):
+        c.get("https://example.test/league")
+    assert slept == [2.0]  # two tries: a third would start past the 90 second budget
 
 
 def test_a_bad_injury_report_or_news_feed_doesnt_stop_an_espn_refresh(monkeypatch):

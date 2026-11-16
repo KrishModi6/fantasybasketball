@@ -62,7 +62,8 @@ Put it behind HTTPS (Caddy, nginx, or your host's TLS). WebSockets must be proxi
   - visible to owners under League → Data and sync, and in the league feed;
   - expired ESPN cookies show as "ESPN refused access" or "non-JSON response": the owner pastes fresh cookies;
   - a crash mid-sync is reset to an error state on restart.
-- **ESPN rate limits:** requests are spaced ≥0.35 s with retries; the scheduler runs at most 2 league syncs in parallel and checks every 10 minutes for due leagues.
+- **ESPN rate limits:** requests are spaced ≥0.35 s. One that can't connect, times out or gets a 429/5xx is tried 5 times over about 30 seconds (at most 90 seconds in all). The scheduler runs at most 2 league syncs in parallel and checks every minute for due leagues.
+- **Failed refreshes:** a league whose refresh failed is tried again 5 minutes later, then after 10, 20 and 40 minutes, then at its usual interval (`sync.RETRY_FIRST`). The league feed gets one `sync_error` line per run of failures. A refresh cut off when the engine stopped is tried again on the first check after it starts. The retry times live in memory, so with several server processes a league one of them saw fail waits for its usual interval in the others.
 - **Backups:** back up the database (SQLite: copy `app.db` while the app is idle, or use `sqlite3 .backup`) and `FBB_SECRET_KEY`. The model and history in `server/data/` can be regenerated from the scripts.
 - **Retraining by hand:** `python -m scripts.build_history && python -m scripts.fetch_game_logs && python -m scripts.train_model`. Check the printed backtest; the new model is picked up automatically.
 

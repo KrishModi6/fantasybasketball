@@ -14,7 +14,9 @@ from .config import SERVER_DIR, get_settings
 from .services.sync import due_leagues, run_sync
 
 log = logging.getLogger(__name__)
-TICK_SECONDS = 600
+# Checked every minute, so a retry 5 minutes after a failed refresh (sync.RETRY_FIRST) comes on time. A check
+# that finds nothing due is one small read of the leagues table.
+TICK_SECONDS = 60
 MAX_PARALLEL = 2
 
 

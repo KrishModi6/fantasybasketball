@@ -24,6 +24,7 @@ from .realtime import hub
 from .routers import ai, analysis, auth, cron, leagues, matchups, meta, rulings, trades
 from .scheduler import refresh_loop
 from .security import decode_token
+from .services.sync import INTERRUPTED
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -32,9 +33,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 async def lifespan(app: FastAPI):
     get_settings().signing_key()  # fail fast if a hosted deployment forgot FBB_SECRET_KEY
     init_db()
-    with SessionLocal() as db:  # a crash mid-sync would otherwise leave leagues stuck in "running"
+    # A crash or quit mid-sync would otherwise leave leagues stuck in "running". The scheduler's first check
+    # tries them again right away (sync.due_leagues).
+    with SessionLocal() as db:
         db.execute(update(League).where(League.last_sync_status == "running").values(last_sync_status="error",
-                                                                                     last_sync_error="Interrupted"))
+                                                                                     last_sync_error=INTERRUPTED))
         db.commit()
     hub.loop = asyncio.get_running_loop()
     task = asyncio.create_task(refresh_loop()) if get_settings().scheduler_enabled else None

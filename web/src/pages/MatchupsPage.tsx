@@ -8,17 +8,20 @@ import { askPath } from "../lib/ai";
 import { api } from "../lib/api";
 import { fmt0, fmt1, pct, shortDate } from "../lib/format";
 import { useAiStatus } from "../lib/queries";
-import type { SimResult, SimTeam, WeekMatchup, WeekOption } from "../lib/types";
+import type { SimResult, SimTeam, WeekMatchup, WeekOption, WeekResult } from "../lib/types";
 
 interface WeekData {
   weeks: WeekOption[];
   matchup_period: number | null;
   matchups: WeekMatchup[];
+  final?: boolean; // a week already played: `results` instead of `matchups`
+  results?: WeekResult[];
   scoring: string;
 }
 
-const weekLabel = (w: WeekOption) =>
-  `${w.is_playoff ? "Playoffs" : `Week ${w.matchup_period}`} (${shortDate(w.start)}–${shortDate(w.end)})${w.is_current ? ", live" : ""}`;
+const weekName = (w: WeekOption) => (w.is_playoff ? "Playoffs" : `Week ${w.matchup_period}`);
+export const weekLabel = (w: WeekOption) =>
+  `${weekName(w)} (${shortDate(w.start)}–${shortDate(w.end)})${w.is_current ? ", live" : w.is_final ? ", final" : ""}`;
 
 export default function MatchupsPage() {
   const { league, myTeamId, teams, teamName } = useLeagueCtx();
@@ -31,6 +34,8 @@ export default function MatchupsPage() {
     placeholderData: keepPreviousData,
   });
   const mp = week.data?.matchup_period ?? null;
+  const final = Boolean(week.data?.final); // a week already played: its results, nothing to simulate
+  const shownWeek = week.data?.weeks.find((w) => w.matchup_period === mp);
 
   // Selected pairing: URL params, else my matchup this week, else the first one.
   const urlA = params.get("a") ? Number(params.get("a")) : null;
@@ -65,7 +70,7 @@ export default function MatchupsPage() {
     queryFn: () => api<SimResult>(`/api/leagues/${league.id}/matchups/simulate`, {
       body: { team_a: a, team_b: b, matchup_period: mp, exclude },
     }),
-    enabled: a != null && b != null && a !== b && mp != null,
+    enabled: a != null && b != null && a !== b && mp != null && !final,
     placeholderData: keepPreviousData,
     staleTime: 5 * 60_000,
   });
@@ -74,7 +79,7 @@ export default function MatchupsPage() {
   return (
     <>
       <PageHead title="Matchups"
-        desc="Each matchup is simulated 10,000 times game by game: who plays, how big a night each player has, and who fills in when a starter sits. Uncheck players to test lineup decisions." />
+        desc="Each matchup is simulated 10,000 times game by game: who plays, how big a night each player has, and who fills in when a starter sits. Uncheck players to test lineup decisions. Pick a past week to see its final scores." />
       {week.error && <ErrorBox error={week.error} />}
       {week.isLoading && <LoadingBlock rows={6} />}
       {week.data && week.data.weeks.length === 0 && <Panel><Empty title="The fantasy season is over" /></Panel>}
@@ -86,6 +91,7 @@ export default function MatchupsPage() {
                 {week.data.weeks.map((w) => <option key={w.matchup_period} value={w.matchup_period}>{weekLabel(w)}</option>)}
               </select>
             </label>
+            {!final && <>
             <span className="sep" />
             <label className="field-inline"><span className="label">Team A</span>
               <select className="select" value={a ?? ""} onChange={(e) => setPair(Number(e.target.value), b ?? 0)}>
@@ -105,9 +111,15 @@ export default function MatchupsPage() {
                   + `which players swing it, and which lineup or streaming moves would most help ${teamName(a)}?`,
               })}>Ask AI</Link>
             )}
+            </>}
           </div>
 
-          {week.data.matchups.length > 0 && (
+          {final && (
+            <WeekResults title={`${shownWeek ? weekName(shownWeek) : `Week ${mp}`} results`}
+              rows={week.data.results ?? []} points={week.data.scoring === "points"} myTeamId={myTeamId} />
+          )}
+
+          {!final && week.data.matchups.length > 0 && (
             <Panel title={`${week.data.weeks.find((w) => w.matchup_period === mp)?.is_playoff ? "Playoff" : `Week ${mp}`} schedule`} flush
               note="Quick estimates from the season model. Select a row to simulate it.">
               <div className="table-wrap">
@@ -134,12 +146,55 @@ export default function MatchupsPage() {
             </Panel>
           )}
 
-          {sim.error && <ErrorBox error={sim.error} />}
-          {sim.isLoading && <LoadingBlock rows={10} />}
-          {sim.data && <SimView r={sim.data} exclude={exclude} onToggle={toggle} busy={sim.isFetching} />}
+          {!final && sim.error && <ErrorBox error={sim.error} />}
+          {!final && sim.isLoading && <LoadingBlock rows={10} />}
+          {!final && sim.data && <SimView r={sim.data} exclude={exclude} onToggle={toggle} busy={sim.isFetching} />}
         </>
       )}
     </>
+  );
+}
+
+/** A finished week: ESPN's final scores, the winner in bold, your matchup marked and summed up. */
+export function WeekResults({ title, rows, points, myTeamId }: { title: string; rows: WeekResult[]; points: boolean; myTeamId: number | null }) {
+  const score = (v: number) => (points ? fmt1(v) : fmt0(v));
+  const mine = rows.find((r) => r.home_id === myTeamId || r.away_id === myTeamId);
+  let note = points ? "Final scores from ESPN." : "Categories won, from ESPN.";
+  if (mine) {
+    const home = mine.home_id === myTeamId;
+    const [me, them, foe] = home ? [mine.home_score, mine.away_score, mine.away_name] : [mine.away_score, mine.home_score, mine.home_name];
+    const verb = mine.winner === "TIE" ? "tied" : (mine.winner === "HOME") === home ? "beat" : "lost to";
+    note = `You ${verb} ${foe}, ${score(me)} to ${score(them)}.`;
+  }
+  return (
+    <Panel title={title} flush note={note}>
+      {rows.length === 0 ? <Empty title="No matchups this week" /> : (
+        <div className="table-wrap">
+          <table className="data">
+            <thead><tr><th>Home</th><th className="n">{points ? "Pts" : "Cats"}</th><th className="n">{points ? "Pts" : "Cats"}</th><th>Away</th><th className="n hide-sm">Margin</th></tr></thead>
+            <tbody>
+              {rows.map((r) => {
+                const homeWon = r.winner === "HOME";
+                const awayWon = r.winner === "AWAY";
+                const margin = Math.abs(r.home_score - r.away_score);
+                return (
+                  <tr key={`${r.home_id}-${r.away_id}`} className={r === mine ? "mine" : ""}>
+                    <td className={homeWon ? "strong" : ""}>{r.home_name}{r.home_id === myTeamId ? " (you)" : ""}</td>
+                    <td className={`n ${homeWon ? "strong" : "muted"}`}>{score(r.home_score)}</td>
+                    <td className={`n ${awayWon ? "strong" : "muted"}`}>{score(r.away_score)}</td>
+                    <td className={awayWon ? "strong" : ""}>
+                      {r.away_name}{r.away_id === myTeamId ? " (you)" : ""}
+                      {r.consolation && <span className="small muted"> · consolation</span>}
+                    </td>
+                    <td className="n hide-sm">{r.winner === "TIE" ? "Tie" : score(margin)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }
 

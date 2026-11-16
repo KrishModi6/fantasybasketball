@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, wsUrl } from "./api";
+import { syncFailedText } from "./format";
 import { useToast } from "./toast";
 import type { League } from "./types";
 
@@ -24,7 +25,7 @@ export function useLive(league: League | undefined): boolean {
 /**
  * Refresh the league when it's opened, or looked at again, with data more than 30 minutes old (3 minutes
  * while games are on), so stats and scores don't wait for the next scheduled refresh. Skipped after a
- * failed refresh (the Refresh button retries).
+ * failed refresh: the engine tries again on its own 5 minutes later, and the Refresh button tries now.
  */
 export function useAutoRefresh(league: League | undefined, live = false) {
   const qc = useQueryClient();
@@ -40,7 +41,7 @@ export function useAutoRefresh(league: League | undefined, live = false) {
       if (document.visibilityState !== "visible" || status !== "ok") return;
       if (Date.now() - (synced ? Date.parse(synced) : 0) < stale || Date.now() - lastTry.current < retry) return;
       lastTry.current = Date.now();
-      api(`/api/leagues/${id}/sync`, { method: "POST" })
+      api(`/api/leagues/${id}/sync?auto=true`, { method: "POST" })
         .then(() => qc.invalidateQueries({ queryKey: ["league", id, "meta"] }))
         .catch(() => undefined); // e.g. someone else refreshed moments ago
     };
@@ -132,7 +133,11 @@ export function useLeagueSocket(leagueId: string | undefined) {
             break;
           case "sync_failed":
             qc.invalidateQueries({ queryKey: [...key, "meta"] });
-            toast(`Refresh failed: ${String(ev.error ?? "unknown error")}`, "err");
+            // Only for the Refresh button. A scheduled or automatic refresh that fails says so in the header
+            // ("Couldn't refresh · trying again in 5 min") without a pop-up, since nobody asked for it.
+            if (ev.reason === "manual") {
+              toast(syncFailedText(ev.error == null ? null : String(ev.error), ev.retry_at == null ? null : String(ev.retry_at)), "err");
+            }
             break;
           case "trade_shared":
             qc.invalidateQueries({ queryKey: [...key, "board"] });

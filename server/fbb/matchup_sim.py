@@ -376,5 +376,42 @@ def week_options(ctx: AnalysisContext) -> list[dict]:
             "end": _iso(ctx, days[-1]) if days else None,
             "is_current": mp == ctx.s.current_matchup_period,
             "is_playoff": mp > ctx.s.settings.regular_season_matchups,
+            "is_final": False,
         })
     return out
+
+
+def finished_weeks(ctx: AnalysisContext) -> list[dict]:
+    """Matchup periods already played (oldest first), so the week picker can show their results too."""
+    out = []
+    for mp, days in sorted(ctx.s.settings.matchup_periods.items()):
+        if not days or max(days) >= ctx.s.current_period:
+            continue
+        out.append({
+            "matchup_period": mp,
+            "start": _iso(ctx, days[0]),
+            "end": _iso(ctx, days[-1]),
+            "is_current": False,
+            "is_playoff": mp > ctx.s.settings.regular_season_matchups,
+            "is_final": True,
+        })
+    return out
+
+
+def week_results(ctx: AnalysisContext, mp: int) -> list[dict]:
+    """A finished week's final scores and winners, as ESPN recorded them."""
+    rows = []
+    for m in ctx.s.matchups:
+        if m.matchup_period != mp or m.away_team_id is None:
+            continue
+        winner = m.winner
+        if winner == "UNDECIDED":  # ESPN closes a week's results a few hours after its last game
+            winner = "HOME" if m.home_score > m.away_score else "AWAY" if m.away_score > m.home_score else "TIE"
+        rows.append({
+            "home_id": m.home_team_id, "away_id": m.away_team_id,
+            "home_name": ctx.s.team(m.home_team_id).name, "away_name": ctx.s.team(m.away_team_id).name,
+            "home_score": m.home_score, "away_score": m.away_score, "winner": winner,
+            # Playoff weeks also have consolation games; only the winners bracket decides the title.
+            "consolation": m.is_playoff and m.playoff_tier not in (None, "WINNERS_BRACKET"),
+        })
+    return rows
