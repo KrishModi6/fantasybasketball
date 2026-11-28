@@ -1,6 +1,14 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.6.6
+## What's new in 0.6.7
+
+- **Trade ideas the other manager might actually take.** Suggested trades used to be allowed to cost the other team a little, and the ones that helped you most came first. So the list filled up with deals the other manager would turn down. Now a trade is only suggested if the other team doesn't lose points on it.
+- **Judged on what they see on ESPN too.** Courtside's projections expect some players to improve, like rookies still finding their role or a player back from injury after a game or two. The other manager only sees season averages. So every suggestion now also has to work for them on those averages, and you can't look like you're losing more than a sliver on them either. A player averaging well below his projection is no longer offered as if he were worth the projection.
+- **The best player in the deal has to be matched.** Each team now gets back a player within 10% of the best one it sends, by season average. No more two good players for one star the other team would never give up.
+- **Both sets of numbers on Trades.** The partner column now shows the change on season averages ("+0.5% avg") under Courtside's projected change. The trade analyzer adds a line on how the trade looks on the season averages for both teams, and the assistant uses the same rules when it looks for trades.
+- **Fewer, smaller suggestions.** Trades that are fair to both teams don't swing a season much, so you'll see fewer ideas and smaller gains than before. That's expected: the old, bigger numbers came from trades nobody would accept.
+
+## In 0.6.6
 
 - **Look back at past weeks.** The **Week** picker on **Matchups** now lists the weeks already played too, marked **final**. Pick one to see every matchup's final score, with the winner in bold, the margin and a line on how your week went ("You beat Team Tacos, 1,412.5 to 1,358.0."). Once the season is over, the page opens on the last week's results instead of saying the season is over.
 - **Fewer "Refresh failed" messages.** When ESPN didn't answer for a few seconds, for example while Wi-Fi reconnected after your laptop woke up, the whole refresh failed. Courtside now keeps trying for about 30 seconds before it gives up.
