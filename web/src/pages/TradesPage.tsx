@@ -123,7 +123,7 @@ function RosterPicker({ title, label, teamId, picked, onToggle, onTeam, others, 
             <thead>
               <tr>
                 <th style={{ width: 28 }}><span className="sr-only">Include</span></th><th>Player</th>
-                {!dest && <th className="hide-sm">Pos</th>}<SortTh dir={sorting.dir("fp_pg")} onSort={() => sorting.toggle("fp_pg")}>FP/G</SortTh>
+                {!dest && <th className="hide-sm">Pos</th>}<SortTh dir={sorting.dir("fp_pg")} onSort={() => sorting.toggle("fp_pg")}>Proj FP/G</SortTh>
                 {dest ? <th>To</th> : <SortTh dir={sorting.dir("ros_value")} onSort={() => sorting.toggle("ros_value")}>ROS</SortTh>}
               </tr>
             </thead>

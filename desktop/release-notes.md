@@ -1,6 +1,12 @@
 Courtside runs on your computer: projections, power rankings, matchup simulations, trade analysis and the AI assistant. Nothing to host and no account to make.
 
-## What's new in 0.6.7
+## What's new in 0.6.8
+
+- **Projected points are labeled as projections.** The big points-per-game number on **Players**, **My Team** and **Trades** is what Courtside expects a player to average from here on, but the column just said **FP/G**, so it looked like the points he actually has. It now says **Proj FP/G**. What he has actually averaged this season is the **Season** column, and it matches ESPN.
+- **Clearer definition.** Hover over **Proj FP/G** (or open the **Glossary**) and it now says the number is a forecast and points you to **Season** for his real average.
+- **Newer building blocks.** Courtside's screens are now built with the latest versions of the tools behind them. Nothing should look or work differently.
+
+## In 0.6.7
 
 - **Trade ideas the other manager might actually take.** Suggested trades used to be allowed to cost the other team a little, and the ones that helped you most came first. So the list filled up with deals the other manager would turn down. Now a trade is only suggested if the other team doesn't lose points on it.
 - **Judged on what they see on ESPN too.** Courtside's projections expect some players to improve, like rookies still finding their role or a player back from injury after a game or two. The other manager only sees season averages. So every suggestion now also has to work for them on those averages, and you can't look like you're losing more than a sliver on them either. A player averaging well below his projection is no longer offered as if he were worth the projection.
