@@ -17,7 +17,7 @@ export const GLOSSARY_SECTIONS: { title: string; keys: TermKey[] }[] = [
 ];
 
 export const GLOSSARY = {
-  fp_pg: { term: "FP/G", def: "Fantasy points per game. Projected columns show what Courtside expects him to average from here on, under your league's scoring." },
+  fp_pg: { term: "Proj FP/G", def: "Projected fantasy points per game: what Courtside expects him to average from here on, under your league's scoring. It is a forecast, not what he has scored so far. For his actual average this season, see Season." },
   value_pg: { term: "Value/G", def: "In a categories league: how much a player helps across all your categories per game, on a fantasy-points scale so players can be compared." },
   fp_sd: { term: "± game", def: "How much his score swings from game to game. About two games in three land within this many points of his average: 30 ± 8 usually means 22 to 38." },
   season: { term: "Season", def: "What he has actually averaged this season so far." },

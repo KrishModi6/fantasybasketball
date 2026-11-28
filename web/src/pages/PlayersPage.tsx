@@ -10,7 +10,7 @@ const POSITIONS = ["", "PG", "SG", "SF", "PF", "C"];
 type Status = "all" | "fa" | "rostered";
 
 const COLUMNS: { key: string; label: string; term: TermKey; hideSm?: boolean }[] = [
-  { key: "fp_pg", label: "FP/G", term: "fp_pg" },
+  { key: "fp_pg", label: "Proj FP/G", term: "fp_pg" },
   { key: "ros_value", label: "ROS", term: "ros" },
   { key: "vorp", label: "Over repl.", term: "over_repl", hideSm: true },
   { key: "games_next7", label: "Next 7", term: "next7" },
