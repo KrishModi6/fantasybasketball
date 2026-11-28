@@ -12,6 +12,15 @@ come from the third-best free agent down, and a player projected below that
 free agent counts as one when he's traded away or dropped: every roster spot is
 worth at least a free agent, so packing two or three such players into a deal
 for one good player buys nothing.
+
+A suggested trade also has to look fair to the people making it. The other manager judges a trade on the
+numbers ESPN shows them, each player's season average, not on Courtside's projections. So every trade is
+scored a second time on those numbers ("seen", SeenContext), and the finders list a trade only if it holds up
+in both: the partner doesn't lose more than min_partner_pct in either, and it doesn't look like a loss to you
+on the season numbers either. Before this, ranking by your gain among trades the partner's projection barely
+accepted picked the trades where Courtside's projection and the season numbers disagree most: rookies
+projected to climb and players back from a 1-game sample went out for stars, deals the other manager would
+laugh at.
 """
 
 from __future__ import annotations
@@ -33,8 +42,8 @@ SIM_RUNS = 3000
 # Trade finder shortlist, tuned on a 10-team demo league: these give each team a full list of
 # suggestions from about 6 partners in every package size, while keeping each team's best deal.
 PARTNER_LOSS_WEIGHT = 1.5  # how much the quick score counts the partner's raw-value loss
-# Share of the loss the partner accepts (min_partner_pct) that the quick score treats as free. At 0 it
-# shortlisted only swaps of equal raw value, which the simulation scores near 0 for both sides (the best
+# Share of a 0.4% loss (or of min_partner_pct, if larger) that the quick score treats as free (_slack). At 0
+# it shortlisted only swaps of equal raw value, which the simulation scores near 0 for both sides (the best
 # 2-for-2 gained 0.45 pts/week, 3-for-3 0.35); at 0.8 they gain about 4. At 1 more land just past the line.
 PARTNER_SLACK = 0.8
 TOP_SHARE = 0.25  # share of the shortlist taken straight from the top quick scores
@@ -46,6 +55,42 @@ THREE_TEAM_CANDIDATES = 120
 # waivers, and in a 10-team league the top one projects about as well as the median rostered player, which
 # made giving away two or three players for one look almost free.
 FA_SKIP = 2
+# A season average over a few games says little, so the seen FP/G blends in this many games of Courtside's
+# projection: a player 1 game in at -2.0 FP/G and projected 30 is seen at 24.7, one 18 games in at 36.4 and
+# projected 40.9 at 37.4. Someone who hasn't played this season is seen at his projection.
+SEEN_PRIOR_GAMES = 5
+# The best player a team sends has to come back with one at least this close to him (as a share of his seen
+# FP/G): managers judge a deal by its best player first, so one giving up a 46 FP/G player for two at 39 and 35
+# says no, whatever games left and a freed roster spot add up to on paper.
+STAR_GAP = 0.10
+# What a suggestion may cost the other team (fraction of rest-of-season output), on Courtside's projection and on
+# the season numbers they see: nothing. A suggestion has to be one Courtside thinks is fair to them too.
+MIN_PARTNER_PCT = 0.0
+# What a suggestion may look like it costs you on the season numbers, when Courtside's projection says you gain.
+MY_SEEN_FLOOR = -0.004
+
+
+def seen_fp_pg(pr) -> float:
+    """The FP/G another manager sees for a player: his season average, blended with the projection while the
+    sample is small (SEEN_PRIOR_GAMES)."""
+    gp = pr.games_played or 0
+    if not gp or pr.season_fp_pg is None:
+        return pr.fp_pg
+    return (gp * pr.season_fp_pg + SEEN_PRIOR_GAMES * pr.fp_pg) / (gp + SEEN_PRIOR_GAMES)
+
+
+class SeenContext(AnalysisContext):
+    """The league as a league-mate sees it on ESPN: each player at his seen FP/G (seen_fp_pg), with none of the
+    projection's adjustments to come (no rookie climb, opening or return dip, or teammate boost). Who plays
+    when, injuries, positions, schedules and roster limits are the same as in ``ctx``, so the same trade math
+    runs on the numbers the other manager trusts. Points leagues only."""
+
+    def __init__(self, ctx: AnalysisContext):
+        super().__init__(ctx.s, {pid: replace(pr, fp_pg=seen_fp_pg(pr), climb=0.0) for pid, pr in ctx.proj.items()})
+        self._pplay = ctx._pplay  # availability doesn't depend on FP/G: share it rather than work it out again
+
+    def form(self, pid: str) -> dict[int, float]:
+        return {}
 
 
 @dataclass
@@ -78,6 +123,9 @@ class TradeSide:
     before_title_odds: float | None = None
     after_title_odds: float | None = None
     verdict: str = "neutral"
+    # The same trade on the season numbers ESPN shows (SeenContext); None in a category league.
+    seen_delta_pct: float | None = None
+    seen_delta_per_week: float | None = None
 
 
 def roster_capacity(ctx: AnalysisContext, team_id: int, roster: list[str]) -> int:
@@ -180,6 +228,9 @@ class TradeEvaluator:
         self._windows: OrderedDict[tuple[int, frozenset], WindowResult] = OrderedDict()
         self._base_sim: dict | None = None
         self._completed: dict[frozenset, dict] = {}  # finished trades, scored once per set of league data
+        self._seen: TradeEvaluator | None = None  # the same league on the season numbers (seen()), built once
+        # Each player's seen FP/G, for the best-player check (stars_ok); None in a category league.
+        self.seen_fp = {pid: seen_fp_pg(pr) for pid, pr in ctx.proj.items()} if ctx.is_points else None
         # One evaluator serves every request for a league, from several threads at once (the trade pages, the
         # board refresh, the assistant): the caches above are read and changed under this lock.
         self._lock = threading.RLock()
@@ -187,6 +238,16 @@ class TradeEvaluator:
         self.this_week = ctx.matchup_days(cur)
         reg = ctx.s.settings.regular_season_matchups
         self.playoff_mps = [mp for mp in ctx.remaining_mps() if mp > reg]
+
+    def seen(self) -> TradeEvaluator | None:
+        """An evaluator for the same league on the numbers another manager sees (SeenContext); None in a
+        category league, or when this one already is that view."""
+        if not self.ctx.is_points or isinstance(self.ctx, SeenContext):
+            return None
+        with self._lock:
+            if self._seen is None:
+                self._seen = TradeEvaluator(SeenContext(self.ctx))
+            return self._seen
 
     def baseline(self, team_id: int) -> tuple[list[str], list[str], WindowResult]:
         """A team's comparison roster (open spots filled from free agents), those pickups, and its lineup window."""
@@ -288,6 +349,11 @@ class TradeEvaluator:
         for t in teams:
             side, before[t], after[t] = self._side(t, list(sends[t]), receives[t])
             sides.append(side)
+        seen = self.seen()
+        if seen is not None:
+            for side in sides:
+                s, _, _ = seen._side(side.team_id, list(sends[side.team_id]), receives[side.team_id])
+                side.seen_delta_pct, side.seen_delta_per_week = s.delta_pct, s.delta_per_week
 
         if with_sim:
             everyone = self._baseline_windows()
@@ -422,6 +488,9 @@ def _reversed_side(s: TradeSide) -> TradeSide:
         delta_playoffs=-s.delta_playoffs, raw_value_delta=-s.raw_value_delta,
         before_playoff_odds=s.after_playoff_odds, after_playoff_odds=s.before_playoff_odds,
         before_title_odds=s.after_title_odds, after_title_odds=s.before_title_odds, verdict=_verdict(pct),
+        # x of the roster before is -x/(1+x) of the roster after
+        seen_delta_pct=None if s.seen_delta_pct is None else -s.seen_delta_pct / (1 + s.seen_delta_pct),
+        seen_delta_per_week=None if s.seen_delta_per_week is None else -s.seen_delta_per_week,
     )
 
 
@@ -438,10 +507,19 @@ def _fairness(sides: list[TradeSide]) -> dict:
     else:
         ahead = [s for s in sides if s.delta_ros > 0] or [max(sides, key=lambda s: s.delta_pct)]
         label = "favors " + " and ".join(s.team_name for s in ahead)
-    # A rough acceptance likelihood for the other side(s): logistic in each partner's % change, and in a
+    # A rough acceptance likelihood for the other side(s): logistic in each partner's % change, on whichever
+    # of Courtside's projection and the season numbers they see (worst_pct) is worse for them, and in a
     # three-team trade both partners have to say yes.
-    accept = math.prod(1 / (1 + math.exp(-s.delta_pct / 0.01)) for s in sides[1:])
+    accept = math.prod(1 / (1 + math.exp(-worst_pct(s) / 0.01)) for s in sides[1:])
     return {"label": label, "partner_accept_likelihood": accept}
+
+
+def worst_pct(side) -> float:
+    """A side's rest-of-season change on Courtside's projection or on the season numbers, whichever is lower:
+    a trade has to hold up on both to be one the other manager takes. A TradeSide or its dict."""
+    get = side.get if isinstance(side, dict) else lambda k: getattr(side, k)
+    seen = get("seen_delta_pct")
+    return get("delta_pct") if seen is None else min(get("delta_pct"), seen)
 
 
 def _balanced_reason(sides: list[TradeSide], proj, values) -> str:
@@ -476,6 +554,60 @@ def _screen_values(ctx: AnalysisContext, ev: TradeEvaluator) -> tuple[dict[str, 
     return vals, {pid: max(v, ev.replacement) for pid, v in vals.items()}, ev.replacement
 
 
+def _seen_screen(ev: TradeEvaluator) -> tuple[dict[str, float], dict[str, float], float] | None:
+    """_screen_values on the season numbers another manager sees, or None in a category league."""
+    seen = ev.seen()
+    return None if seen is None else _screen_values(seen.ctx, seen)
+
+
+def holds_up(me: dict, partner: dict | list[dict], floor: float) -> bool:
+    """Whether a simulated trade (sides as evaluate returns them) is one to suggest: no partner loses more than
+    ``floor`` on Courtside's projection or on the season numbers they see, and on those season numbers it
+    doesn't look like a loss past MY_SEEN_FLOOR to you either (on the projection you have to gain, which each
+    finder checks). Ranking by your gain among trades that only had to pass the projection picked exactly
+    the trades the projection and the season numbers disagree on most."""
+    partners = partner if isinstance(partner, list) else [partner]
+    mine_seen = me.get("seen_delta_pct")
+    return all(worst_pct(p) >= floor for p in partners) and (mine_seen is None or mine_seen >= MY_SEEN_FLOOR)
+
+
+def _top(fp: dict[str, float], players) -> float:
+    return max((fp[p] for p in players), default=0.0)
+
+
+def stars_ok(fp: dict[str, float] | None, sends: dict[int, dict[str, int]],
+             teams: Collection[int] | None = None) -> bool:
+    """Whether every team (or each of ``teams``) gets back a player within STAR_GAP of the best one it sends, on
+    seen FP/G (``fp``; None, in a category league, passes). In a two-team trade that's the best player in the
+    deal coming back with one nearly as good."""
+    if fp is None:
+        return True
+    gets: dict[int, list[str]] = {t: [] for t in sends}
+    for out in sends.values():
+        for p, to in out.items():
+            gets[to].append(p)
+    return all(_top(fp, gets[t]) >= (1 - STAR_GAP) * _top(fp, out)
+               for t, out in sends.items() if out and (teams is None or t in teams))
+
+
+def _row(ctx: AnalysisContext, pt: int, give, get, r: dict) -> dict:
+    """A finder row for a simulated two-team trade."""
+    a, b = r["sides"]
+    return {"partner_id": pt, "partner_name": ctx.s.team(pt).name, "give": list(give), "get": list(get),
+            "my_delta_ros": a["delta_ros"], "my_delta_per_week": a["delta_per_week"], "my_delta_pct": a["delta_pct"],
+            "partner_delta_ros": b["delta_ros"], "partner_delta_pct": b["delta_pct"],
+            # on the season numbers each manager sees (None in a category league)
+            "my_seen_pct": a["seen_delta_pct"], "partner_seen_pct": b["seen_delta_pct"],
+            "fairness": r["fairness"], "summary": r["summary"]}
+
+
+def _slack(ev: TradeEvaluator, team_id: int, floor: float) -> float:
+    """Raw value the quick screen lets a team lose. The lineup simulation often scores a trade better for a team
+    than raw value does (positions, schedules), so the screen allows PARTNER_SLACK of the loss the old 0.4%
+    floor allowed even when the floor is 0, and the simulation decides."""
+    return PARTNER_SLACK * max(-floor, 0.004) * ev.base[team_id].mean
+
+
 def _open_spots(ctx: AnalysisContext, team_id: int, roster: list[str]) -> int:
     return max(roster_capacity(ctx, team_id, roster) - len(roster), 0)
 
@@ -495,22 +627,28 @@ def _spot_adjust(cost: dict[str, float], replacement: float, roster: list[str], 
 
 def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | None = None,
                 max_give: int = 2, max_get: int = 2, partners: list[int] | None = None,
-                candidates: int = 90, limit: int = 12, min_partner_pct: float = -0.004,
+                candidates: int = 90, limit: int = 12, min_partner_pct: float = MIN_PARTNER_PCT,
                 checked: Counter | None = None, exact: bool = False,
                 sizes: frozenset[tuple[int, int]] | None = None) -> list[dict]:
     """Search trades with every other team.
 
     Package sizes: the (give, get) pairs in ``sizes`` (EVEN_SIZES for 1-for-1 and 2-for-2); else with
-    exact=True only max_give-for-max_get; else every size up to max_give-for-max_get. Stage 1 scores every package pair by raw ROS value (with roster-spot
-    replacement) and keeps plausible ones; stage 2 runs the full lineup
-    simulation for both teams on the best candidates; results are ranked by our
-    gain among trades the partner's model also likes (or barely dislikes). If given, `checked`
-    counts the packages fully simulated per size ("2-for-1": 22, ...).
+    exact=True only max_give-for-max_get; else every size up to max_give-for-max_get. Stage 1 scores every
+    package pair by raw ROS value (with roster-spot replacement), on Courtside's projection and on the season
+    numbers, and keeps plausible ones where the best player in the deal comes back with one nearly as good
+    (stars_ok); stage 2 runs the full lineup simulation for both teams on the best candidates; results are
+    ranked by our gain among trades that hold up for both teams on both sets of numbers (holds_up). If given,
+    `checked` counts the packages fully simulated per size ("2-for-1": 22, ...).
     """
     ev = evaluator or TradeEvaluator(ctx)
     vals, cost, replacement = _screen_values(ctx, ev)
+    seen = _seen_screen(ev)
+    svals, scost, srepl = seen or (vals, cost, replacement)
     mine = ctx.team_roster(team_id)
     mine_open = _open_spots(ctx, team_id, mine)
+    my_slack = _slack(ev, team_id, MY_SEEN_FLOOR)
+    fp = ev.seen_fp
+    keep = 1 - STAR_GAP
     partners = partners or [t.id for t in ctx.s.teams if t.id != team_id]
     if sizes:
         allowed = set(sizes)
@@ -519,11 +657,13 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     else:
         allowed = {(g, r) for g in range(1, max_give + 1) for r in range(1, max_get + 1)}
 
-    def packages(roster: list[str], counts: set[int]) -> list[tuple[tuple[str, ...], float, float]]:
-        """Every package of `counts` players with its raw value and what losing it costs, summed once each."""
+    def packages(roster: list[str], counts: set[int]) -> list[tuple[tuple[str, ...], float, float, float, float]]:
+        """Every package of `counts` players with its raw value and what losing it costs, then the same on the
+        season numbers, summed once each."""
         out = []
         for n in sorted(counts):
-            out.extend((p, sum(vals[x] for x in p), sum(cost[x] for x in p)) for p in combinations(roster, n))
+            out.extend((p, sum(vals[x] for x in p), sum(cost[x] for x in p), sum(svals[x] for x in p),
+                        sum(scost[x] for x in p), _top(fp, p) if fp else 0.0) for p in combinations(roster, n))
         return out
 
     # 3-for-3 pairs 286 packages a side on a 13-man roster, so this loop stays lean: package values are
@@ -533,25 +673,29 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
     for pt in partners:
         theirs = ctx.team_roster(pt)
         theirs_open = _open_spots(ctx, pt, theirs)
-        slack = PARTNER_SLACK * -min_partner_pct * ev.base[pt].mean  # raw value they can lose and still accept
+        slack = _slack(ev, pt, min_partner_pct)  # raw value the screen lets them lose
         their_pkgs = packages(theirs, {r for _, r in allowed})
-        for give, v_out, c_out in my_pkgs:
-            for get, v_in, c_in in their_pkgs:
+        for give, v_out, c_out, sv_out, sc_out, t_out in my_pkgs:
+            for get, v_in, c_in, sv_in, sc_in, t_in in their_pkgs:
                 if (len(give), len(get)) not in allowed:
                     continue
-                if v_in < 0.7 * v_out or v_in > 1.6 * v_out:
+                if v_in < 0.7 * v_out or v_in > 1.6 * v_out or t_in < keep * t_out or t_out < keep * t_in:
                     continue
-                my_raw = v_in - c_out
-                their_raw = v_out - c_in
+                my_raw, their_raw = v_in - c_out, v_out - c_in
+                my_seen, their_seen = sv_in - sc_out, sv_out - sc_in
                 if len(give) != len(get):
                     my_raw += _spot_adjust(cost, replacement, mine, give, len(get), mine_open)
                     their_raw += _spot_adjust(cost, replacement, theirs, get, len(give), theirs_open)
+                    my_seen += _spot_adjust(scost, srepl, mine, give, len(get), mine_open)
+                    their_seen += _spot_adjust(scost, srepl, theirs, get, len(give), theirs_open)
                 scale = max(v_out, v_in)
-                if their_raw < -0.12 * scale or my_raw < -0.15 * scale:
+                if min(their_raw, their_seen) < -0.12 * scale or my_raw < -0.15 * scale:
                     continue
-                # Prefer trades good for us that the partner still accepts: the full simulation drops anything
-                # that costs them more than min_partner_pct, so shortlisting lopsided deals wastes it.
-                pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw + slack, 0.0), pt, give, get))
+                # Prefer trades good for us that hold up for both teams: the full simulation drops anything that
+                # costs the partner more than min_partner_pct on the projection or the season numbers, or looks
+                # like a loss to us on the season numbers (holds_up), so shortlisting lopsided deals wastes it.
+                loss = min(their_raw + slack, 0.0) + min(their_seen + slack, 0.0) + min(my_seen + my_slack, 0.0)
+                pre.append((my_raw + PARTNER_LOSS_WEIGHT * loss, pt, give, get))
     pre.sort(key=lambda x: -x[0])
 
     results = []
@@ -563,21 +707,9 @@ def find_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | 
         except ValueError:
             continue
         a, b = r["sides"]
-        if a["delta_ros"] <= 0 or b["delta_pct"] < min_partner_pct:
+        if a["delta_ros"] <= 0 or not holds_up(a, b, min_partner_pct):
             continue
-        results.append({
-            "partner_id": pt,
-            "partner_name": ctx.s.team(pt).name,
-            "give": list(give),
-            "get": list(get),
-            "my_delta_ros": a["delta_ros"],
-            "my_delta_per_week": a["delta_per_week"],
-            "my_delta_pct": a["delta_pct"],
-            "partner_delta_ros": b["delta_ros"],
-            "partner_delta_pct": b["delta_pct"],
-            "fairness": r["fairness"],
-            "summary": r["summary"],
-        })
+        results.append(_row(ctx, pt, give, get, r))
     results.sort(key=lambda x: -x["my_delta_ros"])
     # Diversify: at most 3 suggestions per partner and per outgoing player, and room for every package
     # size the user asked for (half the list at most for any one of 1-for-1, 2-for-1, 2-for-2, ...,
@@ -633,13 +765,13 @@ def _shortlist(pre: list[tuple[float, int, tuple, tuple]], candidates: int, n_sh
 
 def find_offers(ctx: AnalysisContext, team_id: int, targets: list[str], evaluator: TradeEvaluator | None = None,
                 give_counts: frozenset[int] = frozenset({1, 2, 3}), candidates: int = 48, limit: int = 10,
-                min_partner_pct: float = -0.004, checked: Counter | None = None) -> dict:
+                min_partner_pct: float = MIN_PARTNER_PCT, checked: Counter | None = None) -> dict:
     """What to offer for one to three players on another team.
 
     What you get is fixed. Every package of your players in the ``give_counts`` sizes is screened by raw
     ROS value (with roster-spot replacement), the most promising are fully simulated for both teams, and
-    the offers the partner's projection accepts (falls no more than min_partner_pct, as in find_trades)
-    are ranked by your gain, so the first is the cheapest offer that should get it done. If none
+    the offers the partner accepts (as in find_trades: falls no more than min_partner_pct on the projection
+    or the season numbers, and gets a player nearly as good as the best one it sends) are ranked by your gain, so the first is the cheapest offer that should get it done. If none
     qualifies, ``closest`` holds the offers the partner refuses by the least. ValueError (with a message
     for the user) if the targets aren't 1 to 3 players on one other team.
     """
@@ -675,7 +807,7 @@ def find_offers(ctx: AnalysisContext, team_id: int, targets: list[str], evaluato
 
 def find_asks(ctx: AnalysisContext, team_id: int, players: list[str], partner: int | None = None,
               evaluator: TradeEvaluator | None = None, get_counts: frozenset[int] = frozenset({1, 2, 3}),
-              candidates: int = 48, limit: int = 10, min_partner_pct: float = -0.004,
+              candidates: int = 48, limit: int = 10, min_partner_pct: float = MIN_PARTNER_PCT,
               checked: Counter | None = None) -> dict:
     """What to ask for one to three of your players from a team that wants them (partner=None: every team).
 
@@ -720,20 +852,25 @@ def _package_search(ctx: AnalysisContext, ev: TradeEvaluator, team_id: int, part
 
     With fixed_is_mine, ``fixed`` is what team_id sends and the packages come from each partner's roster;
     otherwise ``fixed`` is what team_id gets and the packages are team_id's own. Every package of ``counts``
-    players is screened by raw ROS value (with roster-spot replacement), the most promising are fully
-    simulated for both teams, and the trades the partner's projection accepts (falls no more than
-    min_partner_pct, as in find_trades) are ranked by team_id's gain. An ask (fixed_is_mine) also has to be
-    fair to team_id: one that costs it more than min_partner_pct isn't worth asking for. Returns those,
-    diversified, and, when there are none, the refusals that came closest.
+    players is screened by raw ROS value (with roster-spot replacement), on Courtside's projection and on the
+    season numbers, the most promising are fully simulated for both teams, and the trades the partner accepts
+    (falls no more than min_partner_pct on either and gets a player back nearly as good as the best one it
+    sends, as in find_trades) are ranked by team_id's gain. An ask (fixed_is_mine) also has to be fair to
+    team_id as find_trades' suggestions are (holds_up, stars_ok): one that costs it isn't worth asking for. An
+    offer is what you'd pay for players you picked, so it may cost you. Returns those, diversified, and, when
+    there are none, the refusals that came closest.
     """
     vals, cost, replacement = _screen_values(ctx, ev)
+    views = [(vals, cost, replacement), *([_seen_screen(ev)] if ev.seen() is not None else [])]
+    fp = ev.seen_fp
+    keep = 1 - STAR_GAP
     mine = ctx.team_roster(team_id)
     mine_open = _open_spots(ctx, team_id, mine)
     pre: list[tuple[float, int, tuple, tuple]] = []
     for pt in partners:
         theirs = ctx.team_roster(pt)
         theirs_open = _open_spots(ctx, pt, theirs)
-        slack = PARTNER_SLACK * -min_partner_pct * ev.base[pt].mean  # as in find_trades
+        slack = _slack(ev, pt, min_partner_pct)  # as in find_trades
         for n in sorted(counts):
             for pkg in combinations(theirs if fixed_is_mine else mine, n):
                 if not all(vals[x] > replacement * 0.5 for x in pkg):
@@ -741,10 +878,13 @@ def _package_search(ctx: AnalysisContext, ev: TradeEvaluator, team_id: int, part
                 give, get = (tuple(fixed), pkg) if fixed_is_mine else (pkg, tuple(fixed))
                 my_raw = (sum(vals[x] for x in get) - sum(cost[x] for x in give)
                           + _spot_adjust(cost, replacement, mine, give, len(get), mine_open))
-                their_raw = (sum(vals[x] for x in give) - sum(cost[x] for x in get)
-                             + _spot_adjust(cost, replacement, theirs, get, len(give), theirs_open))
-                # Highest for the trade that keeps the most for team_id while the partner still accepts it.
-                pre.append((my_raw + PARTNER_LOSS_WEIGHT * min(their_raw + slack, 0.0), pt, give, get))
+                # What the partner loses on the worse of the projection and the season numbers.
+                their_raw = min(sum(v[x] for x in give) - sum(c[x] for x in get)
+                                + _spot_adjust(c, rep, theirs, get, len(give), theirs_open) for v, c, rep in views)
+                # A partner giving up its best player for less says no (stars_ok): those go to the bottom.
+                refuses = bool(fp) and _top(fp, give) < keep * _top(fp, get)
+                score = my_raw + PARTNER_LOSS_WEIGHT * min(their_raw + slack, 0.0)
+                pre.append((score - (1e9 if refuses else 0.0), pt, give, get))
     pre.sort(key=lambda x: -x[0])
 
     def varied(pt: int, give: tuple, get: tuple) -> list[tuple]:
@@ -765,13 +905,12 @@ def _package_search(ctx: AnalysisContext, ev: TradeEvaluator, team_id: int, part
         except ValueError:
             continue
         a, b = r["sides"]
-        row = {"partner_id": pt, "partner_name": ctx.s.team(pt).name, "give": list(give), "get": list(get),
-               "my_delta_ros": a["delta_ros"], "my_delta_per_week": a["delta_per_week"], "my_delta_pct": a["delta_pct"],
-               "partner_delta_ros": b["delta_ros"], "partner_delta_pct": b["delta_pct"],
-               "fairness": r["fairness"], "summary": r["summary"]}
-        if b["delta_pct"] < min_partner_pct:
+        row = _row(ctx, pt, give, get, r)
+        sends = {team_id: {p: pt for p in give}, pt: {p: team_id for p in get}}
+        if worst_pct(b) < min_partner_pct or not stars_ok(fp, sends, [pt]):
             refused.append(row)
-        elif not fixed_is_mine or a["delta_pct"] >= min_partner_pct:
+        elif not fixed_is_mine or (a["delta_pct"] >= min_partner_pct and holds_up(a, b, min_partner_pct)
+                                   and stars_ok(fp, sends, [team_id])):
             accepted.append(row)
     accepted.sort(key=lambda x: -x["my_delta_ros"])
     # Diversify as find_trades does: at most 3 built on any one varied player (and, across teams, any one
@@ -779,20 +918,23 @@ def _package_search(ctx: AnalysisContext, ev: TradeEvaluator, team_id: int, part
     offers = _spread(accepted, lambda r: varied(r["partner_id"], tuple(r["give"]), tuple(r["get"])),
                      {"size": limit if len(counts) == 1 else max(limit // 2, 1), "player": 3,
                       "partner": 3 if len(partners) > 1 else limit}, limit)
-    refused.sort(key=lambda x: -x["partner_delta_pct"])
+    # Closest first: the refusals the partner turns down by the least, on its worse set of numbers.
+    refused.sort(key=lambda x: -worst_pct({"delta_pct": x["partner_delta_pct"], "seen_delta_pct": x["partner_seen_pct"]}))
     return offers, [] if offers else refused[:3]
 
 
 def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeEvaluator | None = None,
                            partners: Collection[int] = (), candidates: int = THREE_TEAM_CANDIDATES, limit: int = 12,
-                           min_partner_pct: float = -0.004, checked: Counter | None = None) -> list[dict]:
+                           min_partner_pct: float = MIN_PARTNER_PCT, checked: Counter | None = None) -> list[dict]:
     """Three-team rotations: team_id sends a player to P, P sends one to Q, and Q sends one back to team_id.
 
     Everyone gives one player and gets one from a different team, which finds deals no two-team trade can
     (you want Q's player, Q wants P's, P wants yours). Every ordered pair of partners (so both directions)
     is screened by raw ROS value as in find_trades, the most promising are fully simulated for all three
-    teams, and the rotations neither partner's projection refuses (falls more than min_partner_pct) are
-    ranked by team_id's gain. With ``partners`` (one or two teams), only rotations that include all of them.
+    teams, and the rotations that hold up for all three as find_trades' do (neither partner falls more than
+    min_partner_pct on the projection or the season numbers, you don't look like losing on the season numbers,
+    and each team gets a player nearly as good as the one it sends) are ranked by team_id's gain. With
+    ``partners`` (one or two teams), only rotations that include all of them.
     """
     want = set(partners)
     if len(want) > 2 or team_id in want:
@@ -801,7 +943,13 @@ def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeE
     vals, cost, replacement = _screen_values(ctx, ev)
     others = [t.id for t in ctx.s.teams if t.id != team_id]
     pools = {t: [p for p in ctx.team_roster(t) if vals[p] > replacement * 0.5] for t in [team_id, *others]}
-    slack = {t: PARTNER_SLACK * -min_partner_pct * ev.base[t].mean for t in others}  # as in find_trades
+    slack = {t: _slack(ev, t, min_partner_pct) for t in others}  # as in find_trades
+    fp = ev.seen_fp
+    keep = 1 - STAR_GAP
+
+    def close(x: str, y: str) -> bool:
+        """Each of the two is within STAR_GAP of the other on seen FP/G (stars_ok for a one-player swap)."""
+        return not fp or (fp[x] >= keep * fp[y] and fp[y] >= keep * fp[x])
 
     def plausible(v_in: float, v_out: float, loss: float) -> bool:
         """Gets 70-160% of what it gives and loses no more than `loss` of the bigger side, as find_trades screens."""
@@ -815,11 +963,11 @@ def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeE
             va = vals[a]
             for b in pools[p]:  # P gets a and sends b to Q
                 vb = vals[b]
-                if not plausible(va, vb, 0.12):
+                if not plausible(va, vb, 0.12) or not close(a, b):
                     continue
                 for c in pools[q]:  # Q gets b and sends c to you
                     vc = vals[c]
-                    if not (plausible(vb, vc, 0.12) and plausible(vc, va, 0.15)):
+                    if not (plausible(vb, vc, 0.12) and plausible(vc, va, 0.15) and close(b, c) and close(c, a)):
                         continue
                     # As in find_trades: what each team gets, less what losing its player costs.
                     partners_raw = min(va - cost[b] + slack[p], 0.0) + min(vb - cost[c] + slack[q], 0.0)
@@ -839,13 +987,14 @@ def find_three_team_trades(ctx: AnalysisContext, team_id: int, evaluator: TradeE
         except ValueError:
             continue
         me, *them = r["sides"]
-        if me["delta_ros"] <= 0 or min(s["delta_pct"] for s in them) < min_partner_pct:
+        if me["delta_ros"] <= 0 or not holds_up(me, them, min_partner_pct):
             continue
         results.append({
             "teams": r["teams"], "moves": r["moves"], "give": [a], "get": [c],
             "my_delta_ros": me["delta_ros"], "my_delta_per_week": me["delta_per_week"], "my_delta_pct": me["delta_pct"],
+            "my_seen_pct": me["seen_delta_pct"],
             "partners": [{"team_id": s["team_id"], "team_name": s["team_name"], "delta_ros": s["delta_ros"],
-                          "delta_pct": s["delta_pct"]} for s in them],
+                          "delta_pct": s["delta_pct"], "seen_pct": s["seen_delta_pct"]} for s in them],
             "fairness": r["fairness"], "summary": r["summary"],
         })
     results.sort(key=lambda x: -x["my_delta_ros"])

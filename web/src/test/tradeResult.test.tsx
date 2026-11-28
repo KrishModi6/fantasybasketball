@@ -53,5 +53,17 @@ describe("TradeResult", () => {
   it("adds nothing to any other trade", () => {
     render(<TradeResult ev={trade({ label: "favors Team 2", partner_accept_likelihood: 0.9, reason: "" }, "advantageous")} />);
     expect(screen.getByText(/The summary\./)).not.toHaveTextContent("projects");
+    expect(screen.getByText(/The summary\./)).not.toHaveTextContent("season averages");
+  });
+
+  it("shows how the trade looks on the season averages each manager sees", () => {
+    const ev = trade({ label: "balanced", partner_accept_likelihood: 0.4, reason: "" }, "neutral");
+    ev.sides = [
+      { ...ev.sides[0], seen_delta_pct: 0.012, seen_delta_per_week: 16.5 },
+      { ...ev.sides[1], seen_delta_pct: -0.017, seen_delta_per_week: -23 },
+    ];
+    render(<TradeResult ev={ev} />);
+    expect(screen.getByText(/The summary\./)).toHaveTextContent(
+      /On the season averages each manager sees on ESPN: Team 1 \+16\.5 per week \(\+1\.2%\), Team 2 [−-]23\.0 per week \([−-]1\.7%\)/);
   });
 });

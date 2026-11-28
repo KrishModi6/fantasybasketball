@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import math
 import random
+from dataclasses import replace
 from datetime import datetime, time, timedelta, timezone
 from types import SimpleNamespace
 
@@ -33,7 +34,10 @@ from fbb.trades import (
     _verdict,
     apply_trade,
     find_trades,
+    holds_up,
     pickup_pool,
+    stars_ok,
+    worst_pct,
 )
 from fbb.valuation import player_values
 
@@ -1210,11 +1214,94 @@ def test_three_team_trade(snapshot):
         ev.evaluate_multi({1: {b[1]: 2}, 2: {b[0]: 3}, 3: {c[0]: 1}}, with_sim=False)
 
 
-def test_trade_finder_returns_gains(snapshot):
+def _position_swap_league():
+    """Team 2 carries only centers and team 3 only point guards, so each leaves lineup slots empty that the other
+    could fill: a center for a guard of about the same value helps both teams on any set of numbers."""
+    snap = make_snapshot()
+    for e in snap.team(2).roster:
+        snap.players[e.player_id].positions = ["C"]
+    for e in snap.team(3).roster:
+        snap.players[e.player_id].positions = ["PG"]
+    return snap, AnalysisContext(snap, ProjectionEngine(snap, model=None).project_all())
+
+
+def _fair_to_both(r: dict, fp: dict) -> bool:
+    sends = {2: {p: r["partner_id"] for p in r["give"]}, r["partner_id"]: {p: 2 for p in r["get"]}}
+    return (r["my_delta_ros"] > 0 and r["my_seen_pct"] >= -0.004 and r["partner_delta_pct"] >= 0
+            and r["partner_seen_pct"] >= 0 and stars_ok(fp, sends))
+
+
+def test_trade_finder_suggests_trades_fair_to_both_teams():
+    _, ctx = _position_swap_league()
+    ev = TradeEvaluator(ctx)
+    rows = find_trades(ctx, 2, ev, candidates=40)
+    assert rows and all(_fair_to_both(r, ev.seen_fp) for r in rows)
+    assert any(r["partner_id"] == 3 for r in rows)  # the center-for-guard swaps are found
+
+
+def test_a_player_projected_far_above_his_season_isnt_sold_at_his_projection():
+    """The bug: ranking by your gain among trades the partner's *projection* barely accepted picked the trades
+    the projection and the season numbers disagree on most, so a player projected well above what he's
+    averaging (a rookie expected to climb, a 1-game sample) went out at his projection. The other manager sees
+    his season average, so a trade like that is one they turn down."""
+    _, ctx = _position_swap_league()
+    row = next(r for r in find_trades(ctx, 2, candidates=40, sizes=frozenset({(1, 1)})))
+    (out,), (back,), pt = row["give"], row["get"], row["partner_id"]
+
+    snap, ctx = _position_swap_league()
+    pr = ctx.proj[out]
+    ctx.proj[out] = replace(pr, games_played=15, season_fp_pg=0.4 * pr.fp_pg)  # averaging 40% of his projection
+    ev = TradeEvaluator(ctx)
+    assert ev.seen_fp[out] == pytest.approx((15 * 0.4 + 5) / 20 * pr.fp_pg)
+    me, them = ev.evaluate(2, pt, [out], [back], with_sim=False)["sides"]
+    assert them["seen_delta_pct"] < 0 < them["delta_pct"]  # a gain on the projection, a loss on what they see
+    assert not holds_up(me, them, 0.0)
+    rows = find_trades(ctx, 2, ev, candidates=40, sizes=frozenset({(1, 1)}))
+    assert rows and all(out not in r["give"] for r in rows)
+
+
+def test_seen_fp_blends_a_small_sample_with_the_projection():
+    from fbb.trades import seen_fp_pg
+
+    pr = lambda gp, season, fp: SimpleNamespace(games_played=gp, season_fp_pg=season, fp_pg=fp)  # noqa: E731
+    assert seen_fp_pg(pr(1, -2.0, 30.0)) == pytest.approx(24.67, abs=0.01)  # 1 game in, mostly the projection
+    assert seen_fp_pg(pr(18, 36.4, 40.9)) == pytest.approx(37.38, abs=0.01)  # 18 games in, mostly the season
+    assert seen_fp_pg(pr(0, None, 33.0)) == 33.0  # no games this season: the projection
+
+
+def test_the_best_player_in_a_deal_has_to_come_back_with_one_nearly_as_good():
+    fp = {"star": 46.0, "a": 39.0, "b": 35.0, "near": 42.0}
+    assert not stars_ok(fp, {1: {"star": 2}, 2: {"a": 1, "b": 1}})  # 46 for 39 + 35: team 1 says no
+    assert stars_ok(fp, {1: {"star": 2}, 2: {"near": 1, "b": 1}})  # 42 is within 10% of 46
+    assert stars_ok(fp, {1: {"star": 2}, 2: {"a": 1, "b": 1}}, teams=[2])  # team 2 gets the best player
+    assert stars_ok(None, {1: {"star": 2}, 2: {"a": 1}})  # a category league has no FP/G to compare
+
+
+def test_holds_up_needs_the_partner_to_gain_on_both_sets_of_numbers():
+    me = {"delta_pct": 0.01, "seen_delta_pct": 0.0}
+    assert holds_up(me, {"delta_pct": 0.001, "seen_delta_pct": 0.002}, 0.0)
+    assert not holds_up(me, {"delta_pct": 0.001, "seen_delta_pct": -0.002}, 0.0)  # a loss on what they see
+    assert not holds_up(me, {"delta_pct": -0.001, "seen_delta_pct": 0.002}, 0.0)  # a loss on the projection
+    assert not holds_up({**me, "seen_delta_pct": -0.01}, {"delta_pct": 0.0, "seen_delta_pct": 0.0}, 0.0)
+    assert holds_up({"delta_pct": 0.01, "seen_delta_pct": None}, {"delta_pct": 0.0, "seen_delta_pct": None}, 0.0)
+    assert worst_pct(TradeSide(1, "A", [], [], delta_pct=0.02, seen_delta_pct=-0.01)) == -0.01
+
+
+def test_a_completed_trade_reads_its_season_numbers_the_other_way_round():
+    from fbb.trades import _reversed_side
+
+    s = _reversed_side(TradeSide(1, "A", ["x"], ["y"], delta_pct=0.05, seen_delta_pct=0.1, seen_delta_per_week=4.0))
+    assert s.seen_delta_pct == pytest.approx(-0.1 / 1.1) and s.seen_delta_per_week == -4.0
+
+
+def test_an_evaluated_trade_carries_the_season_numbers_and_accepts_on_the_worse(snapshot):
     ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
-    for s in find_trades(ctx, 2, candidates=40):
-        assert s["my_delta_ros"] > 0
-        assert s["partner_delta_pct"] >= -0.004
+    ev = TradeEvaluator(ctx)
+    r = ev.evaluate(1, 2, ctx.team_roster(1)[:1], ctx.team_roster(2)[:1], with_sim=False)
+    them = r["sides"][1]
+    assert all(s["seen_delta_pct"] is not None and s["seen_delta_per_week"] is not None for s in r["sides"])
+    worse = min(them["delta_pct"], them["seen_delta_pct"])
+    assert r["fairness"]["partner_accept_likelihood"] == pytest.approx(1 / (1 + math.exp(-worse / 0.01)))
 
 
 def test_trade_finder_exact_package_size(snapshot):
@@ -1380,12 +1467,12 @@ def test_espn_matchups_fall_back_when_weeks_disagree():
     assert len(default) == 21 and default[1][0] == 1
 
 
-def test_trade_finder_searches_only_the_sizes_asked_for(snapshot):
+def test_trade_finder_searches_only_the_sizes_asked_for():
     from collections import Counter
 
     from fbb.trades import EVEN_SIZES
 
-    ctx = AnalysisContext(snapshot, ProjectionEngine(snapshot, model=None).project_all())
+    _, ctx = _position_swap_league()  # one with fair trades in every size, so the rows below aren't empty
     checked: Counter = Counter()
     rows = find_trades(ctx, 2, candidates=40, sizes=EVEN_SIZES, checked=checked)
     assert checked and set(checked) <= {"1-for-1", "2-for-2"}  # no 2-for-1 or 1-for-2 is even simulated
@@ -1415,8 +1502,10 @@ def test_offer_finder_prices_the_players_you_pick(snapshot):
     gains = [o["my_delta_ros"] for o in r["offers"]]
     assert gains == sorted(gains, reverse=True)  # best for you first
     mine = set(ctx.team_roster(1))
-    assert all(set(o["give"]) <= mine and o["partner_delta_pct"] >= -0.004 for o in r["offers"])
-    assert all(o["partner_delta_pct"] < -0.004 for o in r["closest"])
+    takes = lambda o: (worst_pct({"delta_pct": o["partner_delta_pct"], "seen_delta_pct": o["partner_seen_pct"]}) >= 0  # noqa: E731
+                       and stars_ok(ev.seen_fp, {1: {p: 3 for p in o["give"]}, 3: {p: 1 for p in o["get"]}}, [3]))
+    assert all(set(o["give"]) <= mine and takes(o) for o in r["offers"])
+    assert not any(takes(o) for o in r["closest"])  # the other team turns each of these down
 
     checked.clear()
     one = find_offers(ctx, 1, [target], ev, frozenset({1}), checked=checked)
@@ -1441,9 +1530,12 @@ def test_ask_finder_prices_what_you_shop(snapshot):
     gains = [o["my_delta_ros"] for o in r["offers"]]
     assert gains == sorted(gains, reverse=True)  # the most you can ask for first
     theirs = set(ctx.team_roster(3))
-    assert all(o["give"] == [shop] and set(o["get"]) <= theirs and o["partner_delta_pct"] >= -0.004
-               and o["my_delta_pct"] >= -0.004 for o in r["offers"])  # fair to both teams
-    assert all(o["partner_delta_pct"] < -0.004 for o in r["closest"])
+    sends = lambda o: {1: {p: 3 for p in o["give"]}, 3: {p: 1 for p in o["get"]}}  # noqa: E731
+    assert all(o["give"] == [shop] and set(o["get"]) <= theirs and o["partner_delta_pct"] >= 0
+               and o["partner_seen_pct"] >= 0 and o["my_delta_pct"] >= 0 and o["my_seen_pct"] >= -0.004
+               and stars_ok(ev.seen_fp, sends(o)) for o in r["offers"])  # fair to both teams
+    assert all(min(o["partner_delta_pct"], o["partner_seen_pct"]) < 0 or not stars_ok(ev.seen_fp, sends(o), [3])
+               for o in r["closest"])
 
     one = find_asks(ctx, 1, [shop], 3, ev, frozenset({1}))
     assert all(len(o["get"]) == 1 for o in one["offers"] + one["closest"])
@@ -1490,7 +1582,7 @@ def test_three_team_finder_rotates_one_player_each(snapshot):
         assert r["give"] == [next(m["player_id"] for m in r["moves"] if m["from_team"] == 1)]
         assert r["get"] == [next(m["player_id"] for m in r["moves"] if m["to_team"] == 1)]
         assert [s["team_id"] for s in r["partners"]] == [p, q]
-        assert all(s["delta_pct"] >= -0.004 for s in r["partners"])
+        assert all(s["delta_pct"] >= 0 and s["seen_pct"] >= 0 for s in r["partners"]) and r["my_seen_pct"] >= -0.004
     assert max(Counter(frozenset(r["teams"][1:]) for r in rows).values(), default=0) <= 2
 
     with_3 = find_three_team_trades(ctx, 1, ev, partners=[3], candidates=20)
