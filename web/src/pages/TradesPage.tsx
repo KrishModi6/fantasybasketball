@@ -315,6 +315,9 @@ export function TradeResult({ ev }: { ev: TradeEval }) {
       <Notice>
         <strong><Term t="fit">{ev.fairness.label}</Term>.</strong> {ev.fairness.reason} {ev.summary} <Term t="accept">Chance {partners.map((p) => p.team_name).join(" and ")} {three ? "both see" : "sees"} it
         as a gain</Term>: {pct(ev.fairness.partner_accept_likelihood)}.
+        {ev.sides.every((s) => s.seen_delta_per_week != null) && (
+          <> On the season averages each manager sees on ESPN: {ev.sides.map((s) => `${s.team_name} ${signed(s.seen_delta_per_week ?? 0)} per week (${signedPct(s.seen_delta_pct ?? 0)})`).join(", ")}.</>
+        )}
       </Notice>
       <div className={`grid ${cols}`} style={{ alignItems: "start" }}>
         {ev.math.map((m) => (
@@ -413,7 +416,7 @@ function TwoTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
         <button className="btn primary" onClick={() => setRun((n) => n + 1)} disabled={q.isFetching}>{q.isFetching ? "Searching…" : "Search"}</button>
       </div>
       <p className="small muted">
-        Screens every package by rest-of-season value, then fully simulates the most promising for both teams. Listed only if the partner's projection doesn't fall more than 0.4%; ranked by your gain.
+        Screens every package by rest-of-season value, then fully simulates the most promising for both teams. Listed only if the other team gains, both on Courtside's projections and on the season averages its manager sees on ESPN, and gets back a player nearly as good as the best one it sends; ranked by your gain.
       </p>
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && <LoadingBlock rows={6} />}
@@ -424,7 +427,7 @@ function TwoTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
         if (!sizes.includes(`${n}-${n}`) || !simulated || q.data.suggestions.some((s) => s.give.length === n && s.get.length === n)) return null;
         return (
           <p key={n} className="small muted">
-            Fully simulated {simulated} {word}-for-{word} packages. None helped you without costing the other team more than 0.4%, so none are listed.
+            Fully simulated {simulated} {word}-for-{word} packages. None helped you while staying fair to the other team, so none are listed.
           </p>
         );
       })}
@@ -443,7 +446,7 @@ function TwoTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
                     <td className="wrap">{s.get_names.join(", ")}</td>
                     <td className="n"><Delta value={s.my_delta_per_week} /></td>
                     <td className="n hide-sm">{signedPct(s.my_delta_pct)}</td>
-                    <td className="n">{signedPct(s.partner_delta_pct)}</td>
+                    <td className="n"><PartnerPct row={s} /></td>
                     <td className="hide-sm"><Tag tone={s.fairness.label === "win-win" ? "up" : undefined}>{s.fairness.label}</Tag></td>
                     <td className="n"><button className="btn" onClick={() => onLoad(twoTeam(team, s.partner_id, s.give, s.get))}>Analyze</button></td>
                   </tr>
@@ -454,6 +457,17 @@ function TwoTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
         </Panel>
       )}
     </div>
+  );
+}
+
+/** The other team's rest-of-season change on Courtside's projections, with the same on the season averages its manager
+ * sees on ESPN underneath (when the league has them). */
+function PartnerPct({ row }: { row: TradeSuggestion }) {
+  if (row.partner_seen_pct == null) return <>{signedPct(row.partner_delta_pct)}</>;
+  return (
+    <span title="On Courtside's projections, then on the season averages the other manager sees">
+      {signedPct(row.partner_delta_pct)}<br /><span className="small muted">{signedPct(row.partner_seen_pct)} avg</span>
+    </span>
   );
 }
 
@@ -500,14 +514,14 @@ function ThreeTeamFinder({ onLoad }: { onLoad: (d: Draft) => void }) {
         <button className="btn primary" onClick={() => setRun((n) => n + 1)} disabled={q.isFetching}>{q.isFetching ? "Searching…" : "Search"}</button>
       </div>
       <p className="small muted">
-        You send a player to one team, that team sends one on to a third, and the third sends one back to you, so each team gives one player and gets one. This finds deals a two-team trade can't, like when the team with the player you want doesn't want anyone of yours. Screens every rotation by rest-of-season value, fully simulates the most promising for all three teams, and lists those where neither other team's projection falls more than 0.4%, ranked by your gain.
+        You send a player to one team, that team sends one on to a third, and the third sends one back to you, so each team gives one player and gets one. This finds deals a two-team trade can't, like when the team with the player you want doesn't want anyone of yours. Screens every rotation by rest-of-season value, fully simulates the most promising for all three teams, and lists those where both other teams gain, on Courtside's projections and on the season averages they see, and each team gets back a player nearly as good as the one it sends; ranked by your gain.
       </p>
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && <LoadingBlock rows={6} />}
       {q.data && !q.isFetching && q.data.suggestions.length === 0 && (
         <Panel><Empty title="No three-team trade works for all three teams">
           {q.data.checked?.["3-team"]
-            ? `Fully simulated ${count(q.data.checked["3-team"], "rotation")}. None helped you without costing another team more than 0.4%.`
+            ? `Fully simulated ${count(q.data.checked["3-team"], "rotation")}. None helped you while staying fair to both other teams.`
             : "Try including another team, or search two-team trades."}
         </Empty></Panel>
       )}
@@ -615,7 +629,7 @@ function Targeter({ onLoad }: { onLoad: (d: Draft) => void }) {
       <RosterPicker title="Players you want" label="Their team" teamId={from} picked={targets} onToggle={toggle} others={[team]}
         onTeam={(id) => { setFrom(id); setTargets([]); }} />
       <p className="small muted">
-        Tries every package of your players for them, fully simulates the most promising for both teams, and lists the offers the other team gains from or loses at most 0.4% on, best for you first. Offering more players than you get opens roster spots, filled from free agents.
+        Tries every package of your players for them, fully simulates the most promising for both teams, and lists the offers the other team gains from, on Courtside's projections and on the season averages its manager sees, best for you first. An offer also has to include a player nearly as good as the best one you ask for. Offering more players than you get opens roster spots, filled from free agents.
       </p>
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && !q.data && <LoadingBlock rows={6} />}
@@ -641,7 +655,7 @@ function OfferResults({ data, team, onLoad }: { data: TradeOffers; team: number;
       <div className="stack">
         <Panel>
           <Empty title={`No offer ${data.partner_name} should accept for ${want}`}>
-            {data.closest.length ? "These came closest, but the other team loses more than 0.4% on each. Try offering more players, or target someone else." : "Try offering more players, or target someone else."}
+            {data.closest.length ? "These came closest, but the other team would turn each down: it loses on Courtside's projections or on season averages, or gives up its best player in the deal for less. Try offering more players, or target someone else." : "Try offering more players, or target someone else."}
           </Empty>
         </Panel>
         {data.closest.length > 0 && <OfferTable title="Closest offers" offers={data.closest} show="give" onAnalyze={analyze} />}
@@ -691,7 +705,7 @@ function OfferTable({ title, offers, show, withTeam = false, onAnalyze }: {
                 <td className="wrap">{(show === "give" ? o.give_names : o.get_names).join(", ")}</td>
                 <td className="n"><Delta value={o.my_delta_per_week} /></td>
                 <td className="n hide-sm">{signedPct(o.my_delta_pct)}</td>
-                <td className="n">{signedPct(o.partner_delta_pct)}</td>
+                <td className="n"><PartnerPct row={o} /></td>
                 <td className="hide-sm"><Tag tone={o.fairness.label === "win-win" ? "up" : undefined}>{o.fairness.label}</Tag></td>
                 <td className="n"><button className="btn" onClick={() => onAnalyze(o)}>Analyze</button></td>
               </tr>
@@ -775,7 +789,7 @@ function Shopper({ onLoad }: { onLoad: (d: Draft) => void }) {
       <RosterPicker title="Players they want" label="Your team" teamId={team} picked={players} onToggle={toggle} others={[partner]}
         onTeam={(id) => { setTeam(id); setPlayers([]); if (id === partner) setPartner(null); }} />
       <p className="small muted">
-        For when another manager wants your player but won't make an offer. Tries every package of their players for yours, fully simulates the most promising for both teams, and lists the packages their team gains from or loses at most 0.4% on, the most you can ask for first. Asking for more players than you give means dropping your weakest, while the other team fills the open spot from free agents.
+        For when another manager wants your player but won't make an offer. Tries every package of their players for yours, fully simulates the most promising for both teams, and lists the packages that are fair to both teams (each gains, on Courtside's projections and on the season averages its manager sees, and neither gives up the best player in the deal for less), the most you can ask for first. Asking for more players than you give means dropping your weakest, while the other team fills the open spot from free agents.
       </p>
       {q.error && <ErrorBox error={q.error} />}
       {q.isFetching && !q.data && <LoadingBlock rows={6} />}
@@ -806,8 +820,8 @@ function AskResults({ data, team, onLoad }: { data: TradeAsks; team: number; onL
         <Panel>
           <Empty title={`No fair return for ${shopping}${data.partner_name ? ` from ${data.partner_name}` : ""}`}>
             {data.closest.length
-              ? "These came closest, but the other team loses more than 0.4% on each. Try asking for fewer players, or another team."
-              : "Everything they'd accept costs you more than 0.4%. Try asking for more players, or another team."}
+              ? "These came closest, but the other team would turn each down: it loses on Courtside's projections or on season averages, or gives up its best player in the deal for less. Try asking for fewer players, or another team."
+              : "Everything they'd accept costs you, on Courtside's projections or on season averages. Try asking for more players, or another team."}
           </Empty>
         </Panel>
         {data.closest.length > 0 && <OfferTable title="Closest asks" offers={data.closest} show="get" withTeam={everyTeam} onAnalyze={analyze} />}

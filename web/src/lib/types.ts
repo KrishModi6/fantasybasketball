@@ -284,6 +284,9 @@ export interface TradeSide {
   before_title_odds: number | null;
   after_title_odds: number | null;
   verdict: "advantageous" | "neutral" | "disadvantageous";
+  /** The same trade on the season averages each manager sees on ESPN; null in a category league. */
+  seen_delta_pct?: number | null;
+  seen_delta_per_week?: number | null;
 }
 
 export interface TradeMove {
@@ -399,6 +402,9 @@ export interface TradeSuggestion {
   my_delta_pct: number;
   partner_delta_ros: number;
   partner_delta_pct: number;
+  /** The same changes on the season averages each manager sees on ESPN; null in a category league. */
+  my_seen_pct?: number | null;
+  partner_seen_pct?: number | null;
   fairness: { label: string; partner_accept_likelihood: number };
   summary: string;
 }
@@ -439,7 +445,8 @@ export interface ThreeTeamSuggestion {
   my_delta_ros: number;
   my_delta_per_week: number;
   my_delta_pct: number;
-  partners: { team_id: number; team_name: string; delta_ros: number; delta_pct: number }[];
+  my_seen_pct?: number | null;
+  partners: { team_id: number; team_name: string; delta_ros: number; delta_pct: number; seen_pct?: number | null }[];
   fairness: { label: string; partner_accept_likelihood: number };
   summary: string;
 }

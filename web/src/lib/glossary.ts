@@ -92,8 +92,8 @@ export const GLOSSARY = {
   odds_change: { term: "Playoff and title odds", def: "The team's chances before → after the trade, from simulating the rest of the season both ways." },
   you_wk: { term: "You/wk", def: "Points per week the trade adds to (or costs) your lineup." },
   you_ros: { term: "You ROS", def: "The change in your rest-of-season points, as a %." },
-  partner_pct: { term: "Partner", def: "The change in the other team's rest-of-season points, as a %. Near zero or positive means they have a reason to accept." },
-  accept: { term: "Chance they see it as a gain", def: "A rough chance the other manager's own numbers say yes: higher when the trade helps them more." },
+  partner_pct: { term: "Partner", def: "The change in the other team's rest-of-season points, as a %, on Courtside's projections. Underneath (avg): the same on the season averages its manager sees on ESPN. The trade finders only list trades where both are zero or better." },
+  accept: { term: "Chance they see it as a gain", def: "A rough chance the other manager says yes: higher when the trade helps them more, on whichever of Courtside's projections and the season averages they see is worse for them." },
 } satisfies Record<string, GlossaryEntry>;
 
 export type TermKey = keyof typeof GLOSSARY;

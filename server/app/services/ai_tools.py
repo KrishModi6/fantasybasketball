@@ -18,6 +18,14 @@ from .analysis import LeagueAnalysis
 from .present import player_detail, player_rows, team_detail
 
 
+
+def _seen_pcts(row: dict) -> dict:
+    """A finder row's changes on the season averages each manager sees on ESPN, as %, when the league has them."""
+    if row.get("partner_seen_pct") is None:
+        return {}
+    return {"my_change_pct_on_season_avgs": _r(row["my_seen_pct"] * 100, 1),
+            "partner_change_pct_on_season_avgs": _r(row["partner_seen_pct"] * 100, 1)}
+
 class ToolError(Exception):
     """A user-facing problem with tool arguments (unknown player, ambiguous name, ...)."""
 
@@ -110,12 +118,13 @@ class ToolBox:
                                       "to_team": {"type": "string", "description": "The team that gets him (name or id)."}},
                    }},
                }, ["moves"]),
-            fn("trade_ideas", "Search 1-for-1 and 2-for-2 trades that help a team and that the partner's projection also "
-               "accepts.", {"team": team, "partner": {"type": "string", "description": "Optional partner team."},
+            fn("trade_ideas", "Search 1-for-1 and 2-for-2 trades that help a team and are fair to the partner: it gains on "
+               "Courtside's projections and on the season averages its manager sees, and gets back a player nearly as "
+               "good as the best one it sends.", {"team": team, "partner": {"type": "string", "description": "Optional partner team."},
                             "uneven": {"type": "boolean", "description": "Also search 2-for-1 and 1-for-2 packages. "
                                        "Only when the user asks for them."}}),
             fn("trade_offers", "What to offer for specific players on another team: every package of 1 to 3 of the user's "
-               "players, simulated for both teams. Offers the other team's projection accepts, best for the user first; "
+               "players, simulated for both teams. Offers the other team gains from (on projections and season averages), best for the user first; "
                "if none, the closest refusals.", {
                    "players": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3,
                                "description": "The players the user wants, all on one other team."},
@@ -124,8 +133,8 @@ class ToolBox:
                                 "description": "Most players the user would send (default 3)."},
                }, ["players"]),
             fn("what_to_ask_for", "What to ask for 1 to 3 of the user's own players from a team that wants them (or from "
-               "every team): every package of 1 to 3 of that team's players, simulated for both teams. Packages the other "
-               "team's projection accepts, the most the user can ask for first; if none, the closest refusals.", {
+               "every team): every package of 1 to 3 of that team's players, simulated for both teams. Packages fair to both "
+               "teams (on projections and season averages), the most the user can ask for first; if none, the closest refusals.", {
                    "players": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3,
                                "description": "The user's players being shopped."},
                    "partner": {"type": "string", "description": "The team that wants them. Omit to search every team."},
@@ -135,8 +144,8 @@ class ToolBox:
                                               "more than that only when the user asks for an uneven trade."},
                }, ["players"]),
             fn("three_team_trade_ideas", "Search three-team rotations: the user's team sends a player to team P, P sends one "
-               "to team Q, and Q sends one back. Rotations that help the user and that both other teams' projections "
-               "accept.", {"team": team, "partner": {"type": "string", "description": "Optional: only rotations that "
+               "to team Q, and Q sends one back. Rotations that help the user and that both other teams gain from, on "
+               "projections and season averages.", {"team": team, "partner": {"type": "string", "description": "Optional: only rotations that "
                                                                                       "include this team."}}),
             fn("simulate_matchup", "Monte Carlo simulation (10,000 runs) of a head-to-head week: win probabilities, score "
                "ranges, swing players and what happens if players sit.", {
@@ -335,6 +344,9 @@ class ToolBox:
                 "team": s["team_name"], "verdict": s["verdict"], "pts_per_week_change": _r(s["delta_per_week"]),
                 "rest_of_season_change": _r(s["delta_ros"], 0), "rest_of_season_pct": _r(s["delta_pct"] * 100, 1),
                 "playoff_weeks_change": _r(s["delta_playoffs"], 0),
+                # the same trade on the season averages each manager sees on ESPN (None in a category league)
+                "season_avg_pts_per_week_change": _r(s["seen_delta_per_week"]),
+                "season_avg_rest_of_season_pct": None if s["seen_delta_pct"] is None else _r(s["seen_delta_pct"] * 100, 1),
                 "playoff_odds": [_r(s["before_playoff_odds"], 2), _r(s["after_playoff_odds"], 2)],
                 "title_odds": [_r(s["before_title_odds"], 2), _r(s["after_title_odds"], 2)],
                 "auto_drops": [self._name(p) for p in s["auto_drops"]], "auto_adds": [self._name(p) for p in s["auto_adds"]],
@@ -354,7 +366,7 @@ class ToolBox:
         return {"team": self.snap.team(tid).name, "ideas": [{
             "partner": r["partner_name"], "give": [self._name(p) for p in r["give"]],
             "get": [self._name(p) for p in r["get"]], "my_pts_per_week_gain": _r(r["my_delta_per_week"]),
-            "partner_change_pct": _r(r["partner_delta_pct"] * 100, 1), "fit": r["fairness"]["label"],
+            "partner_change_pct": _r(r["partner_delta_pct"] * 100, 1), **_seen_pcts(r), "fit": r["fairness"]["label"],
         } for r in rows]}
 
     def trade_offers(self, players: list[str], team: str | None = None, max_give: int = 3) -> dict:
@@ -366,7 +378,7 @@ class ToolBox:
             raise ToolError(str(exc)) from exc
         offer = lambda o: {  # noqa: E731
             "give": [self._name(p) for p in o["give"]], "my_pts_per_week_gain": _r(o["my_delta_per_week"]),
-            "partner_change_pct": _r(o["partner_delta_pct"] * 100, 1), "fit": o["fairness"]["label"],
+            "partner_change_pct": _r(o["partner_delta_pct"] * 100, 1), **_seen_pcts(o), "fit": o["fairness"]["label"],
         }
         return {"team": self.snap.team(tid).name, "partner": r["partner_name"], "get": [self._name(p) for p in r["get"]],
                 "offers": [offer(o) for o in r["offers"]],
@@ -386,7 +398,7 @@ class ToolBox:
         ask = lambda o: {  # noqa: E731
             "from_team": o["partner_name"], "get": [self._name(p) for p in o["get"]],
             "my_pts_per_week_gain": _r(o["my_delta_per_week"]), "partner_change_pct": _r(o["partner_delta_pct"] * 100, 1),
-            "fit": o["fairness"]["label"],
+            **_seen_pcts(o), "fit": o["fairness"]["label"],
         }
         return {"team": self.snap.team(tid).name, "give": [self._name(p) for p in r["give"]],
                 "asks": [ask(o) for o in r["offers"]], "closest_refused_asks": [ask(o) for o in r["closest"]]}
